@@ -150,3 +150,31 @@ test("non-finite target metrics do not poison the decision with NaN", () => {
   assert.equal(Number.isNaN(result.score), false);
   assert.equal(result.targetId, "healthy");
 });
+
+test("decisions expose a versioned trace for auditability", () => {
+  const result = decide({
+    workload: { type: "llm-inference", sensitivity: "low" },
+    targets: [
+      { id: "local", mode: "local", health: 1, capacity: 0.1, privacy: 1, estimatedLatencyMs: 20, estimatedCostUsd: 0 },
+      { id: "cloud", mode: "cloud", health: 1, capacity: 0.2, privacy: 0.5, estimatedLatencyMs: 40, estimatedCostUsd: 0.01 }
+    ]
+  });
+
+  assert.equal(result.decisionVersion, "1.0");
+  assert.equal(result.evaluated.length, 2);
+  assert.equal(result.evaluated.find(item => item.targetId === result.targetId).eligible, true);
+});
+
+test("no-route responses still contain candidate trace", () => {
+  const result = decide({
+    workload: { type: "classification", sensitivity: "high" },
+    policy: { sensitiveDataMode: "local-only" },
+    targets: [
+      { id: "cloud", mode: "cloud", health: 1, capacity: 0.1, privacy: 1, estimatedLatencyMs: 10, estimatedCostUsd: 0.01 }
+    ]
+  });
+
+  assert.equal(result.decisionVersion, "1.0");
+  assert.equal(result.route, "none");
+  assert.equal(result.evaluated[0].eligible, false);
+});
