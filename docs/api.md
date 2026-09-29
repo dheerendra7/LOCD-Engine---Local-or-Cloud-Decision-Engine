@@ -153,14 +153,18 @@ When POST /v1/decide receives no targets in its request body, LOCD uses the regi
 
 The V1 registry is in-memory; persistence is a later milestone.
 
-## Authentication
+## Resource fit
 
-LOCD can enable API-key authentication by setting LOCD_API_KEY.
+Workloads can optionally declare:
 
-When enabled:
+- requiredMemoryGb
+- requiredContextTokens
 
-- GET /health remains public for health checks.
-- All /v1/* endpoints require either Authorization: Bearer <key> or X-LOCD-API-Key: <key>.
-- Invalid or missing credentials return HTTP 401.
+Targets can expose:
 
-For production deployments, use a high-entropy secret from the platform secret manager. Do not commit the key to Git.
+- availableMemoryGb
+- maxContextTokens
+
+When a workload declares these requirements, missing capacity telemetry or insufficient capacity rejects the target before scoring. This keeps placement decisions from selecting infrastructure that cannot actually serve the workload.
+
+When no request-scoped targets are supplied and the target registry is empty, POST /v1/decide returns HTTP 503 with error code no_registered_targets.
