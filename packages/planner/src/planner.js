@@ -53,10 +53,19 @@ function normalizePlan(input) {
 
 function policyRejects(policy, target, sensitivity) {
   const reasons = [];
+  const allowedModes = Array.isArray(policy.allowedModes) && policy.allowedModes.length
+    ? policy.allowedModes
+    : [...MODES];
+  const blockedModes = Array.isArray(policy.blockedModes)
+    ? policy.blockedModes
+    : [];
+  const allowedRegions = Array.isArray(policy.allowedRegions)
+    ? policy.allowedRegions
+    : [];
 
   if (!MODES.has(target.mode)) reasons.push("invalid_target_mode");
-  if (!policy.allowedModes.includes(target.mode)) reasons.push("mode_not_allowed");
-  if (policy.blockedModes.includes(target.mode)) reasons.push("mode_blocked");
+  if (!allowedModes.includes(target.mode)) reasons.push("mode_not_allowed");
+  if (blockedModes.includes(target.mode)) reasons.push("mode_blocked");
 
   if (sensitivity === "high" && policy.sensitiveDataMode === "local-only" && target.mode !== "local") {
     reasons.push("sensitive_stage_requires_local_execution");
@@ -67,9 +76,9 @@ function policyRejects(policy, target, sensitivity) {
     reasons.push("sensitive_stage_requires_private_boundary");
   }
 
-  if (policy.allowedRegions.length) {
+  if (allowedRegions.length) {
     const regions = new Set(target.regions || []);
-    if (!policy.allowedRegions.some(region => regions.has(region))) {
+    if (!allowedRegions.some(region => regions.has(region))) {
       reasons.push("data_residency_mismatch");
     }
   }
