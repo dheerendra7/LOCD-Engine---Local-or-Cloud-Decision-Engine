@@ -5,10 +5,12 @@ import { fileURLToPath } from "node:url";
 import { decide } from "../../../packages/core/src/index.js";
 import { createDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { listPolicyProfiles } from "../../../packages/policy/src/index.js";
+import { createTargetRegistry } from "../../../packages/registry/src/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
 const decisionStore = createDecisionStore({ maxEntries: 1000 });
+const targetRegistry = createTargetRegistry();
 
 function sendJson(res, status, body) {
   res.writeHead(status, {
@@ -75,7 +77,11 @@ export function createServer() {
 
       if (req.method === "POST" && pathname === "/v1/decide") {
         const body = await readBody(req);
-        const decision = decide(body);
+        const registeredTargets = await targetRegistry.list();
+        const request = Array.isArray(body.targets) && body.targets.length
+          ? body
+          : { ...body, targets: registeredTargets };
+        const decision = decide(request);
 
         decisionStore.record({
           decisionVersion: decision.decisionVersion,
@@ -94,6 +100,32 @@ export function createServer() {
 
       if (req.method === "GET" && pathname === "/v1/policies") {
         sendJson(res, 200, { policies: listPolicyProfiles() });
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/v1/targets") {
+        sendJson(res, 200, { targets: await targetRegistry.list() });
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/v1/targets") {
+        const target = await targetRegistry.register(await readBody(req));
+        sendJson(res, 201, await target.getSnapshot());
+        return;
+      }
+
+      if (req.method === "DELETE" && pathname.startsWith("/v1/targets/")) {
+        const id = decodeURIComponent(pathname.slice("/v1/targets/".length));
+        if (!id) {
+          sendJson(res, 400, { error: "target id is required" });
+          return;
+        }
+        const removed = targetRegistry.remove(id);
+        if (!removed) {
+          sendJson(res, 404, { error: "target_not_found" });
+          return;
+        }
+        sendJson(res, 200, { removed: id });
         return;
       }
 
