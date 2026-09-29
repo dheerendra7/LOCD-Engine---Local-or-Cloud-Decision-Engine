@@ -178,3 +178,36 @@ test("no-route responses still contain candidate trace", () => {
   assert.equal(result.route, "none");
   assert.equal(result.evaluated[0].eligible, false);
 });
+
+test("strict latency rejects a target when latency telemetry is missing", () => {
+  const result = decide({
+    workload: { type: "batch", sensitivity: "low" },
+    constraints: { latencyBudgetMs: 500, strictLatency: true },
+    targets: [{ id: "unknown-latency", mode: "private", health: 1, capacity: 0.1, privacy: 1, estimatedCostUsd: 0 }]
+  });
+  assert.equal(result.route, "none");
+  assert.match(result.rejected[0].reasons[0], /latency_estimate_missing/);
+});
+
+test("strict cost rejects a target when cost telemetry is missing", () => {
+  const result = decide({
+    workload: { type: "batch", sensitivity: "low" },
+    constraints: { maxCostUsd: 0.05, strictCost: true },
+    targets: [{ id: "unknown-cost", mode: "private", health: 1, capacity: 0.1, privacy: 1, estimatedLatencyMs: 100 }]
+  });
+  assert.equal(result.route, "none");
+  assert.match(result.rejected[0].reasons[0], /cost_estimate_missing/);
+});
+
+test("duplicate target ids fail the request instead of producing ambiguous output", () => {
+  assert.throws(
+    () => decide({
+      workload: { type: "batch", sensitivity: "low" },
+      targets: [
+        { id: "same", mode: "local" },
+        { id: "same", mode: "cloud" }
+      ]
+    }),
+    /target ids must be unique/
+  );
+});
