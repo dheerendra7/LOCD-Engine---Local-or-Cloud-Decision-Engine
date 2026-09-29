@@ -1,4 +1,5 @@
 import http from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +12,27 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
 const decisionStore = createDecisionStore({ maxEntries: 1000 });
 const targetRegistry = createTargetRegistry();
+const apiKey = process.env.LOCD_API_KEY?.trim() || null;
+
+
+function safeSecretEqual(supplied, expected) {
+  if (typeof supplied !== "string" || typeof expected !== "string") return false;
+  const suppliedBuffer = Buffer.from(supplied);
+  const expectedBuffer = Buffer.from(expected);
+  if (suppliedBuffer.length !== expectedBuffer.length) return false;
+  return timingSafeEqual(suppliedBuffer, expectedBuffer);
+}
+
+function isAuthorized(req) {
+  if (!apiKey) return true;
+
+  const authorization = req.headers.authorization || "";
+  const bearer = authorization.match(/^Bearer\\s+(.+)$/i)?.[1];
+  const headerKey = req.headers["x-locd-api-key"];
+  const supplied = bearer || headerKey;
+
+  return safeSecretEqual(supplied, apiKey);
+}
 
 function sendJson(res, status, body) {
   res.writeHead(status, {
@@ -65,6 +87,16 @@ export function createServer() {
     try {
       const url = new URL(req.url || "/", "http://localhost");
       const pathname = url.pathname;
+
+      if (pathname.startsWith("/v1/") && !isAuthorized(req)) {
+        res.writeHead(401, {
+          "content-type": "application/json; charset=utf-8",
+          "cache-control": "no-store",
+          "www-authenticate": "Bearer"
+        });
+        res.end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
 
       if (req.method === "GET" && pathname === "/health") {
         sendJson(res, 200, {
