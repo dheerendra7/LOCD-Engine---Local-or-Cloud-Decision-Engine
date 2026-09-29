@@ -212,3 +212,15 @@ test("configured API key protects v1 endpoints while health remains public", asy
     await new Promise(resolve => protectedServer.close(resolve));
   }
 });
+
+test("decision without request targets returns 503 when registry is empty", async () => {
+  const response = await fetch(baseUrl + "/v1/decide", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      workload: { type: "classification", sensitivity: "low" }
+    })
+  });
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: "no_registered_targets" });
+});
