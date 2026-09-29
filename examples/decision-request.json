@@ -1,0 +1,53 @@
+{
+  "workload": {
+    "type": "llm-inference",
+    "sensitivity": "high",
+    "requiredCapabilities": ["text-generation"]
+  },
+  "constraints": {
+    "latencyBudgetMs": 800,
+    "maxCostUsd": 0.05,
+    "strictLatency": true,
+    "strictCost": true
+  },
+  "policy": {
+    "sensitiveDataMode": "local-only"
+  },
+  "targets": [
+    {
+      "id": "local-gpu",
+      "mode": "local",
+      "health": 0.98,
+      "capacity": 0.20,
+      "privacy": 1,
+      "estimatedLatencyMs": 420,
+      "estimatedCostUsd": 0,
+      "available": true,
+      "capabilities": ["text-generation"]
+    },
+    {
+      "id": "private-ap-south",
+      "mode": "private",
+      "health": 0.99,
+      "capacity": 0.45,
+      "privacy": 0.95,
+      "estimatedLatencyMs": 560,
+      "estimatedCostUsd": 0.008,
+      "available": true,
+      "regions": ["ap-south-1"],
+      "capabilities": ["text-generation"]
+    },
+    {
+      "id": "public-us",
+      "mode": "cloud",
+      "health": 0.999,
+      "capacity": 0.15,
+      "privacy": 0.20,
+      "estimatedLatencyMs": 240,
+      "estimatedCostUsd": 0.012,
+      "available": true,
+      "regions": ["us-east-1"],
+      "capabilities": ["text-generation"]
+    }
+  ]
+}
