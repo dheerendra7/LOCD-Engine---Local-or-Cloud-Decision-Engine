@@ -19,30 +19,6 @@ function nonNegative(value) {
   return number == null ? null : Math.max(0, number);
 }
 
-function normalizeDecisionEvent(event) {
-  if (!event || typeof event !== "object") throw new Error("decision event must be an object");
-  if (!event.route || !ROUTES.has(event.route)) throw new Error("decision event route is invalid");
-
-  const outcome = event.outcome ? String(event.outcome) : "pending";
-  if (!OUTCOMES.has(outcome)) throw new Error("decision event outcome is invalid");
-
-  return {
-    id: String(event.id || randomUUID()),
-    timestamp: iso(event.timestamp),
-    decisionVersion: String(event.decisionVersion || "1.0"),
-    workloadType: event.workloadType ? String(event.workloadType) : "unknown",
-    route: event.route,
-    targetId: event.targetId == null ? null : String(event.targetId),
-    confidence: Math.min(1, Math.max(0, finite(event.confidence, 0))),
-    estimatedLatencyMs: nonNegative(event.estimatedLatencyMs),
-    estimatedCostUsd: nonNegative(event.estimatedCostUsd),
-    outcome,
-    actualLatencyMs: nonNegative(event.actualLatencyMs),
-    actualCostUsd: nonNegative(event.actualCostUsd),
-    errorClass: event.errorClass ? String(event.errorClass) : null
-  };
-}
-
 function applyOutcome(event, patch) {
   const outcome = String(patch.outcome || "");
   if (!OUTCOMES.has(outcome) || outcome === "pending") {
@@ -58,10 +34,6 @@ function applyOutcome(event, patch) {
 }
 
 export function normalizeDecisionEvent(event) {
-  return normalizeDecisionEventInternal(event);
-}
-
-function normalizeDecisionEventInternal(event) {
   if (!event || typeof event !== "object") throw new Error("decision event must be an object");
   if (!event.route || !ROUTES.has(event.route)) throw new Error("decision event route is invalid");
 
@@ -94,7 +66,7 @@ export function createDecisionStore({ maxEntries = 500 } = {}) {
 
   return {
     record(event) {
-      const normalized = normalizeDecisionEventInternal(event);
+      const normalized = normalizeDecisionEvent(event);
       events.push(normalized);
       if (events.length > maxEntries) events.splice(0, events.length - maxEntries);
       return { ...normalized };
