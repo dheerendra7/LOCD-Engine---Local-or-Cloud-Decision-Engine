@@ -227,3 +227,133 @@ test("named policy profile can drive a decision", () => {
     "sensitive_workload_requires_local_execution"
   ]);
 });
+
+test("memory capacity is a hard workload-fit constraint", () => {
+  const result = decide({
+    workload: {
+      type: "llm-inference",
+      sensitivity: "low",
+      requiredMemoryGb: 16
+    },
+    targets: [
+      {
+        id: "small-gpu",
+        mode: "local",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        availableMemoryGb: 8,
+        estimatedLatencyMs: 20,
+        estimatedCostUsd: 0
+      },
+      {
+        id: "large-gpu",
+        mode: "private",
+        health: 0.99,
+        capacity: 0.2,
+        privacy: 1,
+        availableMemoryGb: 24,
+        estimatedLatencyMs: 80,
+        estimatedCostUsd: 0.01
+      }
+    ]
+  });
+
+  assert.equal(result.targetId, "large-gpu");
+  assert.equal(result.rejected[0].reasons[0], "memory_capacity_exceeded");
+});
+
+test("missing memory telemetry rejects a resource-constrained workload", () => {
+  const result = decide({
+    workload: {
+      type: "llm-inference",
+      sensitivity: "low",
+      requiredMemoryGb: 8
+    },
+    targets: [
+      {
+        id: "unknown-memory",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 30,
+        estimatedCostUsd: 0.01
+      }
+    ]
+  });
+
+  assert.equal(result.route, "none");
+  assert.equal(result.rejected[0].reasons[0], "memory_capacity_unknown");
+});
+
+test("context capacity is enforced independently from memory", () => {
+  const result = decide({
+    workload: {
+      type: "llm-inference",
+      sensitivity: "low",
+      requiredContextTokens: 32000
+    },
+    targets: [
+      {
+        id: "short-context",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        maxContextTokens: 16000,
+        estimatedLatencyMs: 20,
+        estimatedCostUsd: 0.01
+      },
+      {
+        id: "long-context",
+        mode: "cloud",
+        health: 0.99,
+        capacity: 0.1,
+        privacy: 1,
+        maxContextTokens: 64000,
+        estimatedLatencyMs: 40,
+        estimatedCostUsd: 0.02
+      }
+    ]
+  });
+
+  assert.equal(result.targetId, "long-context");
+  assert.equal(result.rejected[0].reasons[0], "context_capacity_exceeded");
+});
+
+test("negative workload resource requirements are rejected", () => {
+  assert.throws(
+    () => decide({
+      workload: { type: "llm-inference", requiredMemoryGb: -1 },
+      targets: [{ id: "local", mode: "local" }]
+    }),
+    /workload.requiredMemoryGb must be >= 0/
+  );
+
+  assert.throws(
+    () => decide({
+      workload: { type: "llm-inference", requiredContextTokens: -1 },
+      targets: [{ id: "local", mode: "local" }]
+    }),
+    /workload.requiredContextTokens must be >= 0/
+  );
+});
+
+test("invalid negative capacity telemetry cannot win", () => {
+  const result = decide({
+    workload: { type: "llm-inference", requiredMemoryGb: 4 },
+    targets: [{
+      id: "bad-capacity",
+      mode: "local",
+      health: 1,
+      capacity: 0.1,
+      privacy: 1,
+      availableMemoryGb: -5,
+      estimatedLatencyMs: 20,
+      estimatedCostUsd: 0
+    }]
+  });
+  assert.equal(result.route, "none");
+  assert.deepEqual(result.rejected[0].reasons, ["invalid_memory_telemetry"]);
+});
