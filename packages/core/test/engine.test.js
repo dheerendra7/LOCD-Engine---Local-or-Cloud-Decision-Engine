@@ -101,3 +101,52 @@ test("alternatives are returned for eligible targets", () => {
   assert.equal(result.alternatives.length, 1);
   assert.equal(result.confidence > 0, true);
 });
+
+test("prefer-local is a soft preference, not a hard local-only rule", () => {
+  const input = {
+    workload: { type: "llm-inference", sensitivity: "high" },
+    policy: { sensitiveDataMode: "prefer-local" },
+    targets: [
+      { id: "local", mode: "local", health: 0.8, capacity: 0.9, privacy: 1, estimatedLatencyMs: 700, estimatedCostUsd: 0.02 },
+      { id: "private", mode: "private", health: 0.99, capacity: 0.1, privacy: 1, estimatedLatencyMs: 100, estimatedCostUsd: 0.01 }
+    ]
+  };
+  const result = decide(input);
+  assert.equal(result.targetId, "private");
+  assert.equal(result.rejected.length, 0);
+});
+
+test("blocked modes are hard rejected", () => {
+  const result = decide({
+    workload: { type: "classification", sensitivity: "low" },
+    policy: { blockedModes: ["cloud"] },
+    targets: [
+      { id: "cloud", mode: "cloud", health: 1, capacity: 0.1, privacy: 1, estimatedLatencyMs: 10, estimatedCostUsd: 0 },
+      { id: "local", mode: "local", health: 0.5, capacity: 0.5, privacy: 1, estimatedLatencyMs: 50, estimatedCostUsd: 0 }
+    ]
+  });
+  assert.equal(result.targetId, "local");
+  assert.deepEqual(result.rejected[0].reasons, ["mode_blocked"]);
+});
+
+test("unknown sensitivity values are rejected", () => {
+  assert.throws(
+    () => decide({
+      workload: { type: "classification", sensitivity: "extreme" },
+      targets: [{ id: "local", mode: "local" }]
+    }),
+    /workload.sensitivity must be one of/
+  );
+});
+
+test("non-finite target metrics do not poison the decision with NaN", () => {
+  const result = decide({
+    workload: { type: "classification", sensitivity: "low" },
+    targets: [
+      { id: "broken", mode: "local", health: "not-a-number", capacity: "wat", privacy: "nan", estimatedLatencyMs: "bad", estimatedCostUsd: "bad" },
+      { id: "healthy", mode: "private", health: 1, capacity: 0.1, privacy: 1, estimatedLatencyMs: 10, estimatedCostUsd: 0 }
+    ]
+  });
+  assert.equal(Number.isNaN(result.score), false);
+  assert.equal(result.targetId, "healthy");
+});
