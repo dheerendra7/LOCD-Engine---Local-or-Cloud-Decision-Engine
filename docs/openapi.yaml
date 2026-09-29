@@ -1,0 +1,163 @@
+openapi: 3.1.0
+info:
+  title: LOCD Engine API
+  version: 1.0.0
+  description: Vendor-neutral workload placement decision API.
+servers:
+  - url: http://localhost:8787
+paths:
+  /health:
+    get:
+      summary: Service health
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /v1/decide:
+    post:
+      summary: Decide execution placement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DecisionRequest"
+      responses:
+        "200":
+          description: Decision result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DecisionResponse"
+        "400":
+          description: Invalid request
+  /v1/decisions:
+    get:
+      summary: Recent decision metadata
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Recent decision events
+  /v1/metrics:
+    get:
+      summary: Decision aggregates
+      responses:
+        "200":
+          description: Aggregate metrics
+components:
+  schemas:
+    Target:
+      type: object
+      required: [id, mode]
+      properties:
+        id: {type: string}
+        mode:
+          type: string
+          enum: [local, private, cloud, hybrid]
+        available: {type: boolean}
+        health: {type: number, minimum: 0, maximum: 1}
+        capacity: {type: number, minimum: 0, maximum: 1}
+        privacy: {type: number, minimum: 0, maximum: 1}
+        estimatedLatencyMs: {type: number, minimum: 0}
+        estimatedCostUsd: {type: number, minimum: 0}
+        regions:
+          type: array
+          items: {type: string}
+        capabilities:
+          type: array
+          items: {type: string}
+    Workload:
+      type: object
+      required: [type]
+      properties:
+        type: {type: string}
+        sensitivity:
+          type: string
+          enum: [low, medium, high]
+        requiredCapabilities:
+          type: array
+          items: {type: string}
+    Constraints:
+      type: object
+      properties:
+        latencyBudgetMs: {type: number, minimum: 0}
+        maxCostUsd: {type: number, minimum: 0}
+        strictLatency: {type: boolean}
+        strictCost: {type: boolean}
+    Policy:
+      type: object
+      properties:
+        allowedModes:
+          type: array
+          items:
+            type: string
+            enum: [local, private, cloud, hybrid]
+        blockedModes:
+          type: array
+          items:
+            type: string
+            enum: [local, private, cloud, hybrid]
+        allowedRegions:
+          type: array
+          items: {type: string}
+        sensitiveDataMode:
+          type: string
+          enum: [balanced, prefer-local, local-only, private-only]
+    DecisionRequest:
+      type: object
+      required: [workload, targets]
+      properties:
+        workload: {$ref: "#/components/schemas/Workload"}
+        constraints: {$ref: "#/components/schemas/Constraints"}
+        policy: {$ref: "#/components/schemas/Policy"}
+        targets:
+          type: array
+          minItems: 1
+          items: {$ref: "#/components/schemas/Target"}
+    DecisionResponse:
+      type: object
+      required: [decisionVersion, route, targetId, confidence, score]
+      properties:
+        decisionVersion: {type: string}
+        route:
+          type: string
+          enum: [local, private, cloud, hybrid, none]
+        targetId:
+          type: [string, "null"]
+        confidence: {type: number, minimum: 0, maximum: 1}
+        score: {type: number, minimum: 0, maximum: 1}
+        estimated:
+          type: [object, "null"]
+          properties:
+            latencyMs: {type: [number, "null"]}
+            costUsd: {type: [number, "null"]}
+        reasons:
+          type: array
+          items: {type: string}
+        alternatives:
+          type: array
+          items:
+            type: object
+        rejected:
+          type: array
+          items:
+            type: object
+        evaluated:
+          type: array
+          items:
+            type: object
+    Health:
+      type: object
+      properties:
+        status: {type: string}
+        service: {type: string}
+        version: {type: string}
