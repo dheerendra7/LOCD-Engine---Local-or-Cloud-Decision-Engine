@@ -22,6 +22,7 @@ Possible destinations:
 
 - Deterministic decision engine with hard-constraint filtering.
 - Explainable decisions with rejected-candidate reasons.
+- Hybrid execution planning with policy-aware multi-stage validation.
 - Privacy and residency controls.
 - Cost and latency budgeting.
 - Capacity and health awareness.
