@@ -1,0 +1,104 @@
+# LOCD Engine
+
+Local-Or-Cloud Decision Engine — a vendor-neutral decision intelligence layer for choosing where a workload should run.
+
+> Decide where compute should run.
+
+LOCD evaluates hard constraints first, then scores eligible execution targets against latency, cost, privacy, capacity, reliability, and policy requirements. The first release is deterministic and explainable; telemetry and calibration can improve estimates later.
+
+## Why LOCD?
+
+Many routing systems optimize model or provider selection. LOCD focuses on a different question:
+
+Given this workload, policy, infrastructure and SLO, where should it execute?
+
+Possible destinations:
+- local
+- private
+- cloud
+- hybrid
+
+## V1 capabilities
+
+- Deterministic decision engine with hard-constraint filtering.
+- Explainable decisions with rejected-candidate reasons.
+- Privacy and residency controls.
+- Cost and latency budgeting.
+- Capacity and health awareness.
+- Pure JavaScript core with no runtime dependency.
+- HTTP API for application integration.
+- Browser dashboard shell.
+- Node built-in tests and GitHub Actions CI.
+
+## Quick start
+
+Requirements: Node.js 20+.
+
+    npm test
+    npm start
+
+Then open http://localhost:8787/.
+
+Decision endpoint:
+
+    POST /v1/decide
+
+Example request:
+
+    {
+      "workload": { "type": "llm-inference", "sensitivity": "high" },
+      "constraints": { "latencyBudgetMs": 800, "maxCostUsd": 0.05 },
+      "targets": [
+        {
+          "id": "local-gpu",
+          "mode": "local",
+          "health": 0.98,
+          "capacity": 0.82,
+          "privacy": 1,
+          "estimatedLatencyMs": 420,
+          "estimatedCostUsd": 0
+        }
+      ],
+      "policy": { "sensitiveDataMode": "prefer-local" }
+    }
+
+## Architecture
+
+    Client / SDK / CLI / Dashboard
+                |
+                v
+            HTTP API
+                |
+                v
+          Decision Service
+                |
+                v
+         LOCD Core Engine
+        /       |        \
+   policy    scoring   explanation
+                |
+                v
+      local / private / cloud
+                |
+                v
+          telemetry/audit
+
+The core is independent of HTTP, storage and UI so it can later power SDKs, a CLI, workers or embedded deployments.
+
+## Roadmap
+
+V1: decision core, policy model, explainability, API, tests, CI and dashboard foundation.
+
+V1.1: target health probes, utilization adapters, decision history and structured audit events.
+
+V2: hybrid execution pipelines, telemetry-based calibration, richer policy language, SDKs and production authentication/authorization.
+
+V3: multi-tenant control plane and advanced optimization.
+
+## Status
+
+Early engineering foundation. Not production-certified yet. Provider availability, telemetry and cost estimates must be validated in the target environment.
+
+## License
+
+MIT.

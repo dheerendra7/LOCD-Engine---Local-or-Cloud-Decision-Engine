@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Test
+        run: npm test
+      - name: Smoke test
+        run: |
+          node apps/api/src/server.js &
+          PID=$!
+          trap "kill $PID" EXIT
+          for i in {1..10}; do
+            curl --fail --silent http://127.0.0.1:8787/health && exit 0
+            sleep 1
+          done
+          exit 1

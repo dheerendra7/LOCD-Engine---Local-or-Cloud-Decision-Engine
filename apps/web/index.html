@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LOCD Engine</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; }
+    body { margin: 0; background: #0b1020; color: #eef2ff; }
+    main { max-width: 1100px; margin: 0 auto; padding: 56px 24px; }
+    .hero { display: grid; gap: 12px; }
+    .eyebrow { color: #93c5fd; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; }
+    h1 { font-size: clamp(38px, 7vw, 72px); margin: 0; letter-spacing: -.04em; }
+    p { color: #b7c0d8; max-width: 760px; line-height: 1.7; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 34px; }
+    .card { border: 1px solid #26314d; background: #12192b; border-radius: 18px; padding: 22px; }
+    .metric { font-size: 30px; font-weight: 700; margin-bottom: 6px; }
+    .label { color: #8e99b5; }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="hero">
+      <div class="eyebrow">Local · Private · Cloud · Hybrid</div>
+      <h1>Decide where compute should run.</h1>
+      <p>LOCD evaluates workload requirements, policy, cost, latency, privacy, capacity and reliability before selecting an execution target.</p>
+    </section>
+    <section class="grid" aria-label="Engine status">
+      <div class="card"><div class="metric">V1</div><div class="label">Deterministic decision core</div></div>
+      <div class="card"><div class="metric">0</div><div class="label">Runtime dependencies in core</div></div>
+      <div class="card"><div class="metric">API</div><div class="label">POST /v1/decide</div></div>
+      <div class="card"><div class="metric">CI</div><div class="label">Node test suite on every push</div></div>
+    </section>
+  </main>
+</body>
+</html>
