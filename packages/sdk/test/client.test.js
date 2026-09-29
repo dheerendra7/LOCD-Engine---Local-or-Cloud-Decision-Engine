@@ -52,3 +52,34 @@ test("client surfaces API errors with status and body", async () => {
     error => error.status === 400 && error.body.error === "bad request"
   );
 });
+
+test("client records decision outcomes", async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify({ outcome: "success" }), { status: 200 });
+  };
+
+  const client = createLocdClient({ baseUrl: "http://localhost:8787", fetchImpl });
+  const result = await client.recordOutcome({
+    decisionId: "decision-1",
+    outcome: "success",
+    actualLatencyMs: 120
+  });
+
+  assert.equal(result.outcome, "success");
+  assert.equal(calls[0].url, "http://localhost:8787/v1/outcomes");
+  assert.equal(JSON.parse(calls[0].options.body).decisionId, "decision-1");
+});
+
+test("client requires a decision ID for outcome feedback", async () => {
+  const client = createLocdClient({
+    baseUrl: "http://localhost:8787",
+    fetchImpl: async () => new Response("{}", { status: 200 })
+  });
+
+  await assert.rejects(
+    () => client.recordOutcome({ outcome: "success" }),
+    /decisionId is required/
+  );
+});

@@ -105,6 +105,28 @@ paths:
         "404":
           description: Target not found
 
+  /v1/outcomes:
+    post:
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+      summary: Record the observed outcome for a prior decision
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DecisionOutcomeRequest"
+      responses:
+        "200":
+          description: Outcome recorded
+        "400":
+          description: Invalid outcome request
+        "401":
+          description: Authentication required
+        "404":
+          description: Decision not found
+
   /v1/decisions:
     get:
       security:
@@ -226,6 +248,7 @@ components:
           type: [string, "null"]
         confidence: {type: number, minimum: 0, maximum: 1}
         score: {type: number, minimum: 0, maximum: 1}
+        decisionId: {type: string}
         estimated:
           type: [object, "null"]
           properties:
@@ -246,6 +269,18 @@ components:
           type: array
           items:
             type: object
+    DecisionOutcomeRequest:
+      type: object
+      required: [decisionId, outcome]
+      properties:
+        decisionId: {type: string}
+        outcome:
+          type: string
+          enum: [success, failure]
+        actualLatencyMs: {type: number, minimum: 0}
+        actualCostUsd: {type: number, minimum: 0}
+        errorClass: {type: string}
+        timestamp: {type: string, format: date-time}
     Health:
       type: object
       properties:

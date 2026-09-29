@@ -224,3 +224,62 @@ test("decision without request targets returns 503 when registry is empty", asyn
   assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), { error: "no_registered_targets" });
 });
+
+test("decision outcome endpoint closes the prediction feedback loop", async () => {
+  const decision = await fetch(baseUrl + "/v1/decide", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      workload: { type: "classification", sensitivity: "low" },
+      targets: [
+        {
+          id: "feedback-local",
+          mode: "local",
+          health: 1,
+          capacity: 0.1,
+          privacy: 1,
+          estimatedLatencyMs: 100,
+          estimatedCostUsd: 0.01
+        }
+      ]
+    })
+  });
+
+  assert.equal(decision.status, 200);
+  const decisionBody = await decision.json();
+  assert.match(decisionBody.decisionId, /^[0-9a-f-]{36}$/);
+
+  const outcome = await fetch(baseUrl + "/v1/outcomes", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      decisionId: decisionBody.decisionId,
+      outcome: "success",
+      actualLatencyMs: 90,
+      actualCostUsd: 0.012
+    })
+  });
+
+  assert.equal(outcome.status, 200);
+  const outcomeBody = await outcome.json();
+  assert.equal(outcomeBody.outcome, "success");
+  assert.equal(outcomeBody.actualLatencyMs, 90);
+
+  const metrics = await fetch(baseUrl + "/v1/metrics");
+  const metricsBody = await metrics.json();
+  assert.equal(metricsBody.successRate > 0, true);
+  assert.equal(metricsBody.meanAbsoluteLatencyErrorMs >= 0, true);
+});
+
+test("unknown decision outcome IDs return not found", async () => {
+  const response = await fetch(baseUrl + "/v1/outcomes", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      decisionId: "does-not-exist",
+      outcome: "failure"
+    })
+  });
+  assert.equal(response.status, 404);
+  assert.deepEqual(await response.json(), { error: "decision_not_found" });
+});
