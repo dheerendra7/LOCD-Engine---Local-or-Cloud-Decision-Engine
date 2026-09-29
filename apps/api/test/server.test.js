@@ -360,4 +360,7 @@ test("hybrid plan uses the registered target set when request targets are omitte
 
   assert.equal(response.status, 200);
   assert.equal((await response.json()).valid, true);
+
+  await fetch(baseUrl + "/v1/targets/planner-local", { method: "DELETE" });
+  await fetch(baseUrl + "/v1/targets/planner-private", { method: "DELETE" });
 });
