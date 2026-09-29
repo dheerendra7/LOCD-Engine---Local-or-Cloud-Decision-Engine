@@ -26,7 +26,10 @@ test("decision events normalize only routing metadata", () => {
     confidence: 0.9,
     estimatedLatencyMs: 120,
     estimatedCostUsd: 0.001,
-    outcome: "unknown"
+    outcome: "pending",
+    actualLatencyMs: null,
+    actualCostUsd: null,
+    errorClass: null
   });
   assert.equal("prompt" in event, false);
 });
@@ -51,7 +54,10 @@ test("summary aggregates route counts and estimates", () => {
     routes: { local: 1, cloud: 2 },
     estimatedCostUsd: 0.03,
     averageEstimatedLatencyMs: 200,
-    averageConfidence: 0.733333
+    averageConfidence: 0.733333,
+    successRate: null,
+    meanAbsoluteLatencyErrorMs: null,
+    meanAbsoluteCostErrorUsd: null
   });
 });
 
