@@ -1,3 +1,8 @@
+function apiHeaders() {
+  const apiKey = document.querySelector("#apiKey")?.value.trim();
+  return apiKey ? { authorization: "Bearer " + apiKey } : {};
+}
+
 const output = document.querySelector("#output");
 
 const targets = [
@@ -70,7 +75,7 @@ document.querySelector("#decide").addEventListener("click", async () => {
   try {
     const response = await fetch("/v1/decide", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...apiHeaders() },
       body: JSON.stringify({
         workload: {
           type: document.querySelector("#workloadType").value.trim(),
@@ -101,7 +106,10 @@ document.querySelector("#decide").addEventListener("click", async () => {
 async function refreshMetrics() {
   const metrics = document.querySelector("#metrics");
   try {
-    const response = await fetch("/v1/metrics", { cache: "no-store" });
+    const response = await fetch("/v1/metrics", {
+      cache: "no-store",
+      headers: apiHeaders()
+    });
     const data = await response.json();
     const routes = Object.entries(data.routes || {})
       .map(([route, count]) => route + ": " + count)
