@@ -12,7 +12,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
 const decisionStore = createDecisionStore({ maxEntries: 1000 });
 const targetRegistry = createTargetRegistry();
-const apiKey = process.env.LOCD_API_KEY?.trim() || null;
 
 
 function safeSecretEqual(supplied, expected) {
@@ -23,8 +22,8 @@ function safeSecretEqual(supplied, expected) {
   return timingSafeEqual(suppliedBuffer, expectedBuffer);
 }
 
-function isAuthorized(req) {
-  if (!apiKey) return true;
+function isAuthorized(req, configuredApiKey) {
+  if (!configuredApiKey) return true;
 
   const authorization = req.headers.authorization || "";
   const bearer = authorization.match(/^Bearer\\s+(.+)$/i)?.[1];
@@ -82,13 +81,13 @@ async function serveWeb(res, pathname) {
   }
 }
 
-export function createServer() {
+export function createServer({ apiKey = process.env.LOCD_API_KEY?.trim() || null } = {}) {
   return http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url || "/", "http://localhost");
       const pathname = url.pathname;
 
-      if (pathname.startsWith("/v1/") && !isAuthorized(req)) {
+      if (pathname.startsWith("/v1/") && !isAuthorized(req, apiKey)) {
         res.writeHead(401, {
           "content-type": "application/json; charset=utf-8",
           "cache-control": "no-store",
