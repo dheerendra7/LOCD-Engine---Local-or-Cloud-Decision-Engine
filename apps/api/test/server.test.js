@@ -111,3 +111,42 @@ test("policy catalog endpoint returns reusable profiles", async () => {
   const body = await response.json();
   assert.equal(body.policies.some(profile => profile.id === "balanced"), true);
 });
+
+test("target registry can drive decisions when request omits targets", async () => {
+  const register = await fetch(baseUrl + "/v1/targets", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      id: "registered-local",
+      mode: "local",
+      health: 1,
+      capacity: 0.1,
+      privacy: 1,
+      estimatedLatencyMs: 40,
+      estimatedCostUsd: 0,
+      capabilities: ["text-generation"]
+    })
+  });
+  assert.equal(register.status, 201);
+
+  const listed = await fetch(baseUrl + "/v1/targets");
+  assert.equal(listed.status, 200);
+  assert.equal((await listed.json()).targets.some(target => target.id === "registered-local"), true);
+
+  const decision = await fetch(baseUrl + "/v1/decide", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      workload: { type: "llm-inference", sensitivity: "high" },
+      policy: { profile: "strictLocalSensitive" }
+    })
+  });
+  assert.equal(decision.status, 200);
+  assert.equal((await decision.json()).targetId, "registered-local");
+
+  const removed = await fetch(baseUrl + "/v1/targets/registered-local", { method: "DELETE" });
+  assert.equal(removed.status, 200);
+
+  const missing = await fetch(baseUrl + "/v1/targets/registered-local", { method: "DELETE" });
+  assert.equal(missing.status, 404);
+});
