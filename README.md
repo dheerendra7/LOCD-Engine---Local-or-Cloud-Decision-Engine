@@ -33,7 +33,7 @@ Possible destinations:
 
 ## Quick start
 
-Requirements: Node.js 20+.
+Requirements: Node.js 22+ (Node 22 and 24 are supported CI runtimes).
 
     npm test
     npm start
