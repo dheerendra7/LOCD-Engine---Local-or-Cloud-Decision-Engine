@@ -152,3 +152,17 @@ Removes a registered target. Returns HTTP 404 when the target does not exist.
 When POST /v1/decide receives no targets in its request body, LOCD uses the registered target set. Supplying a non-empty targets array keeps request-scoped evaluation possible for simulations and advanced callers.
 
 The V1 registry is in-memory; persistence is a later milestone.
+
+## Resource fit
+
+Workloads can optionally declare:
+
+- requiredMemoryGb
+- requiredContextTokens
+
+Targets can expose:
+
+- availableMemoryGb
+- maxContextTokens
+
+When a workload declares these requirements, missing capacity telemetry or insufficient capacity rejects the target before scoring. This keeps placement decisions from selecting infrastructure that cannot actually serve the workload.
