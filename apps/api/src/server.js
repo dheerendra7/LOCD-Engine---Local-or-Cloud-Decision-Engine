@@ -77,10 +77,10 @@ export function createServer() {
 
       if (req.method === "POST" && pathname === "/v1/decide") {
         const body = await readBody(req);
-        const registeredTargets = await targetRegistry.list();
-        const request = Array.isArray(body.targets) && body.targets.length
+        const hasRequestTargets = Array.isArray(body.targets) && body.targets.length > 0;
+        const request = hasRequestTargets
           ? body
-          : { ...body, targets: registeredTargets };
+          : { ...body, targets: await targetRegistry.list() };
         const decision = decide(request);
 
         decisionStore.record({
