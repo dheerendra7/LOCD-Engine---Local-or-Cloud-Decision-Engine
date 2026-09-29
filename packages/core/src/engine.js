@@ -168,7 +168,7 @@ function evaluateCandidate(request, target) {
   if (workload.requiredMemoryGb !== null) {
     if (availableMemoryGb === null) {
       rejected.push("memory_capacity_unknown");
-    } else if (availableMemoryGb < workload.requiredMemoryGb) {
+    } else if (availableMemoryGb >= 0 && availableMemoryGb < workload.requiredMemoryGb) {
       rejected.push("memory_capacity_exceeded");
     }
   }
@@ -176,7 +176,7 @@ function evaluateCandidate(request, target) {
   if (workload.requiredContextTokens !== null) {
     if (maxContextTokens === null) {
       rejected.push("context_capacity_unknown");
-    } else if (maxContextTokens < workload.requiredContextTokens) {
+    } else if (maxContextTokens >= 0 && maxContextTokens < workload.requiredContextTokens) {
       rejected.push("context_capacity_exceeded");
     }
   }
