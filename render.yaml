@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: locd-engine
+    runtime: node
+    plan: free
+    branch: main
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
