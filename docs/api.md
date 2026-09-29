@@ -153,6 +153,18 @@ When POST /v1/decide receives no targets in its request body, LOCD uses the regi
 
 The V1 registry is in-memory; persistence is a later milestone.
 
+## Authentication
+
+LOCD can enable API-key authentication by setting LOCD_API_KEY.
+
+When enabled:
+
+- GET /health remains public for health checks.
+- All /v1/* endpoints require either Authorization: Bearer <key> or X-LOCD-API-Key: <key>.
+- Invalid or missing credentials return HTTP 401.
+
+For production deployments, use a high-entropy secret from the platform secret manager. Do not commit the key to Git.
+
 ## Resource fit
 
 Workloads can optionally declare:
