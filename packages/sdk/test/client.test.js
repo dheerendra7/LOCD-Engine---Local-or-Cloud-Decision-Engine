@@ -83,3 +83,20 @@ test("client requires a decision ID for outcome feedback", async () => {
     /decisionId is required/
   );
 });
+
+test("client requests hybrid execution plans", async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify({ route: "hybrid", valid: true }), { status: 200 });
+  };
+
+  const client = createLocdClient({ baseUrl: "http://localhost:8787", fetchImpl });
+  const result = await client.hybridPlan({
+    workload: { type: "batch" },
+    steps: []
+  });
+
+  assert.equal(result.route, "hybrid");
+  assert.equal(calls[0].url, "http://localhost:8787/v1/hybrid-plan");
+});

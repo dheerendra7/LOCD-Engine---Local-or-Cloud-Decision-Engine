@@ -105,6 +105,28 @@ paths:
         "404":
           description: Target not found
 
+  /v1/hybrid-plan:
+    post:
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+      summary: Validate a multi-stage hybrid execution plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HybridPlanRequest"
+      responses:
+        "200":
+          description: Hybrid plan result
+        "400":
+          description: Invalid plan request
+        "401":
+          description: Authentication required
+        "503":
+          description: No registered execution targets
+
   /v1/outcomes:
     post:
       security:
@@ -269,6 +291,39 @@ components:
           type: array
           items:
             type: object
+    HybridPlanRequest:
+      type: object
+      required: [workload, steps]
+      properties:
+        workload:
+          $ref: "#/components/schemas/Workload"
+        policy:
+          $ref: "#/components/schemas/Policy"
+        constraints:
+          type: object
+          properties:
+            maxLatencyMs: {type: number, minimum: 0}
+            maxCostUsd: {type: number, minimum: 0}
+            strictLatency: {type: boolean}
+            strictCost: {type: boolean}
+        targets:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/Target"
+        steps:
+          type: array
+          minItems: 2
+          items:
+            type: object
+            required: [id, targetId]
+            properties:
+              id: {type: string}
+              purpose: {type: string}
+              targetId: {type: string}
+              dataSensitivity:
+                type: string
+                enum: [low, medium, high]
     DecisionOutcomeRequest:
       type: object
       required: [decisionId, outcome]

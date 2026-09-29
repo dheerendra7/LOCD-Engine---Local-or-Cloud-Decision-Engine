@@ -283,3 +283,84 @@ test("unknown decision outcome IDs return not found", async () => {
   assert.equal(response.status, 404);
   assert.deepEqual(await response.json(), { error: "decision_not_found" });
 });
+
+test("hybrid plan endpoint validates multi-target execution", async () => {
+  const response = await fetch(baseUrl + "/v1/hybrid-plan", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      workload: { type: "llm-inference", sensitivity: "medium" },
+      steps: [
+        { id: "pre", purpose: "preprocess", targetId: "local-stage" },
+        { id: "infer", purpose: "inference", targetId: "private-stage" }
+      ],
+      targets: [
+        {
+          id: "local-stage",
+          mode: "local",
+          available: true,
+          estimatedLatencyMs: 30,
+          estimatedCostUsd: 0
+        },
+        {
+          id: "private-stage",
+          mode: "private",
+          available: true,
+          estimatedLatencyMs: 200,
+          estimatedCostUsd: 0.01
+        }
+      ]
+    })
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.valid, true);
+  assert.equal(body.route, "hybrid");
+});
+
+test("hybrid plan uses the registered target set when request targets are omitted", async () => {
+  const register = await fetch(baseUrl + "/v1/targets", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      id: "planner-local",
+      mode: "local",
+      available: true,
+      estimatedLatencyMs: 20,
+      estimatedCostUsd: 0
+    })
+  });
+  assert.equal(register.status, 201);
+
+  const registerPrivate = await fetch(baseUrl + "/v1/targets", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      id: "planner-private",
+      mode: "private",
+      available: true,
+      estimatedLatencyMs: 100,
+      estimatedCostUsd: 0.01
+    })
+  });
+  assert.equal(registerPrivate.status, 201);
+
+  const response = await fetch(baseUrl + "/v1/hybrid-plan", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      workload: { type: "batch", sensitivity: "low" },
+      steps: [
+        { id: "a", targetId: "planner-local" },
+        { id: "b", targetId: "planner-private" }
+      ]
+    })
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).valid, true);
+
+  await fetch(baseUrl + "/v1/targets/planner-local", { method: "DELETE" });
+  await fetch(baseUrl + "/v1/targets/planner-private", { method: "DELETE" });
+});

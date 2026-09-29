@@ -7,6 +7,7 @@ import { decide } from "../../../packages/core/src/index.js";
 import { createDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { listPolicyProfiles } from "../../../packages/policy/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
+import { planHybridExecution } from "../../../packages/planner/src/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
@@ -103,6 +104,22 @@ export function createServer({ apiKey = process.env.LOCD_API_KEY?.trim() || null
           service: "locd-api",
           version: "0.1.0"
         });
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/v1/hybrid-plan") {
+        const body = await readBody(req);
+        const hasRequestTargets = Array.isArray(body.targets) && body.targets.length > 0;
+        const request = hasRequestTargets
+          ? body
+          : { ...body, targets: await targetRegistry.list() };
+
+        if (!request.targets.length) {
+          sendJson(res, 503, { error: "no_registered_targets" });
+          return;
+        }
+
+        sendJson(res, 200, planHybridExecution(request));
         return;
       }
 
