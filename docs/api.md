@@ -134,3 +134,21 @@ Returns the built-in policy profiles for dashboard and client discovery.
 
 A request can select a profile with policy.profile and override individual fields without changing the underlying preset definition.
 
+
+## Target registry
+
+### GET /v1/targets
+
+Lists the normalized targets currently registered in the control plane process.
+
+### POST /v1/targets
+
+Registers a normalized target snapshot. Returns HTTP 201 on success.
+
+### DELETE /v1/targets/:id
+
+Removes a registered target. Returns HTTP 404 when the target does not exist.
+
+When POST /v1/decide receives no targets in its request body, LOCD uses the registered target set. Supplying a non-empty targets array keeps request-scoped evaluation possible for simulations and advanced callers.
+
+The V1 registry is in-memory; persistence is a later milestone.

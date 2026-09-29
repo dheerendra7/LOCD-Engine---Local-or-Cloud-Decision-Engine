@@ -34,6 +34,58 @@ paths:
                 $ref: "#/components/schemas/DecisionResponse"
         "400":
           description: Invalid request
+
+
+  /v1/policies:
+    get:
+      summary: List reusable policy profiles
+      responses:
+        "200":
+          description: Policy profile catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  policies:
+                    type: array
+                    items:
+                      type: object
+
+  /v1/targets:
+    get:
+      summary: List registered execution targets
+      responses:
+        "200":
+          description: Registered targets
+    post:
+      summary: Register an execution target
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Target"
+      responses:
+        "201":
+          description: Target registered
+        "400":
+          description: Invalid target
+  /v1/targets/{id}:
+    delete:
+      summary: Remove a registered execution target
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Target removed
+        "404":
+          description: Target not found
+
   /v1/decisions:
     get:
       summary: Recent decision metadata
