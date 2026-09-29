@@ -26,11 +26,11 @@ function isAuthorized(req, configuredApiKey) {
   if (!configuredApiKey) return true;
 
   const authorization = req.headers.authorization || "";
-  const bearer = authorization.match(/^Bearer\\s+(.+)$/i)?.[1];
+  const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
   const headerKey = req.headers["x-locd-api-key"];
   const supplied = bearer || headerKey;
 
-  return safeSecretEqual(supplied, apiKey);
+  return safeSecretEqual(supplied, configuredApiKey);
 }
 
 function sendJson(res, status, body) {
