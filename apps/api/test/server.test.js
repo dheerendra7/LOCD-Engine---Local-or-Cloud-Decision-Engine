@@ -150,3 +150,32 @@ test("target registry can drive decisions when request omits targets", async () 
   const missing = await fetch(baseUrl + "/v1/targets/registered-local", { method: "DELETE" });
   assert.equal(missing.status, 404);
 });
+
+test("request-scoped decision does not require a populated registry", async () => {
+  const response = await fetch(baseUrl + "/v1/decide", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      workload: { type: "classification", sensitivity: "low" },
+      targets: [
+        {
+          id: "request-local",
+          mode: "local",
+          health: 1,
+          capacity: 0.1,
+          privacy: 1,
+          estimatedLatencyMs: 30,
+          estimatedCostUsd: 0
+        }
+      ]
+    })
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).targetId, "request-local");
+});
+
+test("empty target registry is readable", async () => {
+  const response = await fetch(baseUrl + "/v1/targets");
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).targets, []);
+});
