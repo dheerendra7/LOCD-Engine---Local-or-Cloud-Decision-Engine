@@ -53,8 +53,8 @@ export function createStaticTargetAdapter(snapshot) {
 }
 
 export async function collectTargetSnapshots(adapters) {
-  if (!Array.isArray(adapters) || adapters.length === 0) {
-    throw new Error("adapters must be a non-empty array");
+  if (!Array.isArray(adapters)) {
+    throw new Error("adapters must be an array");
   }
 
   const snapshots = [];
