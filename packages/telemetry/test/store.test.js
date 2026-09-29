@@ -52,6 +52,7 @@ test("summary aggregates route counts and estimates", () => {
   assert.deepEqual(store.summary(), {
     totalDecisions: 3,
     routes: { local: 1, cloud: 2 },
+    outcomes: { pending: 3, success: 0, failure: 0 },
     estimatedCostUsd: 0.03,
     averageEstimatedLatencyMs: 200,
     averageConfidence: 0.733333,
