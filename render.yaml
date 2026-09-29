@@ -4,6 +4,6 @@ services:
     runtime: node
     plan: free
     branch: main
-    buildCommand: npm install
+    buildCommand: npm ci
     startCommand: npm start
     healthCheckPath: /health
