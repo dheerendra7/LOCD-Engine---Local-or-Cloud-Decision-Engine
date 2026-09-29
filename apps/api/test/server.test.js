@@ -104,3 +104,10 @@ test("decision history and metrics expose metadata without request payloads", as
   assert.equal(metricsBody.totalDecisions >= 1, true);
   assert.equal(metricsBody.routes.local >= 1, true);
 });
+
+test("policy catalog endpoint returns reusable profiles", async () => {
+  const response = await fetch(baseUrl + "/v1/policies");
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.policies.some(profile => profile.id === "balanced"), true);
+});
