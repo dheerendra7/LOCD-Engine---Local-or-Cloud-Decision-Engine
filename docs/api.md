@@ -180,3 +180,22 @@ Targets can expose:
 When a workload declares these requirements, missing capacity telemetry or insufficient capacity rejects the target before scoring. This keeps placement decisions from selecting infrastructure that cannot actually serve the workload.
 
 When no request-scoped targets are supplied and the target registry is empty, POST /v1/decide returns HTTP 503 with error code no_registered_targets.
+
+## POST /v1/outcomes
+
+Reports the observed result for a prior decision without sending the original workload payload.
+
+Request example:
+
+    {
+      "decisionId": "9c2f...",
+      "outcome": "success",
+      "actualLatencyMs": 390,
+      "actualCostUsd": 0.012
+    }
+
+Supported outcomes are success and failure. The event is matched by decisionId.
+
+POST /v1/decide now returns decisionId so callers can correlate predicted and observed execution metadata.
+
+Calibration fields in GET /v1/metrics include successRate, meanAbsoluteLatencyErrorMs and meanAbsoluteCostErrorUsd when enough observed data exists.
