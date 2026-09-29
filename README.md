@@ -103,3 +103,13 @@ Early engineering foundation. Not production-certified yet. Provider availabilit
 ## License
 
 MIT.
+
+## CLI
+
+The repository also includes a dependency-free CLI package.
+
+    node packages/cli/bin/locd.mjs health
+    node packages/cli/bin/locd.mjs metrics
+    node packages/cli/bin/locd.mjs decide examples/decision-request.json
+
+Use --base-url to target a remote LOCD deployment.
