@@ -39,6 +39,15 @@ export function createLocdClient({ baseUrl, fetchImpl = globalThis.fetch, header
       });
     },
 
+    async recordOutcome(outcome) {
+      if (!outcome?.decisionId) throw new Error("decisionId is required");
+      return request("/v1/outcomes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(outcome)
+      });
+    },
+
     async policies() {
       return request("/v1/policies");
     },
