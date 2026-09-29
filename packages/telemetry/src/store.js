@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 const ROUTES = new Set(["local", "private", "cloud", "hybrid", "none"]);
 
 function iso(value) {
@@ -16,15 +18,21 @@ export function normalizeDecisionEvent(event) {
   if (!event.route || !ROUTES.has(event.route)) throw new Error("decision event route is invalid");
 
   return {
-    id: String(event.id || globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2)),
+    id: String(event.id || randomUUID()),
     timestamp: iso(event.timestamp),
     decisionVersion: String(event.decisionVersion || "1.0"),
     workloadType: event.workloadType ? String(event.workloadType) : "unknown",
     route: event.route,
     targetId: event.targetId == null ? null : String(event.targetId),
-    confidence: finite(event.confidence, 0),
-    estimatedLatencyMs: finite(event.estimatedLatencyMs),
-    estimatedCostUsd: finite(event.estimatedCostUsd),
+    confidence: Math.min(1, Math.max(0, finite(event.confidence, 0))),
+    estimatedLatencyMs: (() => {
+      const value = finite(event.estimatedLatencyMs);
+      return value == null ? null : Math.max(0, value);
+    })(),
+    estimatedCostUsd: (() => {
+      const value = finite(event.estimatedCostUsd);
+      return value == null ? null : Math.max(0, value);
+    })(),
     outcome: event.outcome ? String(event.outcome) : "unknown"
   };
 }
