@@ -120,7 +120,7 @@ export function createServer({ apiKey = process.env.LOCD_API_KEY?.trim() || null
 
         const decision = decide(request);
 
-        decisionStore.record({
+        const event = decisionStore.record({
           decisionVersion: decision.decisionVersion,
           workloadType: body.workload?.type,
           route: decision.route,
@@ -128,10 +128,30 @@ export function createServer({ apiKey = process.env.LOCD_API_KEY?.trim() || null
           confidence: decision.confidence,
           estimatedLatencyMs: decision.estimated?.latencyMs,
           estimatedCostUsd: decision.estimated?.costUsd,
-          outcome: "decision-only"
+          outcome: "pending"
         });
 
-        sendJson(res, 200, decision);
+        sendJson(res, 200, { ...decision, decisionId: event.id });
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/v1/outcomes") {
+        const body = await readBody(req);
+        if (!body.decisionId) {
+          sendJson(res, 400, { error: "decisionId is required" });
+          return;
+        }
+
+        try {
+          const event = decisionStore.recordOutcome(body.decisionId, body);
+          sendJson(res, 200, event);
+        } catch (error) {
+          if (error instanceof Error && error.message === "decision_not_found") {
+            sendJson(res, 404, { error: "decision_not_found" });
+            return;
+          }
+          throw error;
+        }
         return;
       }
 
