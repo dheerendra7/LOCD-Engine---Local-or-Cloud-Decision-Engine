@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { decide } from "../../../packages/core/src/index.js";
 import { createDecisionStore } from "../../../packages/telemetry/src/index.js";
+import { listPolicyProfiles } from "../../../packages/policy/src/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
@@ -88,6 +89,11 @@ export function createServer() {
         });
 
         sendJson(res, 200, decision);
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/v1/policies") {
+        sendJson(res, 200, { policies: listPolicyProfiles() });
         return;
       }
 
