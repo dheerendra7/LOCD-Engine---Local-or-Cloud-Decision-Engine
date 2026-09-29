@@ -179,3 +179,36 @@ test("empty target registry is readable", async () => {
   assert.equal(response.status, 200);
   assert.deepEqual((await response.json()).targets, []);
 });
+
+test("configured API key protects v1 endpoints while health remains public", async () => {
+  const protectedServer = createServer({ apiKey: "test-api-key-1234567890" });
+  await new Promise(resolve => protectedServer.listen(0, "127.0.0.1", resolve));
+  const address = protectedServer.address();
+  const protectedBaseUrl = "http://127.0.0.1:" + address.port;
+
+  try {
+    const health = await fetch(protectedBaseUrl + "/health");
+    assert.equal(health.status, 200);
+
+    const missing = await fetch(protectedBaseUrl + "/v1/policies");
+    assert.equal(missing.status, 401);
+    assert.deepEqual(await missing.json(), { error: "unauthorized" });
+
+    const wrong = await fetch(protectedBaseUrl + "/v1/policies", {
+      headers: { authorization: "Bearer wrong-key" }
+    });
+    assert.equal(wrong.status, 401);
+
+    const bearer = await fetch(protectedBaseUrl + "/v1/policies", {
+      headers: { authorization: "Bearer test-api-key-1234567890" }
+    });
+    assert.equal(bearer.status, 200);
+
+    const header = await fetch(protectedBaseUrl + "/v1/metrics", {
+      headers: { "x-locd-api-key": "test-api-key-1234567890" }
+    });
+    assert.equal(header.status, 200);
+  } finally {
+    await new Promise(resolve => protectedServer.close(resolve));
+  }
+});
