@@ -27,6 +27,8 @@ function normalizeSnapshot(snapshot) {
     privacy: Math.min(1, Math.max(0, finiteNumber(snapshot.privacy, 0))),
     estimatedLatencyMs: finiteNumber(snapshot.estimatedLatencyMs),
     estimatedCostUsd: finiteNumber(snapshot.estimatedCostUsd),
+    availableMemoryGb: finiteNumber(snapshot.availableMemoryGb),
+    maxContextTokens: finiteNumber(snapshot.maxContextTokens),
     regions: [...new Set(Array.isArray(snapshot.regions) ? snapshot.regions.map(String) : [])],
     capabilities: [...new Set(Array.isArray(snapshot.capabilities) ? snapshot.capabilities.map(String) : [])]
   };

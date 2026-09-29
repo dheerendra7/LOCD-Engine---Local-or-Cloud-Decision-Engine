@@ -61,18 +61,29 @@ function normalizeRequest(input) {
     strictCost: Boolean(input.constraints?.strictCost)
   };
 
+  const requiredMemoryGb = finiteOrNull(input.workload.requiredMemoryGb);
+  const requiredContextTokens = finiteOrNull(input.workload.requiredContextTokens);
+
   if (constraints.latencyBudgetMs !== null && constraints.latencyBudgetMs < 0) {
     throw new Error("constraints.latencyBudgetMs must be >= 0");
   }
   if (constraints.maxCostUsd !== null && constraints.maxCostUsd < 0) {
     throw new Error("constraints.maxCostUsd must be >= 0");
   }
+  if (requiredMemoryGb !== null && requiredMemoryGb < 0) {
+    throw new Error("workload.requiredMemoryGb must be >= 0");
+  }
+  if (requiredContextTokens !== null && requiredContextTokens < 0) {
+    throw new Error("workload.requiredContextTokens must be >= 0");
+  }
 
   return {
     workload: {
       type: String(input.workload.type),
       sensitivity,
-      requiredCapabilities: unique(input.workload.requiredCapabilities)
+      requiredCapabilities: unique(input.workload.requiredCapabilities),
+      requiredMemoryGb,
+      requiredContextTokens
     },
     constraints,
     targets: input.targets,
@@ -144,6 +155,31 @@ function evaluateCandidate(request, target) {
   const estimatedCostUsd = finiteOrNull(target.estimatedCostUsd);
   const health = clamp(target.health ?? 0);
   const capacity = clamp(target.capacity ?? 1);
+  const availableMemoryGb = finiteOrNull(target.availableMemoryGb);
+  const maxContextTokens = finiteOrNull(target.maxContextTokens);
+
+  if (availableMemoryGb !== null && availableMemoryGb < 0) {
+    rejected.push("invalid_memory_telemetry");
+  }
+  if (maxContextTokens !== null && maxContextTokens < 0) {
+    rejected.push("invalid_context_telemetry");
+  }
+
+  if (workload.requiredMemoryGb !== null) {
+    if (availableMemoryGb === null) {
+      rejected.push("memory_capacity_unknown");
+    } else if (availableMemoryGb >= 0 && availableMemoryGb < workload.requiredMemoryGb) {
+      rejected.push("memory_capacity_exceeded");
+    }
+  }
+
+  if (workload.requiredContextTokens !== null) {
+    if (maxContextTokens === null) {
+      rejected.push("context_capacity_unknown");
+    } else if (maxContextTokens >= 0 && maxContextTokens < workload.requiredContextTokens) {
+      rejected.push("context_capacity_exceeded");
+    }
+  }
 
   if (constraints.strictLatency && constraints.latencyBudgetMs !== null) {
     if (estimatedLatencyMs === null) {
@@ -195,6 +231,10 @@ function evaluateCandidate(request, target) {
       cost,
       capacity: headroom,
       reliability: health
+    },
+    capacity: {
+      availableMemoryGb,
+      maxContextTokens
     }
   };
 }
@@ -278,6 +318,7 @@ export function decide(input) {
       eligible: item.eligible,
       score: item.eligible ? Number(item.score.toFixed(6)) : null,
       factors: item.eligible ? item.factors : null,
+      capacity: item.eligible ? item.capacity : null,
       reasons: item.eligible ? [] : item.rejected
     }))
   };

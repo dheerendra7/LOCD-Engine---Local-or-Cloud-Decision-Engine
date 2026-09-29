@@ -164,3 +164,19 @@ When enabled:
 - Invalid or missing credentials return HTTP 401.
 
 For production deployments, use a high-entropy secret from the platform secret manager. Do not commit the key to Git.
+
+## Resource fit
+
+Workloads can optionally declare:
+
+- requiredMemoryGb
+- requiredContextTokens
+
+Targets can expose:
+
+- availableMemoryGb
+- maxContextTokens
+
+When a workload declares these requirements, missing capacity telemetry or insufficient capacity rejects the target before scoring. This keeps placement decisions from selecting infrastructure that cannot actually serve the workload.
+
+When no request-scoped targets are supplied and the target registry is empty, POST /v1/decide returns HTTP 503 with error code no_registered_targets.

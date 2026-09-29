@@ -155,6 +155,8 @@ components:
         privacy: {type: number, minimum: 0, maximum: 1}
         estimatedLatencyMs: {type: number, minimum: 0}
         estimatedCostUsd: {type: number, minimum: 0}
+        availableMemoryGb: {type: number, minimum: 0}
+        maxContextTokens: {type: number, minimum: 0}
         regions:
           type: array
           items: {type: string}
@@ -169,6 +171,8 @@ components:
         sensitivity:
           type: string
           enum: [low, medium, high]
+        requiredMemoryGb: {type: number, minimum: 0}
+        requiredContextTokens: {type: number, minimum: 0}
         requiredCapabilities:
           type: array
           items: {type: string}
