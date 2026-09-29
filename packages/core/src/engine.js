@@ -142,14 +142,20 @@ function evaluateCandidate(request, target) {
   const health = clamp(target.health ?? 0);
   const capacity = clamp(target.capacity ?? 1);
 
-  if (constraints.strictLatency && constraints.latencyBudgetMs !== null &&
-      estimatedLatencyMs !== null && estimatedLatencyMs > constraints.latencyBudgetMs) {
-    rejected.push("latency_budget_exceeded");
+  if (constraints.strictLatency && constraints.latencyBudgetMs !== null) {
+    if (estimatedLatencyMs === null) {
+      rejected.push("latency_estimate_missing");
+    } else if (estimatedLatencyMs > constraints.latencyBudgetMs) {
+      rejected.push("latency_budget_exceeded");
+    }
   }
 
-  if (constraints.strictCost && constraints.maxCostUsd !== null &&
-      estimatedCostUsd !== null && estimatedCostUsd > constraints.maxCostUsd) {
-    rejected.push("cost_budget_exceeded");
+  if (constraints.strictCost && constraints.maxCostUsd !== null) {
+    if (estimatedCostUsd === null) {
+      rejected.push("cost_estimate_missing");
+    } else if (estimatedCostUsd > constraints.maxCostUsd) {
+      rejected.push("cost_budget_exceeded");
+    }
   }
 
   if (rejected.length) {
@@ -199,6 +205,14 @@ function makeConfidence(ranked) {
 
 export function decide(input) {
   const request = normalizeRequest(input);
+  const ids = new Set();
+  for (const target of request.targets) {
+    if (target?.id && ids.has(String(target.id))) {
+      throw new Error("target ids must be unique");
+    }
+    if (target?.id) ids.add(String(target.id));
+  }
+
   const evaluations = request.targets.map(target => evaluateCandidate(request, target));
   const eligible = evaluations
     .filter(item => item.eligible)
@@ -206,6 +220,7 @@ export function decide(input) {
 
   if (!eligible.length) {
     return {
+      decisionVersion: "1.0",
       route: "none",
       targetId: null,
       confidence: 0,
@@ -213,7 +228,13 @@ export function decide(input) {
       estimated: null,
       reasons: ["no_eligible_target"],
       alternatives: [],
-      rejected: evaluations.map(({ targetId, rejected }) => ({ targetId, reasons: rejected }))
+      rejected: evaluations.map(({ targetId, rejected }) => ({ targetId, reasons: rejected })),
+      evaluated: evaluations.map(item => ({
+        targetId: item.targetId,
+        mode: item.target?.mode ?? null,
+        eligible: false,
+        reasons: item.rejected
+      }))
     };
   }
 
@@ -230,6 +251,7 @@ export function decide(input) {
   ].filter(Boolean);
 
   return {
+    decisionVersion: "1.0",
     route: winner.target.mode,
     targetId: winner.targetId,
     confidence: Number(makeConfidence(eligible).toFixed(6)),
@@ -246,6 +268,14 @@ export function decide(input) {
     })),
     rejected: evaluations
       .filter(item => !item.eligible)
-      .map(({ targetId, rejected }) => ({ targetId, reasons: rejected }))
+      .map(({ targetId, rejected }) => ({ targetId, reasons: rejected })),
+    evaluated: evaluations.map(item => ({
+      targetId: item.targetId,
+      mode: item.target?.mode ?? null,
+      eligible: item.eligible,
+      score: item.eligible ? Number(item.score.toFixed(6)) : null,
+      factors: item.eligible ? item.factors : null,
+      reasons: item.eligible ? [] : item.rejected
+    }))
   };
 }
