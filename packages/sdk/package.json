@@ -1,0 +1,7 @@
+{
+  "name": "locd-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Minimal JavaScript client for the LOCD Engine HTTP API."
+}
