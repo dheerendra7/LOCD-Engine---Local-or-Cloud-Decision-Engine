@@ -35,6 +35,23 @@ paths:
         "400":
           description: Invalid request
 
+
+  /v1/policies:
+    get:
+      summary: List reusable policy profiles
+      responses:
+        "200":
+          description: Policy profile catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  policies:
+                    type: array
+                    items:
+                      type: object
+
   /v1/targets:
     get:
       summary: List registered execution targets
