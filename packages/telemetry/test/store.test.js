@@ -59,3 +59,69 @@ test("invalid route and capacity configuration fail clearly", () => {
   assert.throws(() => normalizeDecisionEvent({ route: "mars" }), /route is invalid/);
   assert.throws(() => createDecisionStore({ maxEntries: 0 }), /positive integer/);
 });
+
+test("outcome feedback updates a decision", () => {
+  const store = createDecisionStore();
+  const event = store.record({
+    id: "decision-1",
+    route: "local",
+    workloadType: "llm-inference",
+    estimatedLatencyMs: 400,
+    estimatedCostUsd: 0.02
+  });
+
+  const updated = store.recordOutcome(event.id, {
+    outcome: "success",
+    actualLatencyMs: 350,
+    actualCostUsd: 0.03,
+    timestamp: "2026-09-30T00:01:00Z"
+  });
+
+  assert.equal(updated.outcome, "success");
+  assert.equal(updated.actualLatencyMs, 350);
+  assert.equal(updated.actualCostUsd, 0.03);
+  assert.equal(updated.errorClass, null);
+  assert.equal(updated.outcomeTimestamp, "2026-09-30T00:01:00.000Z");
+});
+
+test("missing decision IDs cannot be updated", () => {
+  const store = createDecisionStore();
+  assert.throws(
+    () => store.recordOutcome("missing", { outcome: "failure" }),
+    /decision_not_found/
+  );
+});
+
+test("summary exposes outcome rate and calibration errors", () => {
+  const store = createDecisionStore();
+  store.record({
+    id: "1",
+    route: "local",
+    estimatedLatencyMs: 400,
+    estimatedCostUsd: 0.02,
+    outcome: "pending"
+  });
+  store.record({
+    id: "2",
+    route: "cloud",
+    estimatedLatencyMs: 200,
+    estimatedCostUsd: 0.01,
+    outcome: "success",
+    actualLatencyMs: 260,
+    actualCostUsd: 0.015
+  });
+  store.record({
+    id: "3",
+    route: "cloud",
+    estimatedLatencyMs: 300,
+    estimatedCostUsd: 0.02,
+    outcome: "failure",
+    actualLatencyMs: 500,
+    actualCostUsd: 0.03
+  });
+
+  const summary = store.summary();
+  assert.equal(summary.successRate, 0.5);
+  assert.equal(summary.meanAbsoluteLatencyErrorMs, 130);
+  assert.equal(summary.meanAbsoluteCostErrorUsd, 0.0075);
+});
