@@ -106,6 +106,15 @@ paths:
         "200":
           description: Aggregate metrics
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API-Key
+    apiKeyHeader:
+      type: apiKey
+      in: header
+      name: X-LOCD-API-Key
   schemas:
     Target:
       type: object
@@ -213,3 +222,6 @@ components:
         status: {type: string}
         service: {type: string}
         version: {type: string}
+
+# Authentication note: when LOCD_API_KEY is configured, all /v1 operations
+# require bearerAuth or apiKeyHeader. /health remains public.
