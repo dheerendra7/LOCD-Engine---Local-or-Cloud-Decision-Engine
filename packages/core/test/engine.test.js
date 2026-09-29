@@ -321,3 +321,39 @@ test("context capacity is enforced independently from memory", () => {
   assert.equal(result.targetId, "long-context");
   assert.equal(result.rejected[0].reasons[0], "context_capacity_exceeded");
 });
+
+test("negative workload resource requirements are rejected", () => {
+  assert.throws(
+    () => decide({
+      workload: { type: "llm-inference", requiredMemoryGb: -1 },
+      targets: [{ id: "local", mode: "local" }]
+    }),
+    /workload.requiredMemoryGb must be >= 0/
+  );
+
+  assert.throws(
+    () => decide({
+      workload: { type: "llm-inference", requiredContextTokens: -1 },
+      targets: [{ id: "local", mode: "local" }]
+    }),
+    /workload.requiredContextTokens must be >= 0/
+  );
+});
+
+test("invalid negative capacity telemetry cannot win", () => {
+  const result = decide({
+    workload: { type: "llm-inference", requiredMemoryGb: 4 },
+    targets: [{
+      id: "bad-capacity",
+      mode: "local",
+      health: 1,
+      capacity: 0.1,
+      privacy: 1,
+      availableMemoryGb: -5,
+      estimatedLatencyMs: 20,
+      estimatedCostUsd: 0
+    }]
+  });
+  assert.equal(result.route, "none");
+  assert.deepEqual(result.rejected[0].reasons, ["invalid_memory_telemetry"]);
+});
