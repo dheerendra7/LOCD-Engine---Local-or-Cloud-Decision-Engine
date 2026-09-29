@@ -54,3 +54,13 @@ Each target should expose:
 - capabilities
 
 Adapters can later translate real GPU metrics, quotas, network measurements and pricing into this normalized shape.
+
+
+## Sensitive-data policy modes
+
+- `balanced`: privacy contributes to scoring but does not force a route.
+- `prefer-local`: local execution receives an explicit privacy preference for sensitive workloads.
+- `local-only`: high-sensitivity workloads cannot use non-local targets.
+- `private-only`: high-sensitivity workloads cannot cross the private boundary.
+
+These modes are intentionally explicit so a policy change is visible in the decision explanation.
