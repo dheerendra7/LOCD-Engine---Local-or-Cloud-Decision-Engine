@@ -170,12 +170,13 @@ components:
           enum: [balanced, prefer-local, local-only, private-only]
     DecisionRequest:
       type: object
-      required: [workload, targets]
+      required: [workload]
       properties:
         workload: {$ref: "#/components/schemas/Workload"}
         constraints: {$ref: "#/components/schemas/Constraints"}
         policy: {$ref: "#/components/schemas/Policy"}
         targets:
+          description: Optional for request-scoped simulation. When omitted, registered targets are used.
           type: array
           minItems: 1
           items: {$ref: "#/components/schemas/Target"}
