@@ -211,3 +211,19 @@ test("duplicate target ids fail the request instead of producing ambiguous outpu
     /target ids must be unique/
   );
 });
+
+test("named policy profile can drive a decision", () => {
+  const result = decide({
+    workload: { type: "llm-inference", sensitivity: "high" },
+    policy: { profile: "strictLocalSensitive" },
+    targets: [
+      { id: "local", mode: "local", health: 0.9, capacity: 0.2, privacy: 1, estimatedLatencyMs: 200, estimatedCostUsd: 0 },
+      { id: "cloud", mode: "cloud", health: 1, capacity: 0.1, privacy: 1, estimatedLatencyMs: 10, estimatedCostUsd: 0 }
+    ]
+  });
+  assert.equal(result.route, "local");
+  assert.deepEqual(result.rejected[0].reasons, [
+    "mode_not_allowed",
+    "sensitive_workload_requires_local_execution"
+  ]);
+});

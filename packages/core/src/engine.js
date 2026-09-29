@@ -1,3 +1,5 @@
+import { resolvePolicy } from "../../../packages/policy/src/index.js";
+
 const MODES = ["local", "private", "cloud", "hybrid"];
 const SENSITIVITIES = ["low", "medium", "high"];
 const SENSITIVITY_LEVELS = { low: 0, medium: 0.5, high: 1 };
@@ -19,22 +21,23 @@ function unique(values) {
 }
 
 function normalizePolicy(policy = {}) {
-  const sensitiveDataMode = policy.sensitiveDataMode || "balanced";
+  const resolved = resolvePolicy(policy);
+  const sensitiveDataMode = resolved.sensitiveDataMode || "balanced";
   if (!SENSITIVE_MODES.includes(sensitiveDataMode)) {
     throw new Error("policy.sensitiveDataMode must be one of: " + SENSITIVE_MODES.join(", "));
   }
 
   return {
-    allowedModes: unique(policy.allowedModes?.length ? policy.allowedModes : MODES),
-    allowedRegions: unique(policy.allowedRegions || []),
-    blockedModes: unique(policy.blockedModes || []),
+    allowedModes: unique(resolved.allowedModes?.length ? resolved.allowedModes : MODES),
+    allowedRegions: unique(resolved.allowedRegions || []),
+    blockedModes: unique(resolved.blockedModes || []),
     sensitiveDataMode,
     weights: {
-      privacy: clamp(policy.weights?.privacy ?? 0.30),
-      latency: clamp(policy.weights?.latency ?? 0.25),
-      cost: clamp(policy.weights?.cost ?? 0.20),
-      capacity: clamp(policy.weights?.capacity ?? 0.10),
-      reliability: clamp(policy.weights?.reliability ?? 0.15)
+      privacy: clamp(resolved.weights?.privacy ?? 0.30),
+      latency: clamp(resolved.weights?.latency ?? 0.25),
+      cost: clamp(resolved.weights?.cost ?? 0.20),
+      capacity: clamp(resolved.weights?.capacity ?? 0.10),
+      reliability: clamp(resolved.weights?.reliability ?? 0.15)
     }
   };
 }

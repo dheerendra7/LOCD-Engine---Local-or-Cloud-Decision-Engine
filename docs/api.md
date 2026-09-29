@@ -127,3 +127,10 @@ Returns in-memory aggregate decision metrics:
     }
 
 V1 telemetry is process-local and bounded. A durable production event pipeline is a later milestone.
+
+## GET /v1/policies
+
+Returns the built-in policy profiles for dashboard and client discovery.
+
+A request can select a profile with policy.profile and override individual fields without changing the underlying preset definition.
+
