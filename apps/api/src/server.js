@@ -125,7 +125,7 @@ const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPat
 
 if (isMain) {
   const port = Number(process.env.PORT || 8787);
-  createServer().listen(port, () => {
-    console.log("LOCD Engine API listening on port " + port);
+  createServer().listen(port, "0.0.0.0", () => {
+    console.log("LOCD Engine API listening on 0.0.0.0:" + port);
   });
 }
