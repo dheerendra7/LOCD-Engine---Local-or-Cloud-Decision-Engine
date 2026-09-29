@@ -112,6 +112,12 @@ export function createServer({ apiKey = process.env.LOCD_API_KEY?.trim() || null
         const request = hasRequestTargets
           ? body
           : { ...body, targets: await targetRegistry.list() };
+
+        if (!request.targets.length) {
+          sendJson(res, 503, { error: "no_registered_targets" });
+          return;
+        }
+
         const decision = decide(request);
 
         decisionStore.record({
