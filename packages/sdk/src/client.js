@@ -48,6 +48,14 @@ export function createLocdClient({ baseUrl, fetchImpl = globalThis.fetch, header
       });
     },
 
+    async hybridPlan(plan) {
+      return request("/v1/hybrid-plan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(plan)
+      });
+    },
+
     async policies() {
       return request("/v1/policies");
     },
