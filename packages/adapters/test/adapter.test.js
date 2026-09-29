@@ -71,3 +71,7 @@ test("snapshot collection validates interface and duplicate ids", async () => {
     /adapter ids must be unique/
   );
 });
+
+test("snapshot collection allows an empty target set", async () => {
+  assert.deepEqual(await collectTargetSnapshots([]), []);
+});
