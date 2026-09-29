@@ -1,4 +1,5 @@
 import http from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +12,26 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
 const decisionStore = createDecisionStore({ maxEntries: 1000 });
 const targetRegistry = createTargetRegistry();
+
+
+function safeSecretEqual(supplied, expected) {
+  if (typeof supplied !== "string" || typeof expected !== "string") return false;
+  const suppliedBuffer = Buffer.from(supplied);
+  const expectedBuffer = Buffer.from(expected);
+  if (suppliedBuffer.length !== expectedBuffer.length) return false;
+  return timingSafeEqual(suppliedBuffer, expectedBuffer);
+}
+
+function isAuthorized(req, configuredApiKey) {
+  if (!configuredApiKey) return true;
+
+  const authorization = req.headers.authorization || "";
+  const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
+  const headerKey = req.headers["x-locd-api-key"];
+  const supplied = bearer || headerKey;
+
+  return safeSecretEqual(supplied, configuredApiKey);
+}
 
 function sendJson(res, status, body) {
   res.writeHead(status, {
@@ -60,11 +81,21 @@ async function serveWeb(res, pathname) {
   }
 }
 
-export function createServer() {
+export function createServer({ apiKey = process.env.LOCD_API_KEY?.trim() || null } = {}) {
   return http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url || "/", "http://localhost");
       const pathname = url.pathname;
+
+      if (pathname.startsWith("/v1/") && !isAuthorized(req, apiKey)) {
+        res.writeHead(401, {
+          "content-type": "application/json; charset=utf-8",
+          "cache-control": "no-store",
+          "www-authenticate": "Bearer"
+        });
+        res.end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
 
       if (req.method === "GET" && pathname === "/health") {
         sendJson(res, 200, {
@@ -81,6 +112,12 @@ export function createServer() {
         const request = hasRequestTargets
           ? body
           : { ...body, targets: await targetRegistry.list() };
+
+        if (!request.targets.length) {
+          sendJson(res, 503, { error: "no_registered_targets" });
+          return;
+        }
+
         const decision = decide(request);
 
         decisionStore.record({
