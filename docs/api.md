@@ -166,3 +166,5 @@ Targets can expose:
 - maxContextTokens
 
 When a workload declares these requirements, missing capacity telemetry or insufficient capacity rejects the target before scoring. This keeps placement decisions from selecting infrastructure that cannot actually serve the workload.
+
+When no request-scoped targets are supplied and the target registry is empty, POST /v1/decide returns HTTP 503 with error code no_registered_targets.
