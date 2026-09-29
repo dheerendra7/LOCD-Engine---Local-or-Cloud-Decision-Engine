@@ -206,6 +206,7 @@ export function decide(input) {
 
   if (!eligible.length) {
     return {
+      decisionVersion: "1.0",
       route: "none",
       targetId: null,
       confidence: 0,
@@ -213,7 +214,13 @@ export function decide(input) {
       estimated: null,
       reasons: ["no_eligible_target"],
       alternatives: [],
-      rejected: evaluations.map(({ targetId, rejected }) => ({ targetId, reasons: rejected }))
+      rejected: evaluations.map(({ targetId, rejected }) => ({ targetId, reasons: rejected })),
+      evaluated: evaluations.map(item => ({
+        targetId: item.targetId,
+        mode: item.target?.mode ?? null,
+        eligible: false,
+        reasons: item.rejected
+      }))
     };
   }
 
@@ -230,6 +237,7 @@ export function decide(input) {
   ].filter(Boolean);
 
   return {
+    decisionVersion: "1.0",
     route: winner.target.mode,
     targetId: winner.targetId,
     confidence: Number(makeConfidence(eligible).toFixed(6)),
@@ -246,6 +254,14 @@ export function decide(input) {
     })),
     rejected: evaluations
       .filter(item => !item.eligible)
-      .map(({ targetId, rejected }) => ({ targetId, reasons: rejected }))
+      .map(({ targetId, rejected }) => ({ targetId, reasons: rejected })),
+    evaluated: evaluations.map(item => ({
+      targetId: item.targetId,
+      mode: item.target?.mode ?? null,
+      eligible: item.eligible,
+      score: item.eligible ? Number(item.score.toFixed(6)) : null,
+      factors: item.eligible ? item.factors : null,
+      reasons: item.eligible ? [] : item.rejected
+    }))
   };
 }
