@@ -75,3 +75,14 @@ test("snapshot collection validates interface and duplicate ids", async () => {
 test("snapshot collection allows an empty target set", async () => {
   assert.deepEqual(await collectTargetSnapshots([]), []);
 });
+
+test("capacity telemetry is normalized by adapters", async () => {
+  const adapter = createStaticTargetAdapter({
+    id: "gpu",
+    mode: "local",
+    availableMemoryGb: "24",
+    maxContextTokens: "64000"
+  });
+  assert.equal((await adapter.getSnapshot()).availableMemoryGb, 24);
+  assert.equal((await adapter.getSnapshot()).maxContextTokens, 64000);
+});
