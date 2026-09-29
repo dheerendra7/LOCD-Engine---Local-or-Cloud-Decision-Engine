@@ -181,6 +181,21 @@ When a workload declares these requirements, missing capacity telemetry or insuf
 
 When no request-scoped targets are supplied and the target registry is empty, POST /v1/decide returns HTTP 503 with error code no_registered_targets.
 
+
+## POST /v1/hybrid-plan
+
+Validates an explicit multi-stage hybrid execution plan against registered or request-scoped targets and policy.
+
+Each step contains a stable id, purpose and targetId. The planner returns:
+
+- valid: whether every step satisfies hard policy/availability checks
+- steps: normalized stage information
+- estimated.latencyMs: sequential sum of stage latency estimates
+- estimated.costUsd: sum of stage cost estimates
+- rejected: stage-level and plan-level rejection reasons
+
+The planner is intentionally a planning layer. It does not move data, execute inference, or call providers. A future executor can consume its normalized plan.
+
 ## POST /v1/outcomes
 
 Reports the observed result for a prior decision without sending the original workload payload.
