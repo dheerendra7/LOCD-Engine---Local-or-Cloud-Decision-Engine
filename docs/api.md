@@ -100,3 +100,30 @@ Execution is intentionally a separate concern:
     Provider Adapter
 
 This keeps policy and placement logic testable without requiring real GPUs or paid cloud APIs.
+
+## GET /v1/decisions
+
+Returns a bounded list of recent decision metadata. The API intentionally does not persist prompts, completions or provider credentials.
+
+Optional query parameter:
+
+    /v1/decisions?limit=25
+
+## GET /v1/metrics
+
+Returns in-memory aggregate decision metrics:
+
+    {
+      "totalDecisions": 42,
+      "routes": {
+        "local": 25,
+        "private": 8,
+        "cloud": 7,
+        "none": 2
+      },
+      "estimatedCostUsd": 0.43,
+      "averageEstimatedLatencyMs": 318.5,
+      "averageConfidence": 0.84
+    }
+
+V1 telemetry is process-local and bounded. A durable production event pipeline is a later milestone.

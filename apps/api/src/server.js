@@ -3,9 +3,11 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { decide } from "../../../packages/core/src/index.js";
+import { createDecisionStore } from "../../../packages/telemetry/src/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
+const decisionStore = createDecisionStore({ maxEntries: 1000 });
 
 function sendJson(res, status, body) {
   res.writeHead(status, {
@@ -72,7 +74,31 @@ export function createServer() {
 
       if (req.method === "POST" && pathname === "/v1/decide") {
         const body = await readBody(req);
-        sendJson(res, 200, decide(body));
+        const decision = decide(body);
+
+        decisionStore.record({
+          decisionVersion: decision.decisionVersion,
+          workloadType: body.workload?.type,
+          route: decision.route,
+          targetId: decision.targetId,
+          confidence: decision.confidence,
+          estimatedLatencyMs: decision.estimated?.latencyMs,
+          estimatedCostUsd: decision.estimated?.costUsd,
+          outcome: "decision-only"
+        });
+
+        sendJson(res, 200, decision);
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/v1/decisions") {
+        const limit = new URL(req.url || "/", "http://localhost").searchParams.get("limit") || "50";
+        sendJson(res, 200, { decisions: decisionStore.list({ limit }) });
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/v1/metrics") {
+        sendJson(res, 200, decisionStore.summary());
         return;
       }
 

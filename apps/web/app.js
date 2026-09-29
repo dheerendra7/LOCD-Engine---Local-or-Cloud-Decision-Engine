@@ -96,3 +96,25 @@ document.querySelector("#decide").addEventListener("click", async () => {
     output.textContent = error.message;
   }
 });
+
+
+async function refreshMetrics() {
+  const metrics = document.querySelector("#metrics");
+  try {
+    const response = await fetch("/v1/metrics", { cache: "no-store" });
+    const data = await response.json();
+    const routes = Object.entries(data.routes || {})
+      .map(([route, count]) => route + ": " + count)
+      .join(" · ");
+    metrics.textContent =
+      "Decisions: " + data.totalDecisions +
+      " · Avg latency: " + (data.averageEstimatedLatencyMs ?? "—") + " ms" +
+      " · Estimated cost: $" + data.estimatedCostUsd +
+      " · Confidence: " + data.averageConfidence +
+      " · " + (routes || "no routes yet");
+  } catch {
+    metrics.textContent = "Telemetry unavailable.";
+  }
+}
+
+refreshMetrics();

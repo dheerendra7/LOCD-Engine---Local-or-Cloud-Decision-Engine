@@ -79,3 +79,28 @@ test("unsupported methods are rejected", async () => {
   assert.equal(response.status, 405);
   assert.deepEqual(await response.json(), { error: "method_not_allowed" });
 });
+
+test("decision history and metrics expose metadata without request payloads", async () => {
+  await fetch(baseUrl + "/v1/decide", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      workload: { type: "classification", sensitivity: "low" },
+      targets: [
+        { id: "local", mode: "local", health: 1, capacity: 0.1, privacy: 1, estimatedLatencyMs: 20, estimatedCostUsd: 0 }
+      ]
+    })
+  });
+
+  const history = await fetch(baseUrl + "/v1/decisions?limit=10");
+  assert.equal(history.status, 200);
+  const historyBody = await history.json();
+  assert.equal(historyBody.decisions.length > 0, true);
+  assert.equal("prompt" in historyBody.decisions[0], false);
+
+  const metrics = await fetch(baseUrl + "/v1/metrics");
+  assert.equal(metrics.status, 200);
+  const metricsBody = await metrics.json();
+  assert.equal(metricsBody.totalDecisions >= 1, true);
+  assert.equal(metricsBody.routes.local >= 1, true);
+});
