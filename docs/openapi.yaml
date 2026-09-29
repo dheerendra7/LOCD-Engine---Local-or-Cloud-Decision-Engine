@@ -19,9 +19,6 @@ paths:
   /v1/decide:
     post:
       summary: Decide execution placement
-      security:
-        - bearerAuth: []
-        - apiKeyHeader: []
       requestBody:
         required: true
         content:
@@ -37,17 +34,10 @@ paths:
                 $ref: "#/components/schemas/DecisionResponse"
         "400":
           description: Invalid request
-        "401":
-          description: Authentication required
-        "503":
-          description: No registered execution targets
 
 
   /v1/policies:
     get:
-      security:
-        - bearerAuth: []
-        - apiKeyHeader: []
       summary: List reusable policy profiles
       responses:
         "200":
@@ -64,17 +54,11 @@ paths:
 
   /v1/targets:
     get:
-      security:
-        - bearerAuth: []
-        - apiKeyHeader: []
       summary: List registered execution targets
       responses:
         "200":
           description: Registered targets
     post:
-      security:
-        - bearerAuth: []
-        - apiKeyHeader: []
       summary: Register an execution target
       requestBody:
         required: true
@@ -89,9 +73,6 @@ paths:
           description: Invalid target
   /v1/targets/{id}:
     delete:
-      security:
-        - bearerAuth: []
-        - apiKeyHeader: []
       summary: Remove a registered execution target
       parameters:
         - name: id
@@ -107,9 +88,6 @@ paths:
 
   /v1/decisions:
     get:
-      security:
-        - bearerAuth: []
-        - apiKeyHeader: []
       summary: Recent decision metadata
       parameters:
         - name: limit
@@ -123,23 +101,11 @@ paths:
           description: Recent decision events
   /v1/metrics:
     get:
-      security:
-        - bearerAuth: []
-        - apiKeyHeader: []
       summary: Decision aggregates
       responses:
         "200":
           description: Aggregate metrics
 components:
-  securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: API-Key
-    apiKeyHeader:
-      type: apiKey
-      in: header
-      name: X-LOCD-API-Key
   schemas:
     Target:
       type: object
@@ -155,6 +121,8 @@ components:
         privacy: {type: number, minimum: 0, maximum: 1}
         estimatedLatencyMs: {type: number, minimum: 0}
         estimatedCostUsd: {type: number, minimum: 0}
+        availableMemoryGb: {type: number, minimum: 0}
+        maxContextTokens: {type: number, minimum: 0}
         regions:
           type: array
           items: {type: string}
@@ -169,6 +137,8 @@ components:
         sensitivity:
           type: string
           enum: [low, medium, high]
+        requiredMemoryGb: {type: number, minimum: 0}
+        requiredContextTokens: {type: number, minimum: 0}
         requiredCapabilities:
           type: array
           items: {type: string}
@@ -248,6 +218,3 @@ components:
         status: {type: string}
         service: {type: string}
         version: {type: string}
-
-# Authentication note: when LOCD_API_KEY is configured, all /v1 operations
-# require bearerAuth or apiKeyHeader. /health remains public.
