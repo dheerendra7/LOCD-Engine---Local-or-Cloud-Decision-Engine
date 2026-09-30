@@ -33,10 +33,11 @@ function isAuthorized(req, configuredApiKey) {
   return safeSecretEqual(supplied, configuredApiKey);
 }
 
-function sendJson(res, status, body) {
+function sendJson(res, status, body, extraHeaders = {}) {
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store"
+    "cache-control": "no-store",
+    ...extraHeaders
   });
   res.end(JSON.stringify(body));
 }
@@ -283,6 +284,14 @@ export function createServer({
       sendJson(res, 405, { error: "method_not_allowed" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "bad_request";
+      if (message === "idempotency_key_reused") {
+        sendJson(res, 409, { error: message });
+        return;
+      }
+      if (message === "idempotency_key_invalid") {
+        sendJson(res, 400, { error: message });
+        return;
+      }
       sendJson(res, 400, { error: message });
     }
   });
