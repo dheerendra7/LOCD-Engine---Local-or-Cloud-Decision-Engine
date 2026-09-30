@@ -127,6 +127,49 @@ paths:
         "503":
           description: No registered execution targets
 
+  /v1/targets/{id}/heartbeat:
+    post:
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+      summary: Update execution target heartbeat telemetry
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                available: {type: boolean}
+                health: {type: number, minimum: 0, maximum: 1}
+                capacity: {type: number, minimum: 0, maximum: 1}
+                privacy: {type: number, minimum: 0, maximum: 1}
+                estimatedLatencyMs: {type: number, minimum: 0}
+                estimatedCostUsd: {type: number, minimum: 0}
+                availableMemoryGb: {type: number, minimum: 0}
+                maxContextTokens: {type: number, minimum: 0}
+                regions:
+                  type: array
+                  items: {type: string}
+                capabilities:
+                  type: array
+                  items: {type: string}
+      responses:
+        "200":
+          description: Heartbeat accepted
+        "401":
+          description: Authentication required
+        "404":
+          description: Target not found
+        "501":
+          description: Target does not support heartbeat updates
+
   /v1/outcomes:
     post:
       security:
@@ -201,6 +244,9 @@ components:
         estimatedCostUsd: {type: number, minimum: 0}
         availableMemoryGb: {type: number, minimum: 0}
         maxContextTokens: {type: number, minimum: 0}
+        lastHeartbeatAt:
+          type: [string, "null"]
+          format: date-time
         regions:
           type: array
           items: {type: string}
@@ -246,6 +292,7 @@ components:
         sensitiveDataMode:
           type: string
           enum: [balanced, prefer-local, local-only, private-only]
+        maxHeartbeatAgeMs: {type: number, minimum: 0}
     DecisionRequest:
       type: object
       required: [workload]
