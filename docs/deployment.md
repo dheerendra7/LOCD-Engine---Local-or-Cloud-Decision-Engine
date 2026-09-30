@@ -54,3 +54,11 @@ Set:
 The server restores targets from this JSON file at startup and writes the file after target registration/removal.
 
 The file is an operator-controlled configuration/state artifact. On managed platforms with ephemeral filesystems, attach persistent storage or use a database-backed registry before depending on restart durability.
+
+## API hardening configuration
+
+Use LOCD_MAX_BODY_BYTES to cap JSON request size.
+
+Use LOCD_RATE_LIMIT_RPM to enable an in-process /v1 rate limit. Use LOCD_TRUST_PROXY=true only behind a trusted reverse proxy.
+
+Rate limiting is intentionally local to a process; distributed deployments need a shared limiter for a global quota.
