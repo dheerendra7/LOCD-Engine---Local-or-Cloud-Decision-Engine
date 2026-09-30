@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { decide } from "../../../packages/core/src/index.js";
-import { createDecisionStore } from "../../../packages/telemetry/src/index.js";
+import { createDecisionStore, createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { listPolicyProfiles } from "../../../packages/policy/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
 import { planHybridExecution } from "../../../packages/planner/src/index.js";
@@ -336,13 +336,18 @@ const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPat
 if (isMain) {
   const port = Number(process.env.PORT || 8787);
   const targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null;
+  const telemetryFile = process.env.LOCD_TELEMETRY_FILE?.trim() || null;
   const targetRegistry = createTargetRegistry();
 
   if (targetFile) {
     await targetRegistry.loadFromFile(targetFile);
   }
 
-  createServer({ targetFile, targetRegistry }).listen(port, "0.0.0.0", () => {
+  const decisionStore = telemetryFile
+    ? createFileDecisionStore({ filePath: telemetryFile, maxEntries: 5000 })
+    : createDecisionStore({ maxEntries: 1000 });
+
+  createServer({ targetFile, targetRegistry, decisionStore }).listen(port, "0.0.0.0", () => {
     console.log("LOCD Engine API listening on 0.0.0.0:" + port);
   });
 }
