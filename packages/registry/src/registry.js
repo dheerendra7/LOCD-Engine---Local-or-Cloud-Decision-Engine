@@ -42,7 +42,10 @@ export function createTargetRegistry(initialTargets = []) {
       if (!snapshot || typeof snapshot !== "object") {
         throw new Error("probe_returned_invalid_snapshot");
       }
-      return snapshot;
+      if (typeof adapter.setSnapshot === "function") {
+        await adapter.setSnapshot(snapshot);
+      }
+      return structuredClone(await adapter.getSnapshot());
     },
 
     async heartbeat(id, patch = {}) {
