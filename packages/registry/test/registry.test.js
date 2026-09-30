@@ -148,3 +148,33 @@ test("registry heartbeat rejects unsupported adapters", async () => {
   );
 });
 
+
+test("registry can probe adapters that expose probe()", async () => {
+  const registry = createTargetRegistry([{
+    id: "probed",
+    targetId: "probed",
+    async getSnapshot() {
+      return { id: "probed", mode: "private", health: 0.2 };
+    },
+    async probe() {
+      return { id: "probed", mode: "private", health: 1, available: true };
+    }
+  }]);
+
+  const snapshot = await registry.probe("probed");
+  assert.equal(snapshot.health, 1);
+});
+
+test("registry distinguishes adapters without probe support", async () => {
+  const registry = createTargetRegistry([{
+    id: "no-probe",
+    async getSnapshot() {
+      return { id: "no-probe", mode: "local" };
+    }
+  }]);
+
+  await assert.rejects(
+    () => registry.probe("no-probe"),
+    /target_does_not_support_probe/
+  );
+});
