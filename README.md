@@ -30,6 +30,7 @@ Possible destinations:
 - Built-in policy profiles with per-request overrides.
 - Pure JavaScript core with no runtime dependency.
 - HTTP API for application integration.
+- Provider-neutral execution boundary with safe dry-run support.
 - Browser dashboard shell.
 - Node built-in tests and GitHub Actions CI.
 
