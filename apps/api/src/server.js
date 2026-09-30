@@ -298,6 +298,41 @@ export function createServer({
         return;
       }
 
+      if (req.method === "POST" && pathname.startsWith("/v1/targets/") && pathname.endsWith("/probe")) {
+        const id = decodeURIComponent(
+          pathname.slice("/v1/targets/".length, -"/probe".length)
+        );
+        if (!id) {
+          sendJson(res, 400, { error: "target id is required" });
+          return;
+        }
+
+        const body = await readBody(req, maxBodyBytes);
+        const replay = getReplay(body);
+        if (replay) {
+          sendReplay(replay);
+          return;
+        }
+
+        try {
+          const snapshot = await targetRegistry.probe(id);
+          if (targetFile) await targetRegistry.saveToFile(targetFile);
+          rememberResponse(body, 200, snapshot);
+          sendJson(res, 200, snapshot);
+        } catch (error) {
+          if (error instanceof Error && error.message === "target_not_found") {
+            sendJson(res, 404, { error: "target_not_found" });
+            return;
+          }
+          if (error instanceof Error && error.message === "target_does_not_support_probe") {
+            sendJson(res, 501, { error: "target_does_not_support_probe" });
+            return;
+          }
+          throw error;
+        }
+        return;
+      }
+
       if (req.method === "POST" && pathname.startsWith("/v1/targets/") && pathname.endsWith("/heartbeat")) {
         const id = decodeURIComponent(
           pathname.slice("/v1/targets/".length, -"/heartbeat".length)
