@@ -38,7 +38,8 @@ function normalizePolicy(policy = {}) {
       cost: clamp(resolved.weights?.cost ?? 0.20),
       capacity: clamp(resolved.weights?.capacity ?? 0.10),
       reliability: clamp(resolved.weights?.reliability ?? 0.15)
-    }
+    },
+    maxHeartbeatAgeMs: finiteOrNull(resolved.maxHeartbeatAgeMs)
   };
 }
 
@@ -77,6 +78,11 @@ function normalizeRequest(input) {
     throw new Error("workload.requiredContextTokens must be >= 0");
   }
 
+  const policy = normalizePolicy(input.policy);
+  if (policy.maxHeartbeatAgeMs !== null && policy.maxHeartbeatAgeMs < 0) {
+    throw new Error("policy.maxHeartbeatAgeMs must be >= 0");
+  }
+
   return {
     workload: {
       type: String(input.workload.type),
@@ -87,7 +93,7 @@ function normalizeRequest(input) {
     },
     constraints,
     targets: input.targets,
-    policy: normalizePolicy(input.policy)
+    policy
   };
 }
 
@@ -156,6 +162,15 @@ function evaluateCandidate(request, target) {
   const health = clamp(target.health ?? 0);
   const capacity = clamp(target.capacity ?? 1);
   const availableMemoryGb = finiteOrNull(target.availableMemoryGb);
+  const heartbeatAt = target.lastHeartbeatAt ? new Date(target.lastHeartbeatAt).getTime() : null;
+
+  if (policy.maxHeartbeatAgeMs !== null) {
+    if (heartbeatAt === null || !Number.isFinite(heartbeatAt)) {
+      rejected.push("heartbeat_staleness_unknown");
+    } else if (Date.now() - heartbeatAt > policy.maxHeartbeatAgeMs) {
+      rejected.push("target_heartbeat_stale");
+    }
+  }
   const maxContextTokens = finiteOrNull(target.maxContextTokens);
 
   if (availableMemoryGb !== null && availableMemoryGb < 0) {

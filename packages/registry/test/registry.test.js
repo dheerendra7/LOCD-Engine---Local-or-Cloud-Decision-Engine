@@ -113,3 +113,38 @@ test("invalid persistence payload is rejected without clearing current state", a
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("registry heartbeat updates target telemetry and timestamp", async () => {
+  const registry = createTargetRegistry([{
+    id: "heartbeat-target",
+    mode: "local",
+    health: 0.5,
+    capacity: 0.7
+  }]);
+
+  const updated = await registry.heartbeat("heartbeat-target", {
+    health: 0.98,
+    capacity: 0.2,
+    estimatedLatencyMs: 45
+  });
+
+  assert.equal(updated.health, 0.98);
+  assert.equal(updated.capacity, 0.2);
+  assert.equal(updated.estimatedLatencyMs, 45);
+  assert.match(updated.lastHeartbeatAt, /^2026|^202[0-9]-/);
+});
+
+test("registry heartbeat rejects unsupported adapters", async () => {
+  const registry = createTargetRegistry([{
+    id: "read-only",
+    async getSnapshot() {
+      return { id: "read-only", mode: "cloud" };
+    }
+  }]);
+
+  await assert.rejects(
+    () => registry.heartbeat("read-only", { health: 1 }),
+    /target_does_not_support_heartbeat/
+  );
+});
+

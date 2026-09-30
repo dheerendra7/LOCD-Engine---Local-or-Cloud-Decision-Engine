@@ -357,3 +357,69 @@ test("invalid negative capacity telemetry cannot win", () => {
   assert.equal(result.route, "none");
   assert.deepEqual(result.rejected[0].reasons, ["invalid_memory_telemetry"]);
 });
+
+test("heartbeat freshness can be enforced as a hard policy", () => {
+  const now = Date.now();
+
+  const stale = decide({
+    workload: { type: "batch", sensitivity: "low" },
+    policy: { maxHeartbeatAgeMs: 1000 },
+    targets: [{
+      id: "stale",
+      mode: "local",
+      health: 1,
+      capacity: 0.1,
+      privacy: 1,
+      lastHeartbeatAt: new Date(now - 5000).toISOString(),
+      estimatedLatencyMs: 20,
+      estimatedCostUsd: 0
+    }]
+  });
+  assert.equal(stale.route, "none");
+  assert.equal(stale.rejected[0].reasons[0], "target_heartbeat_stale");
+
+  const fresh = decide({
+    workload: { type: "batch", sensitivity: "low" },
+    policy: { maxHeartbeatAgeMs: 1000 },
+    targets: [{
+      id: "fresh",
+      mode: "local",
+      health: 1,
+      capacity: 0.1,
+      privacy: 1,
+      lastHeartbeatAt: new Date(now).toISOString(),
+      estimatedLatencyMs: 20,
+      estimatedCostUsd: 0
+    }]
+  });
+  assert.equal(fresh.targetId, "fresh");
+});
+
+test("heartbeat freshness policy rejects unknown heartbeat state", () => {
+  const result = decide({
+    workload: { type: "batch", sensitivity: "low" },
+    policy: { maxHeartbeatAgeMs: 1000 },
+    targets: [{
+      id: "unknown-heartbeat",
+      mode: "local",
+      health: 1,
+      capacity: 0.1,
+      privacy: 1,
+      estimatedLatencyMs: 20,
+      estimatedCostUsd: 0
+    }]
+  });
+  assert.equal(result.route, "none");
+  assert.equal(result.rejected[0].reasons[0], "heartbeat_staleness_unknown");
+});
+
+test("negative heartbeat age policy is rejected", () => {
+  assert.throws(
+    () => decide({
+      workload: { type: "batch" },
+      policy: { maxHeartbeatAgeMs: -1 },
+      targets: [{ id: "x", mode: "local" }]
+    }),
+    /policy.maxHeartbeatAgeMs must be >= 0/
+  );
+});
