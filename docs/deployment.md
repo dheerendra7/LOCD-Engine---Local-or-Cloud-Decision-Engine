@@ -62,3 +62,7 @@ Use LOCD_MAX_BODY_BYTES to cap JSON request size.
 Use LOCD_RATE_LIMIT_RPM to enable an in-process /v1 rate limit. Use LOCD_TRUST_PROXY=true only behind a trusted reverse proxy.
 
 Rate limiting is intentionally local to a process; distributed deployments need a shared limiter for a global quota.
+
+## Structured logs
+
+LOCD emits structured JSON request lifecycle events to stdout. Use LOCD_LOG_LEVEL to control verbosity. The logger redacts credentials and other sensitive fields and does not log request bodies.
