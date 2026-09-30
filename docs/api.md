@@ -126,7 +126,7 @@ Returns in-memory aggregate decision metrics:
       "averageConfidence": 0.84
     }
 
-V1 telemetry is process-local and bounded. A durable production event pipeline is a later milestone.
+Telemetry is bounded by default and can be file-backed by setting LOCD_TELEMETRY_FILE. File-backed telemetry survives process restarts on the same filesystem, but it is still a single-process storage path and is not a distributed production event pipeline.
 
 ## GET /v1/policies
 
