@@ -44,8 +44,9 @@ export function createTargetRegistry(initialTargets = []) {
       }
       if (typeof adapter.setSnapshot === "function") {
         await adapter.setSnapshot(snapshot);
+        return structuredClone(await adapter.getSnapshot());
       }
-      return structuredClone(await adapter.getSnapshot());
+      return structuredClone(snapshot);
     },
 
     async heartbeat(id, patch = {}) {
