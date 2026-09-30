@@ -233,7 +233,14 @@ export function createServer({
       }
 
       if (req.method === "POST" && pathname === "/v1/targets") {
-        const target = await targetRegistry.register(await readBody(req));
+        const body = await readBody(req);
+        const replay = getReplay(body);
+        if (replay) {
+          sendReplay(replay);
+          return;
+        }
+
+        const target = await targetRegistry.register(body);
         if (targetFile) await targetRegistry.saveToFile(targetFile);
         const responseBody = await target.getSnapshot();
         rememberResponse(body, 201, responseBody);
