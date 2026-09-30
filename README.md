@@ -31,6 +31,7 @@ Possible destinations:
 - Pure JavaScript core with no runtime dependency.
 - HTTP API for application integration.
 - Provider-neutral execution boundary with safe dry-run support.
+- Structured observability utilities with secret redaction.
 - Browser dashboard shell.
 - Node built-in tests and GitHub Actions CI.
 
