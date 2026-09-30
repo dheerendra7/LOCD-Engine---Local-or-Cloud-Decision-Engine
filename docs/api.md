@@ -153,6 +153,19 @@ When POST /v1/decide receives no targets in its request body, LOCD uses the regi
 
 The registry is in-memory by default. Set LOCD_TARGETS_FILE to persist normalized target state as JSON and restore it on process startup. In containerized environments, use a persistent volume or move the registry to a database-backed store before relying on durability.
 
+
+## Target heartbeat
+
+### POST /v1/targets/:id/heartbeat
+
+Accepts a partial target telemetry update and records a server-side lastHeartbeatAt timestamp.
+
+Supported fields are limited to execution metadata such as availability, health, capacity, privacy, estimated latency/cost, memory/context capacity, regions and capabilities. Target identity and mode are not changed by a heartbeat.
+
+When the target adapter does not support updates, the endpoint returns HTTP 501.
+
+For placement policies that require fresh infrastructure telemetry, set policy.maxHeartbeatAgeMs. A candidate with a missing or stale heartbeat is rejected before scoring.
+
 ## Authentication
 
 LOCD can enable API-key authentication by setting LOCD_API_KEY.
