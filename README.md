@@ -26,6 +26,7 @@ Possible destinations:
 - Privacy and residency controls.
 - Cost and latency budgeting.
 - Capacity and health awareness.
+- Optional target heartbeats with enforceable freshness policies.
 - Built-in policy profiles with per-request overrides.
 - Pure JavaScript core with no runtime dependency.
 - HTTP API for application integration.
