@@ -30,6 +30,37 @@ export function createTargetRegistry(initialTargets = []) {
       const adapter = adapters.get(String(id));
       return adapter ? adapter.getSnapshot() : null;
     },
+
+    async heartbeat(id, patch = {}) {
+      const adapter = adapters.get(String(id));
+      if (!adapter) throw new Error("target_not_found");
+      if (typeof adapter.setSnapshot !== "function") {
+        throw new Error("target_does_not_support_heartbeat");
+      }
+
+      const snapshot = await adapter.getSnapshot();
+      const allowed = [
+        "available",
+        "health",
+        "capacity",
+        "privacy",
+        "estimatedLatencyMs",
+        "estimatedCostUsd",
+        "availableMemoryGb",
+        "maxContextTokens",
+        "regions",
+        "capabilities"
+      ];
+
+      const next = { id: snapshot.id };
+      for (const field of allowed) {
+        if (field in patch) next[field] = patch[field];
+      }
+      next.lastHeartbeatAt = new Date().toISOString();
+
+      const updated = await adapter.setSnapshot(next);
+      return updated;
+    },
     async list() {
       return collectTargetSnapshots([...adapters.values()]);
     },
