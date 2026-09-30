@@ -4,12 +4,11 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { decide } from "../../../packages/core/src/index.js";
-import { createDecisionStore } from "../../../packages/telemetry/src/index.js";
+import { createDecisionStore, createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { listPolicyProfiles } from "../../../packages/policy/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
 import { planHybridExecution } from "../../../packages/planner/src/index.js";
 import { createIdempotencyStore } from "../../../packages/runtime/src/index.js";
-import { createRateLimiter, getClientKey } from "./rate-limit.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
@@ -43,14 +42,10 @@ function sendJson(res, status, body, extraHeaders = {}) {
   res.end(JSON.stringify(body));
 }
 
-async function readBody(req, maxBytes = 1_000_000) {
+async function readBody(req) {
   let body = "";
-  for await (const chunk of req) {
-    body += chunk;
-    if (Buffer.byteLength(body, "utf8") > maxBytes) {
-      throw new Error("request body too large");
-    }
-  }
+  for await (const chunk of req) body += chunk;
+  if (body.length > 1_000_000) throw new Error("request body too large");
   try {
     return body ? JSON.parse(body) : {};
   } catch {
@@ -92,17 +87,8 @@ export function createServer({
   decisionStore = createDecisionStore({ maxEntries: 1000 }),
   targetRegistry = createTargetRegistry(),
   targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null,
-  idempotencyStore = createIdempotencyStore(),
-  maxBodyBytes = Number(process.env.LOCD_MAX_BODY_BYTES || 1_000_000),
-  rateLimiter = createRateLimiter({
-    maxRequests: Number(process.env.LOCD_RATE_LIMIT_RPM || 0),
-    windowMs: 60_000
-  }),
-  trustProxy = process.env.LOCD_TRUST_PROXY === "true"
+  idempotencyStore = createIdempotencyStore()
 } = {}) {
-  if (!Number.isFinite(maxBodyBytes) || maxBodyBytes < 1) {
-    throw new Error("maxBodyBytes must be >= 1");
-  }
   return http.createServer(async (req, res) => {
     const requestIdHeader = String(req.headers["x-request-id"] || "").trim();
     const requestId = requestIdHeader && requestIdHeader.length <= 128
@@ -132,22 +118,6 @@ export function createServer({
         "idempotency-replayed": "true"
       });
 
-      if (pathname.startsWith("/v1/")) {
-        const rate = rateLimiter.consume(getClientKey(req, { trustProxy }));
-        if (rateLimiter.enabled) {
-          res.setHeader("x-ratelimit-limit", String(rate.limit));
-          res.setHeader("x-ratelimit-remaining", String(rate.remaining));
-          res.setHeader("x-ratelimit-reset", String(Math.ceil(rate.resetAt / 1000)));
-        }
-
-        if (!rate.allowed) {
-          sendJson(res, 429, { error: "rate_limit_exceeded" }, {
-            "retry-after": String(Math.max(1, Math.ceil((rate.resetAt - Date.now()) / 1000)))
-          });
-          return;
-        }
-      }
-
       if (pathname.startsWith("/v1/") && !isAuthorized(req, apiKey)) {
         res.writeHead(401, {
           "content-type": "application/json; charset=utf-8",
@@ -168,7 +138,7 @@ export function createServer({
       }
 
       if (req.method === "POST" && pathname === "/v1/hybrid-plan") {
-        const body = await readBody(req, maxBodyBytes);
+        const body = await readBody(req);
         const replay = getReplay(body);
         if (replay) {
           sendReplay(replay);
@@ -191,7 +161,7 @@ export function createServer({
       }
 
       if (req.method === "POST" && pathname === "/v1/decide") {
-        const body = await readBody(req, maxBodyBytes);
+        const body = await readBody(req);
         const replay = getReplay(body);
         if (replay) {
           sendReplay(replay);
@@ -227,7 +197,7 @@ export function createServer({
       }
 
       if (req.method === "POST" && pathname === "/v1/outcomes") {
-        const body = await readBody(req, maxBodyBytes);
+        const body = await readBody(req);
         const replay = getReplay(body);
         if (replay) {
           sendReplay(replay);
@@ -263,7 +233,7 @@ export function createServer({
       }
 
       if (req.method === "POST" && pathname === "/v1/targets") {
-        const body = await readBody(req, maxBodyBytes);
+        const body = await readBody(req);
         const replay = getReplay(body);
         if (replay) {
           sendReplay(replay);
@@ -287,7 +257,7 @@ export function createServer({
           return;
         }
 
-        const body = await readBody(req, maxBodyBytes);
+        const body = await readBody(req);
         const replay = getReplay(body);
         if (replay) {
           sendReplay(replay);
@@ -356,10 +326,6 @@ export function createServer({
         sendJson(res, 400, { error: message });
         return;
       }
-      if (message === "request body too large") {
-        sendJson(res, 413, { error: message });
-        return;
-      }
       sendJson(res, 400, { error: message });
     }
   });
@@ -370,13 +336,18 @@ const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPat
 if (isMain) {
   const port = Number(process.env.PORT || 8787);
   const targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null;
+  const telemetryFile = process.env.LOCD_TELEMETRY_FILE?.trim() || null;
   const targetRegistry = createTargetRegistry();
 
   if (targetFile) {
     await targetRegistry.loadFromFile(targetFile);
   }
 
-  createServer({ targetFile, targetRegistry }).listen(port, "0.0.0.0", () => {
+  const decisionStore = telemetryFile
+    ? createFileDecisionStore({ filePath: telemetryFile, maxEntries: 5000 })
+    : createDecisionStore({ maxEntries: 1000 });
+
+  createServer({ targetFile, targetRegistry, decisionStore }).listen(port, "0.0.0.0", () => {
     console.log("LOCD Engine API listening on 0.0.0.0:" + port);
   });
 }
