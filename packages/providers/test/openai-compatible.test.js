@@ -148,3 +148,16 @@ test("provider adapter rejects invalid target modes", () => {
     /mode must be local, private, cloud or hybrid/
   );
 });
+
+test("probe error metadata survives snapshot normalization", async () => {
+  const adapter = createOpenAICompatibleAdapter({
+    id: "unauthorized",
+    targetId: "unauthorized",
+    baseUrl: "https://inference.example.com",
+    fetchImpl: async () => jsonResponse({}, 503)
+  });
+
+  const snapshot = await adapter.probe();
+  assert.equal(snapshot.errorClass, "probe_http_503");
+  assert.equal((await adapter.getSnapshot()).errorClass, "probe_http_503");
+});
