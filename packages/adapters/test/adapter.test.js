@@ -29,6 +29,7 @@ test("static adapter returns normalized snapshots", async () => {
     estimatedCostUsd: 0,
     availableMemoryGb: null,
     maxContextTokens: null,
+    lastHeartbeatAt: null,
     regions: ["local"],
     capabilities: ["text-generation"]
   });
