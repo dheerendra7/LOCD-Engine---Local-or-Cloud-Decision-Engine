@@ -8,6 +8,7 @@ import { createDecisionStore, createFileDecisionStore } from "../../../packages/
 import { listPolicyProfiles } from "../../../packages/policy/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
 import { planHybridExecution } from "../../../packages/planner/src/index.js";
+import { createLogger, createRequestId } from "../../../packages/observability/src/index.js";
 import { createIdempotencyStore } from "../../../packages/runtime/src/index.js";
 import { createRateLimiter, getClientKey } from "./rate-limit.js";
 
@@ -98,20 +99,39 @@ export function createServer({
     maxRequests: Number(process.env.LOCD_RATE_LIMIT_RPM || 0),
     windowMs: 60_000
   }),
-  trustProxy = process.env.LOCD_TRUST_PROXY === "true"
+  trustProxy = process.env.LOCD_TRUST_PROXY === "true",
+  logger = createLogger({
+    level: process.env.LOCD_LOG_LEVEL || "info"
+  })
 } = {}) {
   if (!Number.isFinite(maxBodyBytes) || maxBodyBytes < 1) {
     throw new Error("maxBodyBytes must be >= 1");
   }
   return http.createServer(async (req, res) => {
-    const requestIdHeader = String(req.headers["x-request-id"] || "").trim();
-    const requestId = requestIdHeader && requestIdHeader.length <= 128
-      ? requestIdHeader
-      : randomUUID();
+    const requestId = createRequestId(req.headers["x-request-id"]);
+    const startedAt = process.hrtime.bigint();
+    let requestLogWritten = false;
 
     try {
       const url = new URL(req.url || "/", "http://localhost");
       const pathname = url.pathname;
+
+      const originalEnd = res.end.bind(res);
+      res.end = (...args) => {
+        if (!requestLogWritten) {
+          requestLogWritten = true;
+          const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+          logger.info({
+            event: "http_request",
+            requestId,
+            method: req.method,
+            path: pathname,
+            status: res.statusCode,
+            durationMs: Number(durationMs.toFixed(3))
+          });
+        }
+        return originalEnd(...args);
+      };
       res.setHeader("x-request-id", requestId);
 
       const idempotencyKey = String(req.headers["idempotency-key"] || "").trim() || null;
