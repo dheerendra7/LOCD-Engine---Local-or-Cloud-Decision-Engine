@@ -57,12 +57,15 @@ export function normalizeDecisionEvent(event) {
   };
 }
 
-export function createDecisionStore({ maxEntries = 500 } = {}) {
+export function createDecisionStore({ maxEntries = 500, initialEvents = [] } = {}) {
   if (!Number.isInteger(maxEntries) || maxEntries < 1) {
     throw new Error("maxEntries must be a positive integer");
   }
+  if (!Array.isArray(initialEvents)) {
+    throw new Error("initialEvents must be an array");
+  }
 
-  const events = [];
+  const events = initialEvents.map(normalizeDecisionEvent).slice(-maxEntries);
 
   return {
     record(event) {
