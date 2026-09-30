@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "../src/server.js";
 import { createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
+import { createLogger } from "../../../packages/observability/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
@@ -713,3 +714,38 @@ test("file-backed telemetry survives server restart", async () => {
   }
 });
 
+
+
+test("API emits structured request lifecycle logs without request payloads", async () => {
+  const lines = [];
+  const logger = createLogger({
+    sink: value => lines.push(value),
+    clock: () => new Date("2026-10-01T00:00:00Z")
+  });
+  const observabilityServer = createServer({ logger });
+
+  await new Promise(resolve => observabilityServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + observabilityServer.address().port;
+
+  try {
+    const response = await fetch(url + "/health", {
+      headers: {
+        "x-request-id": "observability-test"
+      }
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("x-request-id"), "observability-test");
+
+    const event = JSON.parse(lines.at(-1));
+    assert.equal(event.event, "http_request");
+    assert.equal(event.requestId, "observability-test");
+    assert.equal(event.method, "GET");
+    assert.equal(event.path, "/health");
+    assert.equal(event.status, 200);
+    assert.equal(typeof event.durationMs, "number");
+    assert.equal("body" in event, false);
+  } finally {
+    await new Promise(resolve => observabilityServer.close(resolve));
+  }
+});
