@@ -71,14 +71,16 @@ function normalizeRequest(input) {
   if (constraints.maxCostUsd !== null && constraints.maxCostUsd < 0) {
     throw new Error("constraints.maxCostUsd must be >= 0");
   }
-  if (request.policy.maxHeartbeatAgeMs !== null && request.policy.maxHeartbeatAgeMs < 0) {
-    throw new Error("policy.maxHeartbeatAgeMs must be >= 0");
-  }
   if (requiredMemoryGb !== null && requiredMemoryGb < 0) {
     throw new Error("workload.requiredMemoryGb must be >= 0");
   }
   if (requiredContextTokens !== null && requiredContextTokens < 0) {
     throw new Error("workload.requiredContextTokens must be >= 0");
+  }
+
+  const policy = normalizePolicy(input.policy);
+  if (policy.maxHeartbeatAgeMs !== null && policy.maxHeartbeatAgeMs < 0) {
+    throw new Error("policy.maxHeartbeatAgeMs must be >= 0");
   }
 
   return {
