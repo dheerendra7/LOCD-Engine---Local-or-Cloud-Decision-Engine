@@ -18,6 +18,19 @@ paths:
                 $ref: "#/components/schemas/Health"
   /v1/decide:
     post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            maxLength: 256
+        - name: X-Request-ID
+          in: header
+          required: false
+          schema:
+            type: string
+            maxLength: 128
       summary: Decide execution placement
       security:
         - bearerAuth: []
@@ -72,6 +85,19 @@ paths:
         "200":
           description: Registered targets
     post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            maxLength: 256
+        - name: X-Request-ID
+          in: header
+          required: false
+          schema:
+            type: string
+            maxLength: 128
       security:
         - bearerAuth: []
         - apiKeyHeader: []
@@ -107,6 +133,19 @@ paths:
 
   /v1/hybrid-plan:
     post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            maxLength: 256
+        - name: X-Request-ID
+          in: header
+          required: false
+          schema:
+            type: string
+            maxLength: 128
       security:
         - bearerAuth: []
         - apiKeyHeader: []
@@ -129,6 +168,19 @@ paths:
 
   /v1/outcomes:
     post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            maxLength: 256
+        - name: X-Request-ID
+          in: header
+          required: false
+          schema:
+            type: string
+            maxLength: 128
       security:
         - bearerAuth: []
         - apiKeyHeader: []
@@ -345,3 +397,7 @@ components:
 
 # Authentication note: when LOCD_API_KEY is configured, all /v1 operations
 # require bearerAuth or apiKeyHeader. /health remains public.
+
+# Idempotency: POST/PUT/PATCH endpoints accept Idempotency-Key and return
+# X-Request-ID. Same-key/same-body requests may be replayed from bounded
+# process-local state.
