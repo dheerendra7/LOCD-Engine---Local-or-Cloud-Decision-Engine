@@ -91,7 +91,7 @@ function normalizeRequest(input) {
     },
     constraints,
     targets: input.targets,
-    policy: normalizePolicy(input.policy)
+    policy
   };
 }
 
