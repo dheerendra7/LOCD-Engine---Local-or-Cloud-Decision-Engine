@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "../src/server.js";
+import { createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
