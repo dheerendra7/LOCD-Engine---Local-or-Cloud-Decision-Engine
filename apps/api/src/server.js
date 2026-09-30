@@ -33,10 +33,11 @@ function isAuthorized(req, configuredApiKey) {
   return safeSecretEqual(supplied, configuredApiKey);
 }
 
-function sendJson(res, status, body) {
+function sendJson(res, status, body, extraHeaders = {}) {
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store"
+    "cache-control": "no-store",
+    ...extraHeaders
   });
   res.end(JSON.stringify(body));
 }
@@ -97,6 +98,10 @@ export function createServer({
   }),
   trustProxy = process.env.LOCD_TRUST_PROXY === "true"
 } = {}) {
+  if (!Number.isFinite(maxBodyBytes) || maxBodyBytes < 1) {
+    throw new Error("maxBodyBytes must be >= 1");
+  }
+
   return http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url || "/", "http://localhost");
