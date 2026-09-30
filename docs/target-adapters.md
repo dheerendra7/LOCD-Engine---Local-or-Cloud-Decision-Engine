@@ -54,3 +54,22 @@ A future provider integration can translate vendor-specific state into this cont
 Provider adapters should not contain routing policy. Policy remains centralized in LOCD.
 
 The current V1 includes a static adapter for testing, simulation and deterministic demos. Live provider adapters are a separate integration layer.
+
+## Probe lifecycle
+
+Adapters that implement probe() can be refreshed through the generic registry.
+
+    adapter.probe()
+        |
+        v
+    normalized snapshot
+        |
+        v
+    registry.probe()
+        |
+        +--> optional persistence
+        |
+        v
+    decision engine
+
+The probe result becomes the current target state. A decision policy can then reject stale targets using maxHeartbeatAgeMs.
