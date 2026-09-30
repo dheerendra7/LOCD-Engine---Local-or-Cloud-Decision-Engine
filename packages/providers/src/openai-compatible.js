@@ -52,6 +52,7 @@ function normalizeSnapshot(snapshot) {
     availableMemoryGb: Number.isFinite(Number(snapshot.availableMemoryGb)) ? Math.max(0, Number(snapshot.availableMemoryGb)) : null,
     maxContextTokens: Number.isFinite(Number(snapshot.maxContextTokens)) ? Math.max(0, Number(snapshot.maxContextTokens)) : null,
     lastHeartbeatAt: snapshot.lastHeartbeatAt ? new Date(snapshot.lastHeartbeatAt).toISOString() : null,
+    errorClass: snapshot.errorClass ? String(snapshot.errorClass) : null,
     regions: Array.isArray(snapshot.regions) ? [...new Set(snapshot.regions.map(String))] : [],
     capabilities: Array.isArray(snapshot.capabilities) ? [...new Set(snapshot.capabilities.map(String))] : []
   };
@@ -79,10 +80,6 @@ export function createOpenAICompatibleAdapter({
   if (typeof fetchImpl !== "function") throw new Error("fetch implementation is required");
 
   const url = assertSafeBaseUrl(baseUrl, { allowInsecureHttp });
-  if (mode === "local" && url.hostname === "localhost") {
-    // valid local combination
-  }
-
   let snapshot = normalizeSnapshot({
     id: targetId,
     mode,
