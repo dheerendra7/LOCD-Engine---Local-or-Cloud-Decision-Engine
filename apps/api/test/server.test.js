@@ -749,3 +749,75 @@ test("API emits structured request lifecycle logs without request payloads", asy
     await new Promise(resolve => observabilityServer.close(resolve));
   }
 });
+
+test("target probe endpoint refreshes a provider adapter snapshot", async () => {
+  let snapshot = {
+    id: "probe-api-target",
+    mode: "private",
+    available: false,
+    health: 0,
+    estimatedLatencyMs: null
+  };
+
+  const registry = createTargetRegistry([{
+    id: "probe-api-target",
+    async getSnapshot() {
+      return snapshot;
+    },
+    async setSnapshot(next) {
+      snapshot = { ...snapshot, ...next };
+      return snapshot;
+    },
+    async probe() {
+      return {
+        ...snapshot,
+        available: true,
+        health: 1,
+        estimatedLatencyMs: 42,
+        lastHeartbeatAt: new Date().toISOString()
+      };
+    }
+  }]);
+
+  const probeServer = createServer({ targetRegistry: registry });
+  await new Promise(resolve => probeServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + probeServer.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/targets/probe-api-target/probe", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}"
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.health, 1);
+    assert.equal(body.estimatedLatencyMs, 42);
+  } finally {
+    await new Promise(resolve => probeServer.close(resolve));
+  }
+});
+
+test("probe endpoint returns 501 when target adapter has no probe operation", async () => {
+  const registry = createTargetRegistry([{
+    id: "probe-unsupported",
+    async getSnapshot() {
+      return { id: "probe-unsupported", mode: "local" };
+    }
+  }]);
+  const probeServer = createServer({ targetRegistry: registry });
+  await new Promise(resolve => probeServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + probeServer.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/targets/probe-unsupported/probe", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}"
+    });
+    assert.equal(response.status, 501);
+    assert.deepEqual(await response.json(), { error: "target_does_not_support_probe" });
+  } finally {
+    await new Promise(resolve => probeServer.close(resolve));
+  }
+});
