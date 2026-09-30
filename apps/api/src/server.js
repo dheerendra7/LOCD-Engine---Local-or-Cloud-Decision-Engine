@@ -8,6 +8,7 @@ import { createDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { listPolicyProfiles } from "../../../packages/policy/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
 import { planHybridExecution } from "../../../packages/planner/src/index.js";
+import { createRateLimiter, getClientKey } from "./rate-limit.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
@@ -40,10 +41,14 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-async function readBody(req) {
+async function readBody(req, maxBytes = 1_000_000) {
   let body = "";
-  for await (const chunk of req) body += chunk;
-  if (body.length > 1_000_000) throw new Error("request body too large");
+  for await (const chunk of req) {
+    body += chunk;
+    if (Buffer.byteLength(body, "utf8") > maxBytes) {
+      throw new Error("request body too large");
+    }
+  }
   try {
     return body ? JSON.parse(body) : {};
   } catch {
@@ -84,12 +89,34 @@ export function createServer({
   apiKey = process.env.LOCD_API_KEY?.trim() || null,
   decisionStore = createDecisionStore({ maxEntries: 1000 }),
   targetRegistry = createTargetRegistry(),
-  targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null
+  targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null,
+  maxBodyBytes = Number(process.env.LOCD_MAX_BODY_BYTES || 1_000_000),
+  rateLimiter = createRateLimiter({
+    maxRequests: Number(process.env.LOCD_RATE_LIMIT_RPM || 0),
+    windowMs: 60_000
+  }),
+  trustProxy = process.env.LOCD_TRUST_PROXY === "true"
 } = {}) {
   return http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url || "/", "http://localhost");
       const pathname = url.pathname;
+
+      if (pathname.startsWith("/v1/")) {
+        const rate = rateLimiter.consume(getClientKey(req, { trustProxy }));
+        if (rateLimiter.enabled) {
+          res.setHeader("x-ratelimit-limit", String(rate.limit));
+          res.setHeader("x-ratelimit-remaining", String(rate.remaining));
+          res.setHeader("x-ratelimit-reset", String(Math.ceil(rate.resetAt / 1000)));
+        }
+
+        if (!rate.allowed) {
+          sendJson(res, 429, { error: "rate_limit_exceeded" }, {
+            "retry-after": String(Math.max(1, Math.ceil((rate.resetAt - Date.now()) / 1000)))
+          });
+          return;
+        }
+      }
 
       if (pathname.startsWith("/v1/") && !isAuthorized(req, apiKey)) {
         res.writeHead(401, {
@@ -111,7 +138,7 @@ export function createServer({
       }
 
       if (req.method === "POST" && pathname === "/v1/hybrid-plan") {
-        const body = await readBody(req);
+        const body = await readBody(req, maxBodyBytes);
         const hasRequestTargets = Array.isArray(body.targets) && body.targets.length > 0;
         const request = hasRequestTargets
           ? body
