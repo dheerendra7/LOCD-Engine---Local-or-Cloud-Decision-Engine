@@ -89,13 +89,17 @@ The core is independent of HTTP, storage and UI so it can later power SDKs, a CL
 
 ## Roadmap
 
-V1: decision core, policy model, explainability, API, tests, CI and dashboard foundation.
+### Shipped foundation
 
-V1.1: target health probes, utilization adapters, decision history and structured audit events.
+Decision core, hard/soft policy semantics, explainability, hybrid planning, target registry, resource-fit checks, metadata-only telemetry with outcome feedback, browser dashboard, HTTP API, SDK, CLI, authentication baseline, Docker/Render deployment config, tests and CI.
 
-V2: hybrid execution pipelines, telemetry-based calibration, richer policy language, SDKs and production authentication/authorization.
+### Next
 
-V3: multi-tenant control plane and advanced optimization.
+Live health/utilization probes and provider adapters, durable production telemetry, persistent database-backed control-plane state, execution adapters, richer policy language, rate limiting and scoped authorization.
+
+### Later
+
+Multi-tenant control plane, advanced optimization, provider-specific execution integrations and calibrated placement models.
 
 ## Status
 
