@@ -148,3 +148,71 @@ test("registry heartbeat rejects unsupported adapters", async () => {
   );
 });
 
+
+test("registry can probe adapters that expose probe()", async () => {
+  const registry = createTargetRegistry([{
+    id: "probed",
+    targetId: "probed",
+    async getSnapshot() {
+      return { id: "probed", mode: "private", health: 0.2 };
+    },
+    async probe() {
+      return { id: "probed", mode: "private", health: 1, available: true };
+    }
+  }]);
+
+  const snapshot = await registry.probe("probed");
+  assert.equal(snapshot.health, 1);
+});
+
+test("registry distinguishes adapters without probe support", async () => {
+  const registry = createTargetRegistry([{
+    id: "no-probe",
+    async getSnapshot() {
+      return { id: "no-probe", mode: "local" };
+    }
+  }]);
+
+  await assert.rejects(
+    () => registry.probe("no-probe"),
+    /target_does_not_support_probe/
+  );
+});
+
+test("registry probe persists returned snapshot when adapter supports setSnapshot", async () => {
+  let snapshot = { id: "probe-persist", mode: "private", health: 0.2 };
+  const registry = createTargetRegistry([{
+    id: "probe-persist",
+    async getSnapshot() {
+      return snapshot;
+    },
+    async setSnapshot(next) {
+      snapshot = { ...snapshot, ...next };
+      return snapshot;
+    },
+    async probe() {
+      return { id: "probe-persist", mode: "private", health: 1, available: true };
+    }
+  }]);
+
+  const result = await registry.probe("probe-persist");
+  assert.equal(result.health, 1);
+  assert.equal((await registry.get("probe-persist")).health, 1);
+});
+
+test("registry probe rejects invalid probe responses", async () => {
+  const registry = createTargetRegistry([{
+    id: "bad-probe",
+    async getSnapshot() {
+      return { id: "bad-probe", mode: "local" };
+    },
+    async probe() {
+      return null;
+    }
+  }]);
+
+  await assert.rejects(
+    () => registry.probe("bad-probe"),
+    /probe_returned_invalid_snapshot/
+  );
+});

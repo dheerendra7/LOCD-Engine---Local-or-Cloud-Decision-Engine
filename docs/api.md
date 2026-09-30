@@ -251,3 +251,17 @@ Set LOCD_RATE_LIMIT_RPM to a positive value to enable a process-local per-client
 Client identity uses the direct socket address by default. Set LOCD_TRUST_PROXY=true only when the deployment proxy is trusted and supplies X-Forwarded-For.
 
 The limiter is process-local. Multi-instance production deployments need shared coordination for global quotas.
+
+
+## Target probes
+
+### POST /v1/targets/:id/probe
+
+Runs a target adapter's live health probe and returns its refreshed normalized snapshot.
+
+The adapter controls the actual probe protocol. The LOCD control plane only stores the normalized result and optionally persists it with LOCD_TARGETS_FILE.
+
+A target without probe support returns HTTP 501. Unknown targets return HTTP 404.
+
+The built-in OpenAI-compatible adapter probes GET /v1/models and measures round-trip latency.
+

@@ -1,0 +1,163 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createOpenAICompatibleAdapter } from "../src/index.js";
+
+function jsonResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" }
+  });
+}
+
+test("adapter rejects insecure remote HTTP by default", () => {
+  assert.throws(
+    () => createOpenAICompatibleAdapter({
+      id: "remote",
+      targetId: "remote",
+      baseUrl: "http://example.com"
+    }),
+    /insecure remote HTTP/
+  );
+});
+
+test("localhost HTTP is allowed for local providers", async () => {
+  const adapter = createOpenAICompatibleAdapter({
+    id: "ollama-like",
+    targetId: "local-1",
+    baseUrl: "http://localhost:11434",
+    mode: "local",
+    fetchImpl: async () => jsonResponse({ data: [] })
+  });
+
+  assert.equal((await adapter.getSnapshot()).mode, "local");
+});
+
+test("probe marks a healthy target and records latency", async () => {
+  const calls = [];
+  const adapter = createOpenAICompatibleAdapter({
+    id: "vllm",
+    targetId: "private-vllm",
+    baseUrl: "https://inference.example.com",
+    mode: "private",
+    apiKey: "secret-not-logged",
+    fetchImpl: async (url, options) => {
+      calls.push({ url: String(url), options });
+      return jsonResponse({ object: "list", data: [] });
+    }
+  });
+
+  const snapshot = await adapter.probe();
+
+  assert.equal(snapshot.available, true);
+  assert.equal(snapshot.health, 1);
+  assert.equal(typeof snapshot.estimatedLatencyMs, "number");
+  assert.match(snapshot.lastHeartbeatAt, /^202/);
+  assert.equal(calls[0].url, "https://inference.example.com/v1/models");
+  assert.equal(calls[0].options.headers.authorization, "Bearer secret-not-logged");
+});
+
+test("probe classifies unauthorized/unhealthy responses", async () => {
+  const adapter = createOpenAICompatibleAdapter({
+    id: "bad",
+    targetId: "bad-target",
+    baseUrl: "https://inference.example.com",
+    fetchImpl: async () => jsonResponse({}, 401)
+  });
+
+  const snapshot = await adapter.probe();
+
+  assert.equal(snapshot.available, false);
+  assert.equal(snapshot.health, 0);
+  assert.equal(snapshot.errorClass, "probe_http_401");
+});
+
+test("probe classifies timeouts", async () => {
+  const adapter = createOpenAICompatibleAdapter({
+    id: "slow",
+    targetId: "slow-target",
+    baseUrl: "https://slow.example.com",
+    timeoutMs: 5,
+    fetchImpl: async (_url, options) => {
+      await new Promise((_, reject) => {
+        options.signal.addEventListener("abort", () => {
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          reject(error);
+        });
+      });
+    }
+  });
+
+  const snapshot = await adapter.probe();
+  assert.equal(snapshot.available, false);
+  assert.equal(snapshot.errorClass, "probe_timeout");
+});
+
+test("execute uses OpenAI-compatible chat completion endpoint", async () => {
+  const calls = [];
+  const adapter = createOpenAICompatibleAdapter({
+    id: "provider",
+    targetId: "provider-target",
+    baseUrl: "https://inference.example.com",
+    apiKey: "secret",
+    model: "demo-model",
+    fetchImpl: async (url, options) => {
+      calls.push({ url: String(url), options });
+      return jsonResponse({
+        id: "chatcmpl-1",
+        choices: [{ message: { role: "assistant", content: "hello" } }]
+      });
+    }
+  });
+
+  const result = await adapter.execute({
+    payload: {
+      messages: [{ role: "user", content: "hello" }]
+    },
+    mode: "live"
+  });
+
+  assert.equal(result.choices[0].message.content, "hello");
+  assert.equal(calls[0].url, "https://inference.example.com/v1/chat/completions");
+  assert.equal(calls[0].options.headers.authorization, "Bearer secret");
+  assert.equal(JSON.parse(calls[0].options.body).model, "demo-model");
+});
+
+test("execute refuses dry-run mode", async () => {
+  const adapter = createOpenAICompatibleAdapter({
+    id: "provider",
+    targetId: "target",
+    baseUrl: "https://inference.example.com",
+    fetchImpl: async () => jsonResponse({})
+  });
+
+  await assert.rejects(
+    () => adapter.execute({ payload: {}, mode: "dry-run" }),
+    /requires live mode/
+  );
+});
+
+test("provider adapter rejects invalid target modes", () => {
+  assert.throws(
+    () => createOpenAICompatibleAdapter({
+      id: "bad-mode",
+      targetId: "bad-mode",
+      baseUrl: "https://inference.example.com",
+      mode: "satellite"
+    }),
+    /mode must be local, private, cloud or hybrid/
+  );
+});
+
+test("probe error metadata survives snapshot normalization", async () => {
+  const adapter = createOpenAICompatibleAdapter({
+    id: "unauthorized",
+    targetId: "unauthorized",
+    baseUrl: "https://inference.example.com",
+    fetchImpl: async () => jsonResponse({}, 503)
+  });
+
+  const snapshot = await adapter.probe();
+  assert.equal(snapshot.errorClass, "probe_http_503");
+  assert.equal((await adapter.getSnapshot()).errorClass, "probe_http_503");
+});

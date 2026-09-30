@@ -148,6 +148,28 @@ paths:
         "503":
           description: No registered execution targets
 
+  /v1/targets/{id}/probe:
+    post:
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+      summary: Probe a registered execution target
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Refreshed normalized target snapshot
+        "401":
+          description: Authentication required
+        "404":
+          description: Target not found
+        "501":
+          description: Target does not support probing
+
   /v1/targets/{id}/heartbeat:
     post:
       parameters:
