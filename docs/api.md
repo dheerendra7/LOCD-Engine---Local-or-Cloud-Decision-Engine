@@ -227,3 +227,13 @@ Supported outcomes are success and failure. The event is matched by decisionId.
 POST /v1/decide now returns decisionId so callers can correlate predicted and observed execution metadata.
 
 Calibration fields in GET /v1/metrics include successRate, meanAbsoluteLatencyErrorMs and meanAbsoluteCostErrorUsd when enough observed data exists.
+
+## API hardening
+
+JSON request bodies are limited by LOCD_MAX_BODY_BYTES. Oversized bodies return HTTP 413 before route evaluation.
+
+Set LOCD_RATE_LIMIT_RPM to a positive value to enable a process-local per-client requests-per-minute limit for /v1 traffic. Limit responses include X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset. HTTP 429 responses include Retry-After.
+
+Client identity uses the direct socket address by default. Set LOCD_TRUST_PROXY=true only when a trusted deployment proxy supplies X-Forwarded-For.
+
+The limiter is process-local. Multi-instance deployments need shared rate-limit coordination for a global quota.
