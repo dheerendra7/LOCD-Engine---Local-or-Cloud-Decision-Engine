@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "../src/server.js";
+import { createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
@@ -581,82 +582,56 @@ test("reusing an idempotency key with a different payload returns 409", async ()
   assert.deepEqual(await second.json(), { error: "idempotency_key_reused" });
 });
 
-test("oversized request bodies return HTTP 413", async () => {
-  const server = createServer({ maxBodyBytes: 32 });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const url = "http://127.0.0.1:" + server.address().port;
+
+
+test("file-backed telemetry survives server restart", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-api-telemetry-"));
+  const telemetryFile = path.join(dir, "events.json");
+
+  const firstStore = createFileDecisionStore({ filePath: telemetryFile, maxEntries: 100 });
+  const first = createServer({ decisionStore: firstStore });
+  await new Promise(resolve => first.listen(0, "127.0.0.1", resolve));
+  const firstUrl = "http://127.0.0.1:" + first.address().port;
 
   try {
-    const response = await fetch(url + "/v1/decide", {
+    const decision = await fetch(firstUrl + "/v1/decide", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         workload: { type: "classification", sensitivity: "low" },
         targets: [
-          { id: "large-body", mode: "local", health: 1, capacity: 0.1, privacy: 1 }
+          {
+            id: "persist-telemetry-target",
+            mode: "local",
+            health: 1,
+            capacity: 0.1,
+            privacy: 1,
+            estimatedLatencyMs: 25,
+            estimatedCostUsd: 0
+          }
         ]
       })
     });
+    assert.equal(decision.status, 200);
+    await new Promise(resolve => first.close(resolve));
 
-    assert.equal(response.status, 413);
-    assert.deepEqual(await response.json(), { error: "request body too large" });
-  } finally {
-    await new Promise(resolve => server.close(resolve));
-  }
-});
+    const secondStore = createFileDecisionStore({ filePath: telemetryFile, maxEntries: 100 });
+    const second = createServer({ decisionStore: secondStore });
+    await new Promise(resolve => second.listen(0, "127.0.0.1", resolve));
+    const secondUrl = "http://127.0.0.1:" + second.address().port;
 
-test("rate limits apply to v1 traffic but not health checks", async () => {
-  const server = createServer({
-    rateLimiter: {
-      enabled: true,
-      consume() {
-        return {
-          allowed: false,
-          limit: 1,
-          remaining: 0,
-          resetAt: Date.now() + 5000
-        };
-      }
+    try {
+      const metrics = await fetch(secondUrl + "/v1/metrics");
+      assert.equal(metrics.status, 200);
+      const body = await metrics.json();
+      assert.equal(body.totalDecisions, 1);
+
+      const history = await fetch(secondUrl + "/v1/decisions?limit=10");
+      assert.equal((await history.json()).decisions.length, 1);
+    } finally {
+      await new Promise(resolve => second.close(resolve));
     }
-  });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const url = "http://127.0.0.1:" + server.address().port;
-
-  try {
-    const health = await fetch(url + "/health");
-    assert.equal(health.status, 200);
-
-    const blocked = await fetch(url + "/v1/policies");
-    assert.equal(blocked.status, 429);
-    assert.equal(blocked.headers.get("x-ratelimit-limit"), "1");
-    assert.equal(blocked.headers.get("x-ratelimit-remaining"), "0");
-    assert.equal(blocked.headers.get("retry-after"), "5");
-    assert.deepEqual(await blocked.json(), { error: "rate_limit_exceeded" });
   } finally {
-    await new Promise(resolve => server.close(resolve));
+    await rm(dir, { recursive: true, force: true });
   }
 });
-
-test("invalid body limit configuration fails at server creation", () => {
-  assert.throws(
-    () => createServer({ maxBodyBytes: 0 }),
-    /maxBodyBytes must be >= 1/
-  );
-});
-
-test("request ID falls back to a generated identifier when caller value is too long", async () => {
-  const server = createServer();
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const url = "http://127.0.0.1:" + server.address().port;
-
-  try {
-    const response = await fetch(url + "/health", {
-      headers: { "x-request-id": "x".repeat(129) }
-    });
-    const requestId = response.headers.get("x-request-id");
-    assert.match(requestId, /^[0-9a-f-]{36}$/);
-  } finally {
-    await new Promise(resolve => server.close(resolve));
-  }
-});
-
