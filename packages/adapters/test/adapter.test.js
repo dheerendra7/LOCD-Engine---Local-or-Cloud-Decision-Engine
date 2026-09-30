@@ -88,3 +88,29 @@ test("capacity telemetry is normalized by adapters", async () => {
   assert.equal((await adapter.getSnapshot()).availableMemoryGb, 24);
   assert.equal((await adapter.getSnapshot()).maxContextTokens, 64000);
 });
+
+test("partial heartbeat updates preserve existing target fields", async () => {
+  const adapter = createStaticTargetAdapter({
+    id: "heartbeat-gpu",
+    mode: "local",
+    health: 0.8,
+    capacity: 0.5,
+    privacy: 1,
+    estimatedLatencyMs: 200,
+    estimatedCostUsd: 0,
+    regions: ["local"]
+  });
+
+  const updated = await adapter.setSnapshot({
+    health: 0.99,
+    capacity: 0.1,
+    lastHeartbeatAt: "2026-09-30T00:00:00Z"
+  });
+
+  assert.equal(updated.id, "heartbeat-gpu");
+  assert.equal(updated.mode, "local");
+  assert.equal(updated.estimatedLatencyMs, 200);
+  assert.equal(updated.health, 0.99);
+  assert.equal(updated.capacity, 0.1);
+  assert.equal(updated.lastHeartbeatAt, "2026-09-30T00:00:00.000Z");
+});
