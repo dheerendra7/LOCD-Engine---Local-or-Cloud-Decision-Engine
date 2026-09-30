@@ -54,3 +54,9 @@ Set:
 The server restores targets from this JSON file at startup and writes the file after target registration/removal.
 
 The file is an operator-controlled configuration/state artifact. On managed platforms with ephemeral filesystems, attach persistent storage or use a database-backed registry before depending on restart durability.
+
+## Persistent telemetry
+
+Set LOCD_TELEMETRY_FILE to a path on persistent storage to retain bounded decision metadata across process restarts.
+
+The file store is appropriate for a single-process evaluation deployment. Use managed/shared storage for multi-instance production workloads.
