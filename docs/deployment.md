@@ -35,7 +35,7 @@ Before production use, add:
 - secret management
 - durable database-backed telemetry
 - centralized policy storage
-- persistent target registry
+- persistent target registry (LOCD_TARGETS_FILE; use durable storage for hosted production)
 - rate limiting
 - structured logs and traces
 - provider credential isolation
@@ -44,3 +44,13 @@ Before production use, add:
 - SLOs for the LOCD control plane
 
 The free deployment is a useful demo and evaluation environment, not a production SLA.
+
+## Persistent target registry
+
+Set:
+
+    LOCD_TARGETS_FILE=/var/lib/locd/targets.json
+
+The server restores targets from this JSON file at startup and writes the file after target registration/removal.
+
+The file is an operator-controlled configuration/state artifact. On managed platforms with ephemeral filesystems, attach persistent storage or use a database-backed registry before depending on restart durability.
