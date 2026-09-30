@@ -7,7 +7,7 @@ const SENSITIVE_KEYS = new Set([
   "x-api-key",
   "x-locd-api-key",
   "idempotency-key",
-  "apiKey",
+  "apikey",
   "api_key",
   "secret",
   "token",
