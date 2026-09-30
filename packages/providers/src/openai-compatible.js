@@ -22,6 +22,8 @@ function assertSafeBaseUrl(value, { allowInsecureHttp = false } = {}) {
   return url;
 }
 
+const MODES = new Set(["local", "private", "cloud", "hybrid"]);
+
 function authHeaders(apiKey) {
   return apiKey ? { authorization: "Bearer " + apiKey } : {};
 }
@@ -73,6 +75,7 @@ export function createOpenAICompatibleAdapter({
 } = {}) {
   if (!id) throw new Error("id is required");
   if (!targetId) throw new Error("targetId is required");
+  if (!MODES.has(mode)) throw new Error("mode must be local, private, cloud or hybrid");
   if (typeof fetchImpl !== "function") throw new Error("fetch implementation is required");
 
   const url = assertSafeBaseUrl(baseUrl, { allowInsecureHttp });
