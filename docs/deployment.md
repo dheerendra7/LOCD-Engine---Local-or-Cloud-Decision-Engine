@@ -54,3 +54,9 @@ Set:
 The server restores targets from this JSON file at startup and writes the file after target registration/removal.
 
 The file is an operator-controlled configuration/state artifact. On managed platforms with ephemeral filesystems, attach persistent storage or use a database-backed registry before depending on restart durability.
+
+## API hardening configuration
+
+Recommended hosted settings should include a bounded LOCD_MAX_BODY_BYTES and, where appropriate, a positive LOCD_RATE_LIMIT_RPM.
+
+LOCD_TRUST_PROXY should remain false unless the operator controls and trusts the reverse proxy that supplies X-Forwarded-For.
