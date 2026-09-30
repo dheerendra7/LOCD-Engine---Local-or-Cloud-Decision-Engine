@@ -32,6 +32,7 @@ Possible destinations:
 - HTTP API for application integration.
 - Provider-neutral execution boundary with safe dry-run support.
 - Browser dashboard shell.
+- Structured observability utilities with secret redaction.
 - Node built-in tests and GitHub Actions CI.
 
 ## Quick start
