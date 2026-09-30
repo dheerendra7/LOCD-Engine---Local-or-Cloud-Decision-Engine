@@ -11,8 +11,6 @@ import { planHybridExecution } from "../../../packages/planner/src/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
-const decisionStore = createDecisionStore({ maxEntries: 1000 });
-const targetRegistry = createTargetRegistry();
 
 
 function safeSecretEqual(supplied, expected) {
@@ -82,7 +80,12 @@ async function serveWeb(res, pathname) {
   }
 }
 
-export function createServer({ apiKey = process.env.LOCD_API_KEY?.trim() || null } = {}) {
+export function createServer({
+  apiKey = process.env.LOCD_API_KEY?.trim() || null,
+  decisionStore = createDecisionStore({ maxEntries: 1000 }),
+  targetRegistry = createTargetRegistry(),
+  targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null
+} = {}) {
   return http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url || "/", "http://localhost");
@@ -184,6 +187,7 @@ export function createServer({ apiKey = process.env.LOCD_API_KEY?.trim() || null
 
       if (req.method === "POST" && pathname === "/v1/targets") {
         const target = await targetRegistry.register(await readBody(req));
+        if (targetFile) await targetRegistry.saveToFile(targetFile);
         sendJson(res, 201, await target.getSnapshot());
         return;
       }
@@ -199,6 +203,7 @@ export function createServer({ apiKey = process.env.LOCD_API_KEY?.trim() || null
           sendJson(res, 404, { error: "target_not_found" });
           return;
         }
+        if (targetFile) await targetRegistry.saveToFile(targetFile);
         sendJson(res, 200, { removed: id });
         return;
       }
@@ -231,7 +236,14 @@ const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPat
 
 if (isMain) {
   const port = Number(process.env.PORT || 8787);
-  createServer().listen(port, "0.0.0.0", () => {
+  const targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null;
+  const targetRegistry = createTargetRegistry();
+
+  if (targetFile) {
+    await targetRegistry.loadFromFile(targetFile);
+  }
+
+  createServer({ targetFile, targetRegistry }).listen("0.0.0.0:" + port, () => {
     console.log("LOCD Engine API listening on 0.0.0.0:" + port);
   });
 }
