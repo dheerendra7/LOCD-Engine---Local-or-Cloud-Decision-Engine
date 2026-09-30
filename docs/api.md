@@ -227,3 +227,17 @@ Supported outcomes are success and failure. The event is matched by decisionId.
 POST /v1/decide now returns decisionId so callers can correlate predicted and observed execution metadata.
 
 Calibration fields in GET /v1/metrics include successRate, meanAbsoluteLatencyErrorMs and meanAbsoluteCostErrorUsd when enough observed data exists.
+
+
+## Retry safety
+
+All POST endpoints under /v1 support an optional Idempotency-Key header.
+
+When the same key and request body are received within the bounded in-memory retention window, LOCD returns the original response and sets Idempotency-Replayed: true.
+
+Reusing the same key with a different request body returns HTTP 409 with error idempotency_key_reused.
+
+Every request also receives an X-Request-ID response header. Callers may provide their own value (up to 128 characters) for distributed tracing.
+
+Idempotency state is process-local and bounded. Multi-instance production deployments require shared durable coordination before relying on replay behavior across replicas.
+
