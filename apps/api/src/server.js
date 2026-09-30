@@ -243,7 +243,7 @@ if (isMain) {
     await targetRegistry.loadFromFile(targetFile);
   }
 
-  createServer({ targetFile, targetRegistry }).listen("0.0.0.0:" + port, () => {
+  createServer({ targetFile, targetRegistry }).listen(port, "0.0.0.0", () => {
     console.log("LOCD Engine API listening on 0.0.0.0:" + port);
   });
 }
