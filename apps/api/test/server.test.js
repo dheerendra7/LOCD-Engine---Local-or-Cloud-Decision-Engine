@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "../src/server.js";
+import { createTargetRegistry } from "../../../packages/registry/src/index.js";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 let server;
 let baseUrl;
@@ -363,4 +367,84 @@ test("hybrid plan uses the registered target set when request targets are omitte
 
   await fetch(baseUrl + "/v1/targets/planner-local", { method: "DELETE" });
   await fetch(baseUrl + "/v1/targets/planner-private", { method: "DELETE" });
+});
+
+
+test("target writes persist when a target file is configured", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-api-persist-"));
+  const targetFile = path.join(dir, "targets.json");
+  const registry = createTargetRegistry();
+  const persistentServer = createServer({ targetRegistry: registry, targetFile });
+
+  await new Promise(resolve => persistentServer.listen(0, "127.0.0.1", resolve));
+  const address = persistentServer.address();
+  const url = "http://127.0.0.1:" + address.port;
+
+  try {
+    const response = await fetch(url + "/v1/targets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "persist-api-target",
+        mode: "local",
+        health: 1,
+        capacity: 0.2,
+        privacy: 1
+      })
+    });
+    assert.equal(response.status, 201);
+
+    const persisted = JSON.parse(await readFile(targetFile, "utf8"));
+    assert.equal(persisted.length, 1);
+    assert.equal(persisted[0].id, "persist-api-target");
+
+    const removed = await fetch(url + "/v1/targets/persist-api-target", { method: "DELETE" });
+    assert.equal(removed.status, 200);
+
+    const afterDelete = JSON.parse(await readFile(targetFile, "utf8"));
+    assert.deepEqual(afterDelete, []);
+  } finally {
+    await new Promise(resolve => persistentServer.close(resolve));
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("different server instances keep decision and registry state isolated", async () => {
+  const a = createServer();
+  const b = createServer();
+
+  await Promise.all([
+    new Promise(resolve => a.listen(0, "127.0.0.1", resolve)),
+    new Promise(resolve => b.listen(0, "127.0.0.1", resolve))
+  ]);
+
+  const aUrl = "http://127.0.0.1:" + a.address().port;
+  const bUrl = "http://127.0.0.1:" + b.address().port;
+
+  try {
+    await fetch(aUrl + "/v1/targets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "instance-a-target",
+        mode: "local",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 20,
+        estimatedCostUsd: 0
+      })
+    });
+
+    const aTargets = await (await fetch(aUrl + "/v1/targets")).json();
+    const bTargets = await (await fetch(bUrl + "/v1/targets")).json();
+
+    assert.equal(aTargets.targets.some(target => target.id === "instance-a-target"), true);
+    assert.equal(bTargets.targets.some(target => target.id === "instance-a-target"), false);
+  } finally {
+    await Promise.all([
+      new Promise(resolve => a.close(resolve)),
+      new Promise(resolve => b.close(resolve))
+    ]);
+  }
 });

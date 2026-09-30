@@ -151,7 +151,7 @@ Removes a registered target. Returns HTTP 404 when the target does not exist.
 
 When POST /v1/decide receives no targets in its request body, LOCD uses the registered target set. Supplying a non-empty targets array keeps request-scoped evaluation possible for simulations and advanced callers.
 
-The V1 registry is in-memory; persistence is a later milestone.
+The registry is in-memory by default. Set LOCD_TARGETS_FILE to persist normalized target state as JSON and restore it on process startup. In containerized environments, use a persistent volume or move the registry to a database-backed store before relying on durability.
 
 ## Authentication
 
