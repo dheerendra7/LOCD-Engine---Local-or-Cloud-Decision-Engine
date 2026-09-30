@@ -499,3 +499,85 @@ test("heartbeat returns not found for unknown targets", async () => {
   });
   assert.equal(response.status, 404);
 });
+
+test("request IDs are returned and idempotency replays the same decision", async () => {
+  const headers = {
+    "content-type": "application/json",
+    "idempotency-key": "decision-retry-1",
+    "x-request-id": "client-request-1"
+  };
+  const body = JSON.stringify({
+    workload: { type: "classification", sensitivity: "low" },
+    targets: [
+      {
+        id: "idem-local",
+        mode: "local",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 20,
+        estimatedCostUsd: 0
+      }
+    ]
+  });
+
+  const first = await fetch(baseUrl + "/v1/decide", {
+    method: "POST",
+    headers,
+    body
+  });
+  assert.equal(first.status, 200);
+  assert.equal(first.headers.get("x-request-id"), "client-request-1");
+  assert.equal(first.headers.get("idempotency-replayed"), null);
+
+  const firstBody = await first.json();
+
+  const second = await fetch(baseUrl + "/v1/decide", {
+    method: "POST",
+    headers: {
+      ...headers,
+      "x-request-id": "client-request-2"
+    },
+    body
+  });
+  assert.equal(second.status, 200);
+  assert.equal(second.headers.get("x-request-id"), "client-request-2");
+  assert.equal(second.headers.get("idempotency-replayed"), "true");
+
+  const secondBody = await second.json();
+  assert.equal(secondBody.decisionId, firstBody.decisionId);
+});
+
+test("reusing an idempotency key with a different payload returns 409", async () => {
+  const commonHeaders = {
+    "content-type": "application/json",
+    "idempotency-key": "decision-conflict-1"
+  };
+
+  const first = await fetch(baseUrl + "/v1/decide", {
+    method: "POST",
+    headers: commonHeaders,
+    body: JSON.stringify({
+      workload: { type: "classification", sensitivity: "low" },
+      targets: [
+        { id: "conflict-a", mode: "local", health: 1, capacity: 0.1, privacy: 1, estimatedLatencyMs: 20, estimatedCostUsd: 0 }
+      ]
+    })
+  });
+  assert.equal(first.status, 200);
+
+  const second = await fetch(baseUrl + "/v1/decide", {
+    method: "POST",
+    headers: commonHeaders,
+    body: JSON.stringify({
+      workload: { type: "classification", sensitivity: "low" },
+      targets: [
+        { id: "conflict-b", mode: "local", health: 1, capacity: 0.1, privacy: 1, estimatedLatencyMs: 20, estimatedCostUsd: 0 }
+      ]
+    })
+  });
+
+  assert.equal(second.status, 409);
+  assert.deepEqual(await second.json(), { error: "idempotency_key_reused" });
+});
+

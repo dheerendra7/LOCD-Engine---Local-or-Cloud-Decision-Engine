@@ -100,3 +100,39 @@ test("client requests hybrid execution plans", async () => {
   assert.equal(result.route, "hybrid");
   assert.equal(calls[0].url, "http://localhost:8787/v1/hybrid-plan");
 });
+
+
+test("client can send per-request idempotency and request IDs", async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify({ route: "local" }), { status: 200 });
+  };
+
+  const client = createLocdClient({ baseUrl: "http://localhost:8787", fetchImpl });
+  await client.decide(
+    { workload: { type: "batch" }, targets: [] },
+    { idempotencyKey: "retry-key", requestId: "request-123" }
+  );
+
+  assert.equal(calls[0].options.headers["idempotency-key"], "retry-key");
+  assert.equal(calls[0].options.headers["x-request-id"], "request-123");
+});
+
+test("client exposes target registration and heartbeat helpers", async () => {
+  const paths = [];
+  const fetchImpl = async (url) => {
+    paths.push(url);
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+
+  const client = createLocdClient({ baseUrl: "http://localhost:8787", fetchImpl });
+  await client.registerTarget({ id: "gpu", mode: "local" });
+  await client.heartbeat("gpu/1", { health: 1 });
+
+  assert.deepEqual(paths, [
+    "http://localhost:8787/v1/targets",
+    "http://localhost:8787/v1/targets/gpu%2F1/heartbeat"
+  ]);
+});
+

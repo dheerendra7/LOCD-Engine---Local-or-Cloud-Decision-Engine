@@ -1,5 +1,5 @@
 import http from "node:http";
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,7 @@ import { createDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { listPolicyProfiles } from "../../../packages/policy/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
 import { planHybridExecution } from "../../../packages/planner/src/index.js";
+import { createIdempotencyStore } from "../../../packages/runtime/src/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
@@ -32,10 +33,11 @@ function isAuthorized(req, configuredApiKey) {
   return safeSecretEqual(supplied, configuredApiKey);
 }
 
-function sendJson(res, status, body) {
+function sendJson(res, status, body, extraHeaders = {}) {
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store"
+    "cache-control": "no-store",
+    ...extraHeaders
   });
   res.end(JSON.stringify(body));
 }
@@ -84,12 +86,37 @@ export function createServer({
   apiKey = process.env.LOCD_API_KEY?.trim() || null,
   decisionStore = createDecisionStore({ maxEntries: 1000 }),
   targetRegistry = createTargetRegistry(),
-  targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null
+  targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null,
+  idempotencyStore = createIdempotencyStore()
 } = {}) {
   return http.createServer(async (req, res) => {
+    const requestIdHeader = String(req.headers["x-request-id"] || "").trim();
+    const requestId = requestIdHeader && requestIdHeader.length <= 128
+      ? requestIdHeader
+      : randomUUID();
+
     try {
       const url = new URL(req.url || "/", "http://localhost");
       const pathname = url.pathname;
+      res.setHeader("x-request-id", requestId);
+
+      const idempotencyKey = String(req.headers["idempotency-key"] || "").trim() || null;
+      const getReplay = body => {
+        if (!idempotencyKey || !["POST", "PUT", "PATCH"].includes(req.method)) return null;
+        return idempotencyStore.lookup(req.method + " " + pathname, idempotencyKey, body);
+      };
+      const rememberResponse = (body, status, responseBody) => {
+        if (!idempotencyKey) return;
+        idempotencyStore.remember(
+          req.method + " " + pathname,
+          idempotencyKey,
+          body,
+          { status, body: responseBody }
+        );
+      };
+      const sendReplay = replay => sendJson(res, replay.status, replay.body, {
+        "idempotency-replayed": "true"
+      });
 
       if (pathname.startsWith("/v1/") && !isAuthorized(req, apiKey)) {
         res.writeHead(401, {
@@ -112,6 +139,11 @@ export function createServer({
 
       if (req.method === "POST" && pathname === "/v1/hybrid-plan") {
         const body = await readBody(req);
+        const replay = getReplay(body);
+        if (replay) {
+          sendReplay(replay);
+          return;
+        }
         const hasRequestTargets = Array.isArray(body.targets) && body.targets.length > 0;
         const request = hasRequestTargets
           ? body
@@ -122,12 +154,19 @@ export function createServer({
           return;
         }
 
-        sendJson(res, 200, planHybridExecution(request));
+        const responseBody = planHybridExecution(request);
+        rememberResponse(body, 200, responseBody);
+        sendJson(res, 200, responseBody);
         return;
       }
 
       if (req.method === "POST" && pathname === "/v1/decide") {
         const body = await readBody(req);
+        const replay = getReplay(body);
+        if (replay) {
+          sendReplay(replay);
+          return;
+        }
         const hasRequestTargets = Array.isArray(body.targets) && body.targets.length > 0;
         const request = hasRequestTargets
           ? body
@@ -151,12 +190,19 @@ export function createServer({
           outcome: "pending"
         });
 
-        sendJson(res, 200, { ...decision, decisionId: event.id });
+        const responseBody = { ...decision, decisionId: event.id };
+        rememberResponse(body, 200, responseBody);
+        sendJson(res, 200, responseBody);
         return;
       }
 
       if (req.method === "POST" && pathname === "/v1/outcomes") {
         const body = await readBody(req);
+        const replay = getReplay(body);
+        if (replay) {
+          sendReplay(replay);
+          return;
+        }
         if (!body.decisionId) {
           sendJson(res, 400, { error: "decisionId is required" });
           return;
@@ -164,6 +210,7 @@ export function createServer({
 
         try {
           const event = decisionStore.recordOutcome(body.decisionId, body);
+          rememberResponse(body, 200, event);
           sendJson(res, 200, event);
         } catch (error) {
           if (error instanceof Error && error.message === "decision_not_found") {
@@ -186,9 +233,18 @@ export function createServer({
       }
 
       if (req.method === "POST" && pathname === "/v1/targets") {
-        const target = await targetRegistry.register(await readBody(req));
+        const body = await readBody(req);
+        const replay = getReplay(body);
+        if (replay) {
+          sendReplay(replay);
+          return;
+        }
+
+        const target = await targetRegistry.register(body);
         if (targetFile) await targetRegistry.saveToFile(targetFile);
-        sendJson(res, 201, await target.getSnapshot());
+        const responseBody = await target.getSnapshot();
+        rememberResponse(body, 201, responseBody);
+        sendJson(res, 201, responseBody);
         return;
       }
 
@@ -202,10 +258,16 @@ export function createServer({
         }
 
         const body = await readBody(req);
+        const replay = getReplay(body);
+        if (replay) {
+          sendReplay(replay);
+          return;
+        }
 
         try {
           const updated = await targetRegistry.heartbeat(id, body);
           if (targetFile) await targetRegistry.saveToFile(targetFile);
+          rememberResponse(body, 200, updated);
           sendJson(res, 200, updated);
         } catch (error) {
           if (error instanceof Error && error.message === "target_not_found") {
@@ -256,6 +318,14 @@ export function createServer({
       sendJson(res, 405, { error: "method_not_allowed" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "bad_request";
+      if (message === "idempotency_key_reused") {
+        sendJson(res, 409, { error: message });
+        return;
+      }
+      if (message === "idempotency_key_invalid") {
+        sendJson(res, 400, { error: message });
+        return;
+      }
       sendJson(res, 400, { error: message });
     }
   });
