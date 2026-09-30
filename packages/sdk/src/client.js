@@ -2,6 +2,13 @@ function joinUrl(baseUrl, pathname) {
   return String(baseUrl).replace(/\/$/, "") + pathname;
 }
 
+function operationHeaders(options = {}) {
+  const result = {};
+  if (options.idempotencyKey) result["idempotency-key"] = String(options.idempotencyKey);
+  if (options.requestId) result["x-request-id"] = String(options.requestId);
+  return result;
+}
+
 export function createLocdClient({ baseUrl, fetchImpl = globalThis.fetch, headers = {} } = {}) {
   if (!baseUrl) throw new Error("baseUrl is required");
   if (typeof fetchImpl !== "function") throw new Error("fetch implementation is required");
@@ -31,28 +38,44 @@ export function createLocdClient({ baseUrl, fetchImpl = globalThis.fetch, header
       return request("/health");
     },
 
-    async decide(decisionRequest) {
+    async decide(decisionRequest, options = {}) {
       return request("/v1/decide", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...operationHeaders(options) },
         body: JSON.stringify(decisionRequest)
       });
     },
 
-    async recordOutcome(outcome) {
+    async hybridPlan(plan, options = {}) {
+      return request("/v1/hybrid-plan", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...operationHeaders(options) },
+        body: JSON.stringify(plan)
+      });
+    },
+
+    async recordOutcome(outcome, options = {}) {
       if (!outcome?.decisionId) throw new Error("decisionId is required");
       return request("/v1/outcomes", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...operationHeaders(options) },
         body: JSON.stringify(outcome)
       });
     },
 
-    async hybridPlan(plan) {
-      return request("/v1/hybrid-plan", {
+    async registerTarget(target, options = {}) {
+      return request("/v1/targets", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(plan)
+        headers: { "content-type": "application/json", ...operationHeaders(options) },
+        body: JSON.stringify(target)
+      });
+    },
+
+    async heartbeat(targetId, telemetry, options = {}) {
+      return request("/v1/targets/" + encodeURIComponent(targetId) + "/heartbeat", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...operationHeaders(options) },
+        body: JSON.stringify(telemetry)
       });
     },
 
