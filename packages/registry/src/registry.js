@@ -31,6 +31,20 @@ export function createTargetRegistry(initialTargets = []) {
       return adapter ? adapter.getSnapshot() : null;
     },
 
+    async probe(id) {
+      const adapter = adapters.get(String(id));
+      if (!adapter) throw new Error("target_not_found");
+      if (typeof adapter.probe !== "function") {
+        throw new Error("target_does_not_support_probe");
+      }
+
+      const snapshot = await adapter.probe();
+      if (!snapshot || typeof snapshot !== "object") {
+        throw new Error("probe_returned_invalid_snapshot");
+      }
+      return snapshot;
+    },
+
     async heartbeat(id, patch = {}) {
       const adapter = adapters.get(String(id));
       if (!adapter) throw new Error("target_not_found");
