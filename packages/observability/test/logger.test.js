@@ -72,3 +72,13 @@ test("request IDs preserve valid caller values and generate fallback IDs", () =>
   assert.equal(createRequestId("req-123"), "req-123");
   assert.match(createRequestId("x".repeat(129)), /^[0-9a-f-]{36}$/);
 });
+
+test("camelCase API keys are redacted", () => {
+  const lines = [];
+  const logger = createLogger({ sink: value => lines.push(value) });
+
+  logger.info({ apiKey: "hidden-value" });
+
+  const event = JSON.parse(lines[0]);
+  assert.equal(event.apiKey, "[redacted]");
+});
