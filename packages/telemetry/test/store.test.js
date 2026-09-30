@@ -132,3 +132,105 @@ test("summary exposes outcome rate and calibration errors", () => {
   assert.equal(summary.meanAbsoluteLatencyErrorMs, 130);
   assert.equal(summary.meanAbsoluteCostErrorUsd, 0.0075);
 });
+
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { createFileDecisionStore } from "../src/index.js";
+
+test("in-memory store can restore initial events with a bounded cap", () => {
+  const store = createDecisionStore({
+    maxEntries: 2,
+    initialEvents: [
+      { id: "1", route: "local" },
+      { id: "2", route: "cloud" },
+      { id: "3", route: "private" }
+    ]
+  });
+
+  assert.deepEqual(store.list({ limit: 10 }).map(item => item.id), ["3", "2"]);
+});
+
+test("file-backed store restores history across instances", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-telemetry-"));
+  const file = path.join(dir, "events.json");
+
+  try {
+    const first = createFileDecisionStore({ filePath: file, maxEntries: 10 });
+    first.record({
+      id: "persisted-1",
+      route: "local",
+      workloadType: "classification",
+      estimatedLatencyMs: 100,
+      estimatedCostUsd: 0
+    });
+
+    const second = createFileDecisionStore({ filePath: file, maxEntries: 10 });
+    assert.deepEqual(second.list({ limit: 10 }).map(item => item.id), ["persisted-1"]);
+    assert.equal(second.summary().totalDecisions, 1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("file-backed store persists outcomes and calibration metadata", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-telemetry-outcome-"));
+  const file = path.join(dir, "events.json");
+
+  try {
+    const store = createFileDecisionStore({ filePath: file, maxEntries: 10 });
+    const event = store.record({
+      id: "decision-1",
+      route: "cloud",
+      estimatedLatencyMs: 200,
+      estimatedCostUsd: 0.01,
+      prompt: "do not persist"
+    });
+
+    store.recordOutcome(event.id, {
+      outcome: "success",
+      actualLatencyMs: 250,
+      actualCostUsd: 0.012
+    });
+
+    const restored = createFileDecisionStore({ filePath: file, maxEntries: 10 });
+    const restoredEvent = restored.list({ limit: 1 })[0];
+
+    assert.equal(restoredEvent.outcome, "success");
+    assert.equal(restoredEvent.actualLatencyMs, 250);
+    assert.equal("prompt" in restoredEvent, false);
+    assert.equal(restored.summary().meanAbsoluteLatencyErrorMs, 50);
+
+    const raw = JSON.parse(await readFile(file, "utf8"));
+    assert.equal("prompt" in raw[0], false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("file-backed store treats a missing file as empty state", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-telemetry-missing-"));
+  const file = path.join(dir, "events.json");
+
+  try {
+    const store = createFileDecisionStore({ filePath: file });
+    assert.equal(store.summary().totalDecisions, 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("invalid telemetry files fail without silently accepting malformed state", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-telemetry-invalid-"));
+  const file = path.join(dir, "events.json");
+
+  try {
+    await writeFile(file, JSON.stringify({ invalid: true }), "utf8");
+    assert.throws(
+      () => createFileDecisionStore({ filePath: file }),
+      /telemetry file must contain an array/
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

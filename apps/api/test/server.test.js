@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "../src/server.js";
+import { createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
@@ -657,6 +658,58 @@ test("request ID falls back to a generated identifier when caller value is too l
     assert.match(requestId, /^[0-9a-f-]{36}$/);
   } finally {
     await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test("file-backed telemetry survives server restart", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-api-telemetry-"));
+  const telemetryFile = path.join(dir, "events.json");
+
+  const firstStore = createFileDecisionStore({ filePath: telemetryFile, maxEntries: 100 });
+  const first = createServer({ decisionStore: firstStore });
+  await new Promise(resolve => first.listen(0, "127.0.0.1", resolve));
+  const firstUrl = "http://127.0.0.1:" + first.address().port;
+
+  try {
+    const decision = await fetch(firstUrl + "/v1/decide", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workload: { type: "classification", sensitivity: "low" },
+        targets: [
+          {
+            id: "persist-telemetry-target",
+            mode: "local",
+            health: 1,
+            capacity: 0.1,
+            privacy: 1,
+            estimatedLatencyMs: 25,
+            estimatedCostUsd: 0
+          }
+        ]
+      })
+    });
+    assert.equal(decision.status, 200);
+    await new Promise(resolve => first.close(resolve));
+
+    const secondStore = createFileDecisionStore({ filePath: telemetryFile, maxEntries: 100 });
+    const second = createServer({ decisionStore: secondStore });
+    await new Promise(resolve => second.listen(0, "127.0.0.1", resolve));
+    const secondUrl = "http://127.0.0.1:" + second.address().port;
+
+    try {
+      const metrics = await fetch(secondUrl + "/v1/metrics");
+      assert.equal(metrics.status, 200);
+      const body = await metrics.json();
+      assert.equal(body.totalDecisions, 1);
+
+      const history = await fetch(secondUrl + "/v1/decisions?limit=10");
+      assert.equal((await history.json()).decisions.length, 1);
+    } finally {
+      await new Promise(resolve => second.close(resolve));
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 });
 
