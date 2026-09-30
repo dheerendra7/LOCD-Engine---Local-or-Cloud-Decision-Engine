@@ -364,3 +364,55 @@ test("hybrid plan uses the registered target set when request targets are omitte
   await fetch(baseUrl + "/v1/targets/planner-local", { method: "DELETE" });
   await fetch(baseUrl + "/v1/targets/planner-private", { method: "DELETE" });
 });
+
+test("target heartbeat endpoint updates live target telemetry", async () => {
+  const register = await fetch(baseUrl + "/v1/targets", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      id: "api-heartbeat-target",
+      mode: "local",
+      health: 0.6,
+      capacity: 0.7,
+      privacy: 1,
+      estimatedLatencyMs: 300
+    })
+  });
+  assert.equal(register.status, 201);
+
+  const heartbeat = await fetch(baseUrl + "/v1/targets/api-heartbeat-target/heartbeat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      health: 0.98,
+      capacity: 0.15,
+      estimatedLatencyMs: 55,
+      availableMemoryGb: 18,
+      maxContextTokens: 64000
+    })
+  });
+
+  assert.equal(heartbeat.status, 200);
+  const body = await heartbeat.json();
+  assert.equal(body.health, 0.98);
+  assert.equal(body.capacity, 0.15);
+  assert.equal(body.estimatedLatencyMs, 55);
+  assert.equal(body.availableMemoryGb, 18);
+  assert.equal(body.maxContextTokens, 64000);
+  assert.match(body.lastHeartbeatAt, /^202/);
+
+  const listed = await (await fetch(baseUrl + "/v1/targets")).json();
+  const target = listed.targets.find(item => item.id === "api-heartbeat-target");
+  assert.equal(target.health, 0.98);
+
+  await fetch(baseUrl + "/v1/targets/api-heartbeat-target", { method: "DELETE" });
+});
+
+test("heartbeat returns not found for unknown targets", async () => {
+  const response = await fetch(baseUrl + "/v1/targets/missing-heartbeat/heartbeat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ health: 1 })
+  });
+  assert.equal(response.status, 404);
+});
