@@ -29,6 +29,7 @@ function normalizeSnapshot(snapshot) {
     estimatedCostUsd: finiteNumber(snapshot.estimatedCostUsd),
     availableMemoryGb: finiteNumber(snapshot.availableMemoryGb),
     maxContextTokens: finiteNumber(snapshot.maxContextTokens),
+    lastHeartbeatAt: snapshot.lastHeartbeatAt ? new Date(snapshot.lastHeartbeatAt).toISOString() : null,
     regions: [...new Set(Array.isArray(snapshot.regions) ? snapshot.regions.map(String) : [])],
     capabilities: [...new Set(Array.isArray(snapshot.capabilities) ? snapshot.capabilities.map(String) : [])]
   };
@@ -48,7 +49,12 @@ export function createStaticTargetAdapter(snapshot) {
       if (nextSnapshot?.id && String(nextSnapshot.id) !== current.id) {
         throw new Error("adapter id cannot change");
       }
-      current = normalizeSnapshot({ ...nextSnapshot, id: current.id });
+      current = normalizeSnapshot({
+        ...current,
+        ...nextSnapshot,
+        id: current.id,
+        lastHeartbeatAt: nextSnapshot?.lastHeartbeatAt ?? current.lastHeartbeatAt
+      });
       return structuredClone(current);
     }
   };
