@@ -154,7 +154,7 @@ export function createServer({
       }
 
       if (req.method === "POST" && pathname === "/v1/decide") {
-        const body = await readBody(req);
+        const body = await readBody(req, maxBodyBytes);
         const hasRequestTargets = Array.isArray(body.targets) && body.targets.length > 0;
         const request = hasRequestTargets
           ? body
@@ -183,7 +183,7 @@ export function createServer({
       }
 
       if (req.method === "POST" && pathname === "/v1/outcomes") {
-        const body = await readBody(req);
+        const body = await readBody(req, maxBodyBytes);
         if (!body.decisionId) {
           sendJson(res, 400, { error: "decisionId is required" });
           return;
@@ -228,7 +228,7 @@ export function createServer({
           return;
         }
 
-        const body = await readBody(req);
+        const body = await readBody(req, maxBodyBytes);
 
         try {
           const updated = await targetRegistry.heartbeat(id, body);
