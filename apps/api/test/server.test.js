@@ -581,3 +581,82 @@ test("reusing an idempotency key with a different payload returns 409", async ()
   assert.deepEqual(await second.json(), { error: "idempotency_key_reused" });
 });
 
+test("oversized request bodies return HTTP 413", async () => {
+  const server = createServer({ maxBodyBytes: 32 });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + server.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workload: { type: "classification", sensitivity: "low" },
+        targets: [
+          { id: "large-body", mode: "local", health: 1, capacity: 0.1, privacy: 1 }
+        ]
+      })
+    });
+
+    assert.equal(response.status, 413);
+    assert.deepEqual(await response.json(), { error: "request body too large" });
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test("rate limits apply to v1 traffic but not health checks", async () => {
+  const server = createServer({
+    rateLimiter: {
+      enabled: true,
+      consume() {
+        return {
+          allowed: false,
+          limit: 1,
+          remaining: 0,
+          resetAt: Date.now() + 5000
+        };
+      }
+    }
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + server.address().port;
+
+  try {
+    const health = await fetch(url + "/health");
+    assert.equal(health.status, 200);
+
+    const blocked = await fetch(url + "/v1/policies");
+    assert.equal(blocked.status, 429);
+    assert.equal(blocked.headers.get("x-ratelimit-limit"), "1");
+    assert.equal(blocked.headers.get("x-ratelimit-remaining"), "0");
+    assert.equal(blocked.headers.get("retry-after"), "5");
+    assert.deepEqual(await blocked.json(), { error: "rate_limit_exceeded" });
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test("invalid body limit configuration fails at server creation", () => {
+  assert.throws(
+    () => createServer({ maxBodyBytes: 0 }),
+    /maxBodyBytes must be >= 1/
+  );
+});
+
+test("request ID falls back to a generated identifier when caller value is too long", async () => {
+  const server = createServer();
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + server.address().port;
+
+  try {
+    const response = await fetch(url + "/health", {
+      headers: { "x-request-id": "x".repeat(129) }
+    });
+    const requestId = response.headers.get("x-request-id");
+    assert.match(requestId, /^[0-9a-f-]{36}$/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
