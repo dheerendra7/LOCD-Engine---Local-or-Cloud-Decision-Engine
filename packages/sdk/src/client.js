@@ -31,27 +31,27 @@ export function createLocdClient({ baseUrl, fetchImpl = globalThis.fetch, header
       return request("/health");
     },
 
-    async decide(decisionRequest) {
+    async decide(decisionRequest, options = {}) {
       return request("/v1/decide", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...operationHeaders(options) },
         body: JSON.stringify(decisionRequest)
       });
     },
 
-    async recordOutcome(outcome) {
+    async recordOutcome(outcome, options = {}) {
       if (!outcome?.decisionId) throw new Error("decisionId is required");
       return request("/v1/outcomes", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...operationHeaders(options) },
         body: JSON.stringify(outcome)
       });
     },
 
-    async hybridPlan(plan) {
+    async hybridPlan(plan, options = {}) {
       return request("/v1/hybrid-plan", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...operationHeaders(options) },
         body: JSON.stringify(plan)
       });
     },
