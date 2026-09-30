@@ -137,6 +137,19 @@ A request can select a profile with policy.profile and override individual field
 
 ## Target registry
 
+## Target heartbeat
+
+### POST /v1/targets/:id/heartbeat
+
+Accepts a partial target telemetry update and records a server-side lastHeartbeatAt timestamp.
+
+Supported fields are limited to execution metadata such as availability, health, capacity, privacy, estimated latency/cost, memory/context capacity, regions and capabilities. Target identity and mode are not changed by a heartbeat.
+
+When the target adapter does not support updates, the endpoint returns HTTP 501.
+
+For placement policies that require fresh infrastructure telemetry, set policy.maxHeartbeatAgeMs. A candidate with a missing or stale heartbeat is then rejected before scoring.
+
+
 ### GET /v1/targets
 
 Lists the normalized targets currently registered in the control plane process.
