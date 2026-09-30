@@ -136,3 +136,15 @@ test("execute refuses dry-run mode", async () => {
     /requires live mode/
   );
 });
+
+test("provider adapter rejects invalid target modes", () => {
+  assert.throws(
+    () => createOpenAICompatibleAdapter({
+      id: "bad-mode",
+      targetId: "bad-mode",
+      baseUrl: "https://inference.example.com",
+      mode: "satellite"
+    }),
+    /mode must be local, private, cloud or hybrid/
+  );
+});
