@@ -38,6 +38,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DecisionResponse"
+        "413":
+          description: Request body too large
+        "429":
+          description: Rate limit exceeded
         "400":
           description: Invalid request
         "401":
@@ -91,6 +95,10 @@ paths:
       responses:
         "201":
           description: Target registered
+        "413":
+          description: Request body too large
+        "429":
+          description: Rate limit exceeded
         "400":
           description: Invalid target
   /v1/targets/{id}:
@@ -129,6 +137,10 @@ paths:
       responses:
         "200":
           description: Hybrid plan result
+        "413":
+          description: Request body too large
+        "429":
+          description: Rate limit exceeded
         "400":
           description: Invalid plan request
         "401":
@@ -175,6 +187,10 @@ paths:
       responses:
         "200":
           description: Heartbeat accepted
+        "413":
+          description: Request body too large
+        "429":
+          description: Rate limit exceeded
         "400":
           description: Invalid heartbeat
         "401":
@@ -202,6 +218,10 @@ paths:
       responses:
         "200":
           description: Outcome recorded
+        "413":
+          description: Request body too large
+        "429":
+          description: Rate limit exceeded
         "400":
           description: Invalid outcome request
         "401":

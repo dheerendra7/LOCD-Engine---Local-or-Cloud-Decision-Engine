@@ -241,3 +241,13 @@ Every request also receives an X-Request-ID response header. Callers may provide
 
 Idempotency state is process-local and bounded. Multi-instance production deployments require shared durable coordination before relying on replay behavior across replicas.
 
+
+## API hardening
+
+JSON request bodies are limited by LOCD_MAX_BODY_BYTES. Oversized bodies return HTTP 413 before route evaluation.
+
+Set LOCD_RATE_LIMIT_RPM to a positive value to enable a process-local per-client requests-per-minute limit for /v1 traffic. Responses expose X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset. HTTP 429 responses include Retry-After.
+
+Client identity uses the direct socket address by default. Set LOCD_TRUST_PROXY=true only when the deployment proxy is trusted and supplies X-Forwarded-For.
+
+The limiter is process-local. Multi-instance production deployments need shared coordination for global quotas.
