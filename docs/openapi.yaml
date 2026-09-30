@@ -18,6 +18,9 @@ paths:
                 $ref: "#/components/schemas/Health"
   /v1/decide:
     post:
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/RequestId"
       summary: Decide execution placement
       security:
         - bearerAuth: []
@@ -72,6 +75,9 @@ paths:
         "200":
           description: Registered targets
     post:
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/RequestId"
       security:
         - bearerAuth: []
         - apiKeyHeader: []
@@ -107,6 +113,9 @@ paths:
 
   /v1/hybrid-plan:
     post:
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/RequestId"
       security:
         - bearerAuth: []
         - apiKeyHeader: []
@@ -129,6 +138,9 @@ paths:
 
   /v1/targets/{id}/heartbeat:
     post:
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/RequestId"
       security:
         - bearerAuth: []
         - apiKeyHeader: []
@@ -174,6 +186,9 @@ paths:
 
   /v1/outcomes:
     post:
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/RequestId"
       security:
         - bearerAuth: []
         - apiKeyHeader: []
@@ -229,6 +244,21 @@ components:
       type: apiKey
       in: header
       name: X-LOCD-API-Key
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 256
+    RequestId:
+      name: X-Request-ID
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 128
   schemas:
     Target:
       type: object
