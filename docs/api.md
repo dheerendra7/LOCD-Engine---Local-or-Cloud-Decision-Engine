@@ -235,7 +235,7 @@ All POST endpoints under /v1 support an optional Idempotency-Key header.
 
 When the same key and request body are received within the bounded in-memory retention window, LOCD returns the original response and sets Idempotency-Replayed: true.
 
-Reusing the same key with a different request body returns HTTP 409 with error idempotency_key_reused.
+Reusing the same key with a different request body returns HTTP 409 with error idempotency_key_reused. A concurrent duplicate that arrives while the original request is still running returns HTTP 409 with error idempotency_request_in_progress.
 
 Every request also receives an X-Request-ID response header. Callers may provide their own value (up to 128 characters) for distributed tracing.
 
