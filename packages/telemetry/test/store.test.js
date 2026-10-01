@@ -234,3 +234,24 @@ test("invalid telemetry files fail without silently accepting malformed state", 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("telemetry preserves bounded target utilization when supplied", () => {
+  const store = createDecisionStore();
+  const event = store.record({
+    route: "local",
+    targetId: "gpu",
+    targetUtilization: 0.72
+  });
+
+  assert.equal(event.targetUtilization, 0.72);
+  assert.equal(store.list({ limit: 1 })[0].targetUtilization, 0.72);
+});
+
+test("telemetry clamps out-of-range target utilization", () => {
+  const store = createDecisionStore();
+  const low = store.record({ route: "local", targetUtilization: -0.5 });
+  const high = store.record({ route: "local", targetUtilization: 1.5 });
+
+  assert.equal(low.targetUtilization, 0);
+  assert.equal(high.targetUtilization, 1);
+});
