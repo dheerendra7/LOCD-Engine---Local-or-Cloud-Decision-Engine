@@ -94,3 +94,24 @@ test("coordinated consumer validates backend configuration", () => {
     /must implement get/
   );
 });
+
+
+test("coordinated idempotency can release failed claims", async () => {
+  const store = createInMemoryCoordinationStore();
+  const one = createCoordinatedIdempotencyStore({ store, namespace: "release-test" });
+
+  assert.deepEqual(
+    await one.claim("scope", "key", { x: 1 }),
+    { claimed: true }
+  );
+
+  assert.equal(
+    await one.release("scope", "key", { x: 1 }),
+    true
+  );
+
+  assert.deepEqual(
+    await one.claim("scope", "key", { x: 1 }),
+    { claimed: true }
+  );
+});
