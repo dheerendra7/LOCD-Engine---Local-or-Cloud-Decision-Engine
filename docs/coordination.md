@@ -44,3 +44,18 @@ Use shared coordination before putting more than one LOCD API instance behind a 
 LOCD includes a SQLite implementation of the shared coordination contract. It supports atomic set-if-absent and increment operations across separate connections to the same database file.
 
 This provides cross-process coordination on one host or shared filesystem. Multi-host deployments still require a network-accessible shared coordination service.
+
+## Network state service
+
+LOCD can use a remote state service for coordination-backed rate limiting and idempotency.
+
+Set:
+
+    LOCD_COORDINATION_URL=http://state-service:8890
+    LOCD_COORDINATION_API_KEY=...
+
+When LOCD_STATE_DB_FILE is also configured, the local SQLite coordination backend takes precedence.
+
+The reference state service in apps/state-service is backed by SQLite and exposes the coordination contract over authenticated HTTP. It is intended for a controlled internal network and does not by itself provide a highly available distributed datastore.
+
+Do not expose the state service directly to the public internet without an authenticated network boundary, TLS and additional operational controls.
