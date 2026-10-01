@@ -57,3 +57,72 @@ test("history is bounded", () => {
   store.remember("c", "3", {}, {});
   assert.equal(store.size(), 2);
 });
+
+
+test("claim prevents concurrent duplicate work and supports release", () => {
+  const store = createIdempotencyStore();
+
+  assert.deepEqual(
+    store.claim("POST /v1/execute", "same", { x: 1 }),
+    { claimed: true }
+  );
+
+  assert.deepEqual(
+    store.claim("POST /v1/execute", "same", { x: 1 }),
+    { claimed: false, reason: "in_progress" }
+  );
+
+  assert.throws(
+    () => store.claim("POST /v1/execute", "same", { x: 2 }),
+    /idempotency_key_reused/
+  );
+
+  assert.equal(
+    store.release("POST /v1/execute", "same", { x: 1 }),
+    true
+  );
+
+  assert.deepEqual(
+    store.claim("POST /v1/execute", "same", { x: 1 }),
+    { claimed: true }
+  );
+});
+
+test("completed claims become replayable through remember", () => {
+  const store = createIdempotencyStore();
+
+  assert.equal(store.claim("scope", "key", { x: 1 }).claimed, true);
+  store.remember("scope", "key", { x: 1 }, {
+    status: 200,
+    body: { ok: true }
+  });
+
+  assert.deepEqual(
+    store.claim("scope", "key", { x: 1 }),
+    {
+      claimed: false,
+      reason: "completed",
+      response: { status: 200, body: { ok: true }, replayed: true }
+    }
+  );
+});
+
+test("expired processing claim can be reclaimed", async () => {
+  const store = createIdempotencyStore();
+  assert.deepEqual(
+    store.claim("scope", "key", { x: 1 }, 5),
+    { claimed: true }
+  );
+
+  await new Promise(resolve => setTimeout(resolve, 10));
+
+  assert.equal(store.claim("scope", "key", { x: 1 }, 5).claimed, true);
+});
+
+test("invalid lock TTL is rejected", () => {
+  const store = createIdempotencyStore();
+  assert.throws(
+    () => store.claim("scope", "key", {}, 0),
+    /idempotency_lock_ttl_invalid/
+  );
+});
