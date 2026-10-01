@@ -227,7 +227,9 @@ export function createServer({
     throw new Error("calibrator must implement apply, observe and hydrate");
   }
   try {
-    calibrator.hydrate(decisionStore.list({ limit: 5000 }));
+    if (calibrator.snapshot().length === 0) {
+      calibrator.hydrate(decisionStore.list({ limit: 5000 }));
+    }
   } catch (error) {
     logger.warn({
       event: "calibration_hydrate_failed",
