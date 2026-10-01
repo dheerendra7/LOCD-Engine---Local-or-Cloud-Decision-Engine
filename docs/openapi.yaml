@@ -558,3 +558,7 @@ components:
 # execute: POST /v1/execute
 # admin: all scopes
 # Missing credentials -> 401; valid credential without required scope -> 403.
+
+# Provider configuration
+# type: openai-compatible | ollama
+# apiKeyEnv references a server-side environment variable; raw keys are not stored in provider config files.
