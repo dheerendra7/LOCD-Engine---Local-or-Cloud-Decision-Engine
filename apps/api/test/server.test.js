@@ -2020,3 +2020,144 @@ test("network State Service can provide shared telemetry across API instances", 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+
+test("concurrent API execution claims prevent duplicate live work", async () => {
+  const coordination = createInMemoryCoordinationStore();
+  const authorizer = createScopedAuthorizer({
+    keys: [{ id: "executor", secret: "executor-secret", scopes: ["execute"] }]
+  });
+  let executions = 0;
+
+  const executionRegistry = createExecutionRegistry([{
+    id: "slow-live",
+    targetId: "slow-live-target",
+    async execute() {
+      executions += 1;
+      await new Promise(resolve => setTimeout(resolve, 60));
+      return { ok: true };
+    }
+  }]);
+
+  const serverA = createServer({
+    authorizer,
+    coordinationStore: coordination,
+    executionEnabled: true,
+    executionRegistry,
+    rateLimitMaxRequests: 100
+  });
+  const serverB = createServer({
+    authorizer,
+    coordinationStore: coordination,
+    executionEnabled: true,
+    executionRegistry,
+    rateLimitMaxRequests: 100
+  });
+
+  await Promise.all([
+    new Promise(resolve => serverA.listen(0, "127.0.0.1", resolve)),
+    new Promise(resolve => serverB.listen(0, "127.0.0.1", resolve))
+  ]);
+
+  const urlA = "http://127.0.0.1:" + serverA.address().port;
+  const urlB = "http://127.0.0.1:" + serverB.address().port;
+  const headers = {
+    authorization: "Bearer executor-secret",
+    "content-type": "application/json",
+    "idempotency-key": "concurrent-live-1"
+  };
+  const body = JSON.stringify({
+    plan: {
+      valid: true,
+      steps: [{ id: "live-step", targetId: "slow-live-target" }]
+    },
+    mode: "live"
+  });
+
+  try {
+    const firstPromise = fetch(urlA + "/v1/execute", {
+      method: "POST",
+      headers,
+      body
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 5));
+
+    const second = await fetch(urlB + "/v1/execute", {
+      method: "POST",
+      headers,
+      body
+    });
+
+    const first = await firstPromise;
+    const statuses = [first.status, second.status].sort((a, b) => a - b);
+
+    assert.deepEqual(statuses, [200, 409]);
+    assert.equal(executions, 1);
+    assert.deepEqual(await second.json(), { error: "idempotency_request_in_progress" });
+  } finally {
+    await Promise.all([
+      new Promise(resolve => serverA.close(resolve)),
+      new Promise(resolve => serverB.close(resolve))
+    ]);
+  }
+});
+
+test("failed execution releases an idempotency claim for a retry", async () => {
+  const authorizer = createScopedAuthorizer({
+    keys: [{ id: "executor", secret: "executor-secret", scopes: ["execute"] }]
+  });
+  let executions = 0;
+
+  const executionRegistry = createExecutionRegistry([{
+    id: "flaky",
+    targetId: "flaky-target",
+    async execute() {
+      executions += 1;
+      if (executions === 1) throw new Error("provider_down");
+      return { ok: true };
+    }
+  }]);
+
+  const server = createServer({
+    authorizer,
+    executionEnabled: true,
+    executionRegistry
+  });
+
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + server.address().port;
+
+  const headers = {
+    authorization: "Bearer executor-secret",
+    "content-type": "application/json",
+    "idempotency-key": "retry-after-failure"
+  };
+  const body = JSON.stringify({
+    plan: {
+      valid: true,
+      steps: [{ id: "flaky-step", targetId: "flaky-target" }]
+    },
+    mode: "live"
+  });
+
+  try {
+    const first = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers,
+      body
+    });
+    assert.equal(first.status, 400);
+
+    const second = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers,
+      body
+    });
+    assert.equal(second.status, 200);
+    assert.equal((await second.json()).status, "completed");
+    assert.equal(executions, 2);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
