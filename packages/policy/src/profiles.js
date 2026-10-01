@@ -165,7 +165,7 @@ export function resolvePolicy(policy = {}, context = {}) {
   }
 
   const rules = rawRules.map(validateRule);
-  const sorted = [...rules].sort((a, b) => b.priority - a.priority || a.order - b.order);
+  const sorted = [...rules].sort((a, b) => a.priority - b.priority || a.order - b.order);
   const matchedRules = [];
 
   for (const rule of sorted) {
