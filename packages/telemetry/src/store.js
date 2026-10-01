@@ -53,7 +53,8 @@ export function normalizeDecisionEvent(event) {
     outcome,
     actualLatencyMs: nonNegative(event.actualLatencyMs),
     actualCostUsd: nonNegative(event.actualCostUsd),
-    errorClass: event.errorClass ? String(event.errorClass) : null
+    errorClass: event.errorClass ? String(event.errorClass) : null,
+    outcomeTimestamp: event.outcomeTimestamp ? iso(event.outcomeTimestamp) : null
   };
 }
 
