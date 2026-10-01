@@ -1,0 +1,19 @@
+{
+  "keys": [
+    {
+      "id": "dashboard",
+      "keyEnv": "LOCD_DASHBOARD_KEY",
+      "scopes": ["read"]
+    },
+    {
+      "id": "operator",
+      "keyEnv": "LOCD_OPERATOR_KEY",
+      "scopes": ["read", "decide", "targets:write", "telemetry:write"]
+    },
+    {
+      "id": "executor",
+      "keyEnv": "LOCD_EXECUTOR_KEY",
+      "scopes": ["read", "decide", "execute", "telemetry:write"]
+    }
+  ]
+}
