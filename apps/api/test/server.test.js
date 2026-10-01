@@ -10,7 +10,6 @@ import { createSQLiteStateStores } from "../../../packages/sqlite/src/index.js";
 import { createHTTPStateStores } from "../../../packages/state-client/src/index.js";
 import { createStateServiceServer } from "../../state-service/src/server.js";
 import { createHTTPCoordinationStore } from "../../../packages/state-client/src/index.js";
-import { createStateServiceServer } from "../../state-service/src/server.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
 import { createExecutionRegistry } from "../../../packages/execution/src/index.js";
 import { createInMemoryCoordinationStore } from "../../../packages/coordination/src/index.js";
