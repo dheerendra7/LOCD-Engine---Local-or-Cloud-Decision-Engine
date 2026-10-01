@@ -1352,3 +1352,34 @@ test("live execution requires execute scope even when execution is enabled", asy
     await new Promise(resolve => scopedServer.close(resolve));
   }
 });
+
+test("server provider config loads native Ollama adapter into the target registry", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-ollama-bootstrap-"));
+  const file = path.join(dir, "providers.json");
+
+  try {
+    await writeFile(file, JSON.stringify({
+      providers: [{
+        id: "bootstrap-ollama",
+        targetId: "bootstrap-ollama",
+        type: "ollama",
+        mode: "local",
+        baseUrl: "http://localhost:11434/api",
+        model: "llama3.2"
+      }]
+    }), "utf8");
+
+    const registry = await createConfiguredTargetRegistry({
+      providerFile: file,
+      env: {},
+      fetchImpl: async () => new Response(JSON.stringify({ models: [] }), { status: 200 })
+    });
+
+    assert.equal(registry.has("bootstrap-ollama"), true);
+    const snapshot = await registry.probe("bootstrap-ollama");
+    assert.equal(snapshot.available, true);
+    assert.equal(snapshot.mode, "local");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
