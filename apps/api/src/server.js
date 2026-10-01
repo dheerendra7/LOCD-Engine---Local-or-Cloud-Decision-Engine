@@ -109,12 +109,13 @@ export async function createConfiguredExecutionRegistry({
   const snapshots = await targetRegistry.list();
   for (const target of snapshots) {
     if (!executionRegistry.has(target.id)) {
-      executionRegistry.register(
-        createDryRunExecutionAdapter({
+      executionRegistry.register({
+        ...createDryRunExecutionAdapter({
           id: "dry-run:" + target.id,
           targetId: target.id
-        })
-      );
+        }),
+        dryRunOnly: true
+      });
     }
   }
 
