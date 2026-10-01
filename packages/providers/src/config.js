@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { createOpenAICompatibleAdapter } from "./openai-compatible.js";
 
 function requiredString(value, field) {
@@ -36,6 +37,26 @@ export function createProviderFromConfig(config, env = process.env, fetchImpl = 
     apiKey,
     fetchImpl
   });
+}
+
+export async function loadProvidersFromFile(filePath, env = process.env, fetchImpl = globalThis.fetch) {
+  if (!filePath) throw new Error("filePath is required");
+
+  let parsed;
+  try {
+    const raw = await readFile(filePath, "utf8");
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      throw new Error("provider config file not found: " + filePath);
+    }
+    if (error instanceof SyntaxError) {
+      throw new Error("provider config file is invalid JSON");
+    }
+    throw error;
+  }
+
+  return createProvidersFromConfig(parsed, env, fetchImpl);
 }
 
 export function createProvidersFromConfig(config, env = process.env, fetchImpl = globalThis.fetch) {
