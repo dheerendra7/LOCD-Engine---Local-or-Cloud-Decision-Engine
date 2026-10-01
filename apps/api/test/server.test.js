@@ -1173,3 +1173,45 @@ test("configured execution registry adds dry-run fallbacks for static targets", 
   assert.equal(registry.has("static-target"), true);
   assert.equal(registry.has("dry-run:static-target"), false);
 });
+
+test("live execution rejects static target fallbacks", async () => {
+  const executionServer = createServer({
+    targetRegistry: createTargetRegistry([{
+      id: "static-live-target",
+      mode: "local",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1
+    }]),
+    executionEnabled: true,
+    apiKey: "server-secret"
+  });
+
+  await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + executionServer.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer server-secret"
+      },
+      body: JSON.stringify({
+        mode: "live",
+        plan: {
+          valid: true,
+          steps: [{ id: "static-live-step", targetId: "static-live-target" }]
+        }
+      })
+    });
+
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.status, "failed");
+    assert.equal(body.receipts[0].errorClass, "execution_adapter_dry_run_only");
+  } finally {
+    await new Promise(resolve => executionServer.close(resolve));
+  }
+});
