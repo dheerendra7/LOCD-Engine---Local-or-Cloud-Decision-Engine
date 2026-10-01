@@ -60,7 +60,7 @@ export function createSQLiteDecisionStore({ filePath, maxEntries = 5000, databas
       DELETE FROM decision_events
       WHERE id IN (
         SELECT id FROM decision_events
-        ORDER BY timestamp DESC
+        ORDER BY timestamp DESC, rowid DESC
         LIMIT -1 OFFSET ?
       )
     `).run(maxEntries);
@@ -127,13 +127,13 @@ export function createSQLiteDecisionStore({ filePath, maxEntries = 5000, databas
     list({ limit = 50 } = {}) {
       const safeLimit = Math.min(maxEntries, Math.max(1, Number(limit) || 50));
       return db.prepare(
-        "SELECT * FROM decision_events ORDER BY timestamp DESC LIMIT ?"
+        "SELECT * FROM decision_events ORDER BY timestamp DESC, rowid DESC LIMIT ?"
       ).all(safeLimit).map(rowToEvent);
     },
 
     summary() {
       const events = db.prepare(
-        "SELECT * FROM decision_events ORDER BY timestamp ASC LIMIT ?"
+        "SELECT * FROM decision_events ORDER BY timestamp ASC, rowid ASC LIMIT ?"
       ).all(maxEntries).map(rowToEvent);
       return createDecisionStore({ maxEntries, initialEvents: events }).summary();
     },
