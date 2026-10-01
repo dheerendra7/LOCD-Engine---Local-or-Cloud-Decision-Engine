@@ -121,7 +121,8 @@ export async function createConfiguredExecutionRegistry({
 export function createGracefulShutdown({
   server,
   probeScheduler = null,
-  logger = createLogger({ level: "info" })
+  logger = createLogger({ level: "info" }),
+  onClosed = null
 } = {}) {
   if (!server || typeof server.close !== "function") {
     throw new Error("server is required");
@@ -140,9 +141,18 @@ export function createGracefulShutdown({
 
     if (probeScheduler) probeScheduler.stop();
 
-    server.close(() => {
-      logger.info({ event: "shutdown_complete", signal });
-      resolve(true);
+    server.close(async () => {
+      try {
+        if (typeof onClosed === "function") await onClosed();
+        logger.info({ event: "shutdown_complete", signal });
+        resolve(true);
+      } catch (error) {
+        logger.error({
+          event: "shutdown_close_error",
+          errorClass: error instanceof Error ? error.message : "shutdown_close_error"
+        });
+        resolve(false);
+      }
     });
   });
 }
