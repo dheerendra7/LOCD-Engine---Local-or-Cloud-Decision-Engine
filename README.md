@@ -35,7 +35,6 @@ Possible destinations:
 - Scoped API authorization with legacy full-access compatibility.
 - Structured observability utilities with secret redaction.
 - Server-side provider configuration with environment-backed secrets.
-- Scoped API authorization with environment-backed credentials.
 - Browser dashboard shell.
 - Live provider probes and server-side provider configuration.
 - Optional automatic probe scheduling with bounded concurrency.
