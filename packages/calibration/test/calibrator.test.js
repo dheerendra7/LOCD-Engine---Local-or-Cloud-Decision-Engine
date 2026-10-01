@@ -153,3 +153,83 @@ test("invalid calibration configuration fails clearly", () => {
     /minSamples must be a positive integer/
   );
 });
+
+test("utilization-aware calibration keeps separate factors for low and saturated load", () => {
+  const calibrator = createCalibrator({ minSamples: 1, alpha: 1 });
+
+  calibrator.observe({
+    targetId: "gpu",
+    workloadType: "llm",
+    utilization: 0.10,
+    estimatedLatencyMs: 100,
+    actualLatencyMs: 120,
+    outcome: "success"
+  });
+
+  calibrator.observe({
+    targetId: "gpu",
+    workloadType: "llm",
+    utilization: 0.95,
+    estimatedLatencyMs: 100,
+    actualLatencyMs: 220,
+    outcome: "success"
+  });
+
+  const low = calibrator.apply([{
+    id: "gpu",
+    capacity: 0.10,
+    estimatedLatencyMs: 100
+  }], "llm")[0];
+
+  const saturated = calibrator.apply([{
+    id: "gpu",
+    capacity: 0.95,
+    estimatedLatencyMs: 100
+  }], "llm")[0];
+
+  assert.equal(low.estimatedLatencyMs, 120);
+  assert.equal(saturated.estimatedLatencyMs, 220);
+});
+
+test("calibration falls back to unknown-utilization history when no band exists", () => {
+  const calibrator = createCalibrator({ minSamples: 1, alpha: 1 });
+
+  calibrator.observe({
+    targetId: "gpu",
+    workloadType: "llm",
+    estimatedLatencyMs: 100,
+    actualLatencyMs: 150,
+    outcome: "success"
+  });
+
+  const adjusted = calibrator.apply([{
+    id: "gpu",
+    capacity: 0.70,
+    estimatedLatencyMs: 100
+  }], "llm")[0];
+
+  assert.equal(adjusted.estimatedLatencyMs, 150);
+});
+
+test("custom utilization bands are accepted and exposed in config", () => {
+  const calibrator = createCalibrator({
+    utilizationBands: {
+      low: 0.20,
+      moderate: 0.50,
+      high: 0.80
+    }
+  });
+
+  assert.deepEqual(calibrator.config.utilizationBands, {
+    low: 0.20,
+    moderate: 0.50,
+    high: 0.80
+  });
+
+  assert.throws(
+    () => createCalibrator({
+      utilizationBands: { low: 0.5, moderate: 0.4, high: 0.8 }
+    }),
+    /utilizationBands must be increasing/
+  );
+});
