@@ -1354,3 +1354,35 @@ test("invalid scoped credentials return 401 before route handling", async () => 
     await new Promise(resolve => testServer.close(resolve));
   }
 });
+
+test("configured API authorizer loads scoped keys from a file", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-api-auth-config-"));
+  const file = path.join(dir, "api-keys.json");
+
+  try {
+    await writeFile(file, JSON.stringify({
+      keys: [{
+        id: "reader",
+        keyEnv: "READER_KEY",
+        scopes: ["read"]
+      }]
+    }), "utf8");
+
+    const authorizer = await createConfiguredAuthorizer({
+      authFile: file,
+      legacyKey: null,
+      env: { READER_KEY: "reader-secret" }
+    });
+
+    const authenticated = authorizer.authenticate({
+      headers: { "x-locd-api-key": "reader-secret" }
+    });
+
+    assert.equal(authenticated.authenticated, true);
+    assert.equal(authenticated.principal.id, "reader");
+    assert.equal(authorizer.authorize(authenticated.principal, "read"), true);
+    assert.equal(authorizer.authorize(authenticated.principal, "execute"), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
