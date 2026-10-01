@@ -197,7 +197,7 @@ export function requiredScopeForRequest(method, pathname) {
   }
 
   if (method === "POST" && pathname === "/v1/execute") {
-    return "execute";
+    return "read";
   }
 
   if (method === "POST" && pathname === "/v1/targets") {
