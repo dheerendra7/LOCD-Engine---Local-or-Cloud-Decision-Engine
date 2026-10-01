@@ -7,6 +7,8 @@ import { createCalibrator } from "../../../packages/calibration/src/index.js";
 import { createScopedAuthorizer } from "../../../packages/auth/src/index.js";
 import { createLogger } from "../../../packages/observability/src/index.js";
 import { createSQLiteStateStores } from "../../../packages/sqlite/src/index.js";
+import { createHTTPCoordinationStore } from "../../../packages/state-client/src/index.js";
+import { createStateServiceServer } from "../../state-service/src/server.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
 import { createExecutionRegistry } from "../../../packages/execution/src/index.js";
 import { createInMemoryCoordinationStore } from "../../../packages/coordination/src/index.js";
@@ -1848,3 +1850,76 @@ test("SQLite state can back multiple API instances for telemetry and coordinatio
   }
 });
 
+
+
+test("two LOCD API instances can coordinate through network State Service", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-network-state-"));
+  const file = path.join(dir, "state.db");
+  const stores = createSQLiteStateStores({ filePath: file, maxEntries: 100 });
+  const stateServer = createStateServiceServer({
+    stores,
+    apiKey: "network-secret"
+  });
+
+  const coordination = createHTTPCoordinationStore({
+    baseUrl: "http://127.0.0.1:0",
+    apiKey: "network-secret"
+  });
+
+  await new Promise(resolve => stateServer.listen(0, "127.0.0.1", resolve));
+  const stateUrl = "http://127.0.0.1:" + stateServer.address().port;
+  const sharedA = createHTTPCoordinationStore({
+    baseUrl: stateUrl,
+    apiKey: "network-secret"
+  });
+  const sharedB = createHTTPCoordinationStore({
+    baseUrl: stateUrl,
+    apiKey: "network-secret"
+  });
+
+  const serverA = createServer({
+    coordinationStore: sharedA,
+    rateLimitMaxRequests: 1,
+    rateLimitWindowMs: 60_000,
+    trustProxy: true
+  });
+  const serverB = createServer({
+    coordinationStore: sharedB,
+    rateLimitMaxRequests: 1,
+    rateLimitWindowMs: 60_000,
+    trustProxy: true
+  });
+
+  await Promise.all([
+    new Promise(resolve => serverA.listen(0, "127.0.0.1", resolve)),
+    new Promise(resolve => serverB.listen(0, "127.0.0.1", resolve))
+  ]);
+
+  const urlA = "http://127.0.0.1:" + serverA.address().port;
+  const urlB = "http://127.0.0.1:" + serverB.address().port;
+
+  try {
+    const first = await fetch(urlA + "/v1/metrics", {
+      headers: { "x-forwarded-for": "198.51.100.11" }
+    });
+    assert.equal(first.status, 200);
+
+    const second = await fetch(urlB + "/v1/metrics", {
+      headers: { "x-forwarded-for": "198.51.100.11" }
+    });
+    assert.equal(second.status, 429);
+  } finally {
+    await Promise.all([
+      new Promise(resolve => serverA.close(resolve)),
+      new Promise(resolve => serverB.close(resolve)),
+      new Promise(resolve => stateServer.close(resolve))
+    ]);
+    stores.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+
+  await assert.rejects(
+    () => coordination.get("unused"),
+    /fetch failed/
+  );
+});
