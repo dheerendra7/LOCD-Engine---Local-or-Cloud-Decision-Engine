@@ -464,13 +464,13 @@ test("higher-priority rules win deterministic scalar conflicts", () => {
           id: "low-priority",
           priority: 10,
           when: { workloadType: "finance" },
-          set: { sensitiveDataMode: "prefer-local" }
+          set: { allowedModes: ["local"] }
         },
         {
           id: "high-priority",
           priority: 100,
           when: { workloadType: "finance" },
-          set: { sensitiveDataMode: "private-only" }
+          set: { allowedModes: ["private"] }
         }
       ]
     },
