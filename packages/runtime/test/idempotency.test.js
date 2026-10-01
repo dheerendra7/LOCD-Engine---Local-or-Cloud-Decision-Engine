@@ -57,3 +57,50 @@ test("history is bounded", () => {
   store.remember("c", "3", {}, {});
   assert.equal(store.size(), 2);
 });
+
+test("local idempotency claims prevent concurrent duplicate work", () => {
+  const store = createIdempotencyStore();
+
+  assert.deepEqual(
+    store.claim("POST /v1/execute", "same-key", { x: 1 }),
+    { claimed: true }
+  );
+
+  assert.deepEqual(
+    store.claim("POST /v1/execute", "same-key", { x: 1 }),
+    { claimed: false, reason: "in_progress" }
+  );
+
+  assert.throws(
+    () => store.claim("POST /v1/execute", "same-key", { x: 2 }),
+    /idempotency_key_reused/
+  );
+
+  store.remember(
+    "POST /v1/execute",
+    "same-key",
+    { x: 1 },
+    { status: 200, body: { executionId: "e-1" } }
+  );
+
+  assert.deepEqual(
+    store.claim("POST /v1/execute", "same-key", { x: 1 }),
+    {
+      claimed: false,
+      reason: "completed",
+      response: {
+        status: 200,
+        body: { executionId: "e-1" },
+        replayed: true
+      }
+    }
+  );
+});
+
+test("invalid local idempotency lock TTL fails clearly", () => {
+  const store = createIdempotencyStore();
+  assert.throws(
+    () => store.claim("scope", "key", {}, 0),
+    /idempotency_lock_ttl_invalid/
+  );
+});
