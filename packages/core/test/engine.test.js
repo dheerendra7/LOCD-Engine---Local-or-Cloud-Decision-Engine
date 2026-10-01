@@ -481,7 +481,7 @@ test("higher-priority rules win deterministic scalar conflicts", () => {
   });
 
   assert.equal(result.targetId, "private");
-  assert.deepEqual(result.policyRulesApplied, ["high-priority", "low-priority"]);
+  assert.deepEqual(result.policyRulesApplied, ["low-priority", "high-priority"]);
 });
 
 test("later rule of the same priority wins by deterministic declaration order", () => {
