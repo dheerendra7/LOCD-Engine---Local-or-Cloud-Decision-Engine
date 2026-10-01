@@ -55,7 +55,9 @@ export function createProbeScheduler({
   }
 
   async function runOnce() {
-    const targets = await registry.list();
+    const targets = typeof registry.listProbeable === "function"
+      ? await registry.listProbeable()
+      : await registry.list();
     const results = [];
     let cursor = 0;
 
@@ -86,6 +88,7 @@ export function createProbeScheduler({
           errorClass: error instanceof Error ? error.message : "scheduler_failed"
         }));
       }, intervalMs);
+      timer?.unref?.();
       return true;
     },
 
