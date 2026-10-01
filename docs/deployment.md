@@ -78,3 +78,9 @@ Providers remain unavailable until their first successful probe unless explicitl
 Use `GET /health` for liveness and `GET /ready` for readiness. Both are intentionally public so load balancers and platform health checks can call them without application credentials.
 
 The application handles SIGTERM/SIGINT and stops the probe scheduler before closing the HTTP listener.
+
+## Telemetry calibration
+
+LOCD_CALIBRATION_ENABLED enables outcome-driven latency/cost estimate correction. For reproducible rollout, enable it only after the telemetry pipeline and outcome data are trustworthy.
+
+Calibration state can be rebuilt from durable telemetry on restart.
