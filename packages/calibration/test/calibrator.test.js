@@ -233,3 +233,17 @@ test("custom utilization bands are accepted and exposed in config", () => {
     /utilizationBands must be increasing/
   );
 });
+
+test("null utilization maps to the unknown calibration band", () => {
+  const calibrator = createCalibrator({ minSamples: 1 });
+  calibrator.observe({
+    targetId: "gpu",
+    workloadType: "llm",
+    utilization: null,
+    estimatedLatencyMs: 100,
+    actualLatencyMs: 150,
+    outcome: "success"
+  });
+
+  assert.equal(calibrator.get("gpu", "llm", null).utilizationBand, "unknown");
+});
