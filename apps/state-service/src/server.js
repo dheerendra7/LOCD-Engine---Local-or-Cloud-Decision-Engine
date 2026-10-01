@@ -161,10 +161,15 @@ export function createStateServiceServer({
         return;
       }
 
-      if (req.method === "POST" && pathname === "/v1/state/clear") {
-        await stores.coordination.clear();
+      if (req.method === "POST" && pathname === "/v1/state/telemetry/clear") {
         stores.telemetry.clear();
-        sendJson(res, 200, { cleared: true });
+        sendJson(res, 200, { cleared: "telemetry" });
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/v1/state/coordination/clear") {
+        await stores.coordination.clear();
+        sendJson(res, 200, { cleared: "coordination" });
         return;
       }
 
