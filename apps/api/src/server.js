@@ -18,6 +18,7 @@ import {
   executePlan
 } from "../../../packages/execution/src/index.js";
 import { loadProvidersFromFile } from "../../../packages/providers/src/index.js";
+import { loadScopedAuthFromEnv } from "../../../packages/auth/src/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
@@ -40,6 +41,18 @@ function isAuthorized(req, configuredApiKey) {
   const supplied = bearer || headerKey;
 
   return safeSecretEqual(supplied, configuredApiKey);
+}
+
+function requiredScope(method, pathname) {
+  if (method === "GET") return "read";
+  if (method === "POST" && pathname === "/v1/decide") return "decide";
+  if (method === "POST" && pathname === "/v1/hybrid-plan") return "decide";
+  if (method === "POST" && pathname === "/v1/outcomes") return "telemetry";
+  if (method === "POST" && pathname === "/v1/execute") return "execute";
+  if (method === "POST" && pathname === "/v1/targets") return "targets";
+  if (method === "POST" && pathname.startsWith("/v1/targets/")) return "targets";
+  if (method === "DELETE" && pathname.startsWith("/v1/targets/")) return "targets";
+  return "admin";
 }
 
 function sendJson(res, status, body, extraHeaders = {}) {
@@ -187,11 +200,17 @@ export function createServer({
     level: process.env.LOCD_LOG_LEVEL || "info"
   }),
   executionRegistry = null,
-  executionEnabled = process.env.LOCD_EXECUTION_ENABLED === "true"
+  executionEnabled = process.env.LOCD_EXECUTION_ENABLED === "true",
+  authorizer = null
 } = {}) {
   if (!Number.isFinite(maxBodyBytes) || maxBodyBytes < 1) {
+
     throw new Error("maxBodyBytes must be >= 1");
   }
+  const auth = authorizer || loadScopedAuthFromEnv({
+    legacyApiKey: apiKey
+  });
+
   return http.createServer(async (req, res) => {
     const requestId = createRequestId(req.headers["x-request-id"]);
     const startedAt = process.hrtime.bigint();
@@ -253,14 +272,28 @@ export function createServer({
         }
       }
 
-      if (pathname.startsWith("/v1/") && !isAuthorized(req, apiKey)) {
-        res.writeHead(401, {
-          "content-type": "application/json; charset=utf-8",
-          "cache-control": "no-store",
-          "www-authenticate": "Bearer"
-        });
-        res.end(JSON.stringify({ error: "unauthorized" }));
-        return;
+      let authContext = {
+        ok: true,
+        keyId: null,
+        scopes: ["admin"]
+      };
+
+      if (pathname.startsWith("/v1/")) {
+        authContext = auth.authorize(req, requiredScope(req.method, pathname));
+
+        if (!authContext.ok) {
+          const status = authContext.reason === "forbidden_scope" ? 403 : 401;
+          const body = {
+            error: authContext.reason === "forbidden_scope"
+              ? "insufficient_scope"
+              : "unauthorized"
+          };
+          const headers = status === 401
+            ? { "www-authenticate": "Bearer" }
+            : {};
+          sendJson(res, status, body, headers);
+          return;
+        }
       }
 
       if (req.method === "GET" && pathname === "/health") {
@@ -296,8 +329,8 @@ export function createServer({
             sendJson(res, 403, { error: "live_execution_disabled" });
             return;
           }
-          if (!apiKey) {
-            sendJson(res, 403, { error: "live_execution_requires_api_key" });
+          if (!auth.enabled || !authContext.ok || (!authContext.scopes.includes("admin") && !authContext.scopes.includes("execute"))) {
+            sendJson(res, 403, { error: "live_execution_requires_execute_scope" });
             return;
           }
         }
