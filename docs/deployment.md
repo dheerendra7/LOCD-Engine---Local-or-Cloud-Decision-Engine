@@ -98,3 +98,9 @@ When LOCD_STATE_DB_FILE is set, it becomes the source for telemetry persistence 
 For multiple LOCD API instances on different hosts, set LOCD_COORDINATION_URL and LOCD_COORDINATION_API_KEY to use the reference network state service.
 
 The local SQLite mode remains the simpler single-host option. The network service is a coordination endpoint, not a public-facing application API.
+
+## Multi-instance shared state
+
+For multiple API instances, set LOCD_STATE_SERVICE_URL and LOCD_STATE_SERVICE_API_KEY to share telemetry and coordination through the internal State Service.
+
+Use LOCD_COORDINATION_URL instead when you need shared rate limiting/idempotency without moving decision telemetry off the API process.
