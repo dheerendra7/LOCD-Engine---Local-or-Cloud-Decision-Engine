@@ -11,6 +11,7 @@ import { createLogger, createRequestId } from "../../../packages/observability/s
 import { createCalibrator } from "../../../packages/calibration/src/index.js";
 import { createIdempotencyStore } from "../../../packages/runtime/src/index.js";
 import { createRateLimiter, getClientKey } from "./rate-limit.js";
+import { createCoordinatedFixedWindowRateLimiter, createCoordinatedIdempotencyStore } from "../../../packages/coordination/src/index.js";
 import { createProbeScheduler } from "../../../packages/probing/src/index.js";
 import {
   createDryRunExecutionAdapter,
@@ -199,7 +200,8 @@ export function createServer({
   decisionStore = createDecisionStore({ maxEntries: 1000 }),
   targetRegistry = createTargetRegistry(),
   targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null,
-  idempotencyStore = createIdempotencyStore(),
+  idempotencyStore = null,
+  coordinationStore = null,
   maxBodyBytes = Number(process.env.LOCD_MAX_BODY_BYTES || 1_000_000),
   rateLimiter = createRateLimiter({
     maxRequests: Number(process.env.LOCD_RATE_LIMIT_RPM || 0),
@@ -240,6 +242,23 @@ export function createServer({
     legacyApiKey: apiKey
   });
 
+  const effectiveIdempotencyStore = idempotencyStore ||
+    (coordinationStore
+      ? createCoordinatedIdempotencyStore({ store: coordinationStore })
+      : createIdempotencyStore());
+
+  const effectiveRateLimiter = rateLimiter ||
+    (coordinationStore
+      ? createCoordinatedFixedWindowRateLimiter({
+          store: coordinationStore,
+          maxRequests: Number(process.env.LOCD_RATE_LIMIT_RPM || 0),
+          windowMs: 60_000
+        })
+      : createRateLimiter({
+          maxRequests: Number(process.env.LOCD_RATE_LIMIT_RPM || 0),
+          windowMs: 60_000
+        }));
+
   return http.createServer(async (req, res) => {
     const requestId = createRequestId(req.headers["x-request-id"]);
     const startedAt = process.hrtime.bigint();
@@ -268,13 +287,17 @@ export function createServer({
       res.setHeader("x-request-id", requestId);
 
       const idempotencyKey = String(req.headers["idempotency-key"] || "").trim() || null;
-      const getReplay = body => {
+      const getReplay = async body => {
         if (!idempotencyKey || !["POST", "PUT", "PATCH"].includes(req.method)) return null;
-        return idempotencyStore.lookup(req.method + " " + pathname, idempotencyKey, body);
+        return await effectiveIdempotencyStore.lookup(
+          req.method + " " + pathname,
+          idempotencyKey,
+          body
+        );
       };
-      const rememberResponse = (body, status, responseBody) => {
+      const rememberResponse = async (body, status, responseBody) => {
         if (!idempotencyKey) return;
-        idempotencyStore.remember(
+        await effectiveIdempotencyStore.remember(
           req.method + " " + pathname,
           idempotencyKey,
           body,
@@ -286,8 +309,8 @@ export function createServer({
       });
 
       if (pathname.startsWith("/v1/")) {
-        const rate = rateLimiter.consume(getClientKey(req, { trustProxy }));
-        if (rateLimiter.enabled) {
+        const rate = await effectiveRateLimiter.consume(getClientKey(req, { trustProxy }));
+        if (effectiveRateLimiter.enabled) {
           res.setHeader("x-ratelimit-limit", String(rate.limit));
           res.setHeader("x-ratelimit-remaining", String(rate.remaining));
           res.setHeader("x-ratelimit-reset", String(Math.ceil(rate.resetAt / 1000)));
@@ -345,7 +368,7 @@ export function createServer({
 
       if (req.method === "POST" && pathname === "/v1/execute") {
         const body = await readBody(req, maxBodyBytes);
-        const replay = getReplay(body);
+        const replay = await getReplay(body);
         if (replay) {
           sendReplay(replay);
           return;
@@ -384,14 +407,14 @@ export function createServer({
           includeOutputs: body.includeOutputs === true
         });
 
-        rememberResponse(body, 200, responseBody);
+        await rememberResponse(body, 200, responseBody);
         sendJson(res, 200, responseBody);
         return;
       }
 
       if (req.method === "POST" && pathname === "/v1/hybrid-plan") {
         const body = await readBody(req, maxBodyBytes);
-        const replay = getReplay(body);
+        const replay = await getReplay(body);
         if (replay) {
           sendReplay(replay);
           return;
@@ -407,14 +430,14 @@ export function createServer({
         }
 
         const responseBody = planHybridExecution(request);
-        rememberResponse(body, 200, responseBody);
+        await rememberResponse(body, 200, responseBody);
         sendJson(res, 200, responseBody);
         return;
       }
 
       if (req.method === "POST" && pathname === "/v1/decide") {
         const body = await readBody(req, maxBodyBytes);
-        const replay = getReplay(body);
+        const replay = await getReplay(body);
         if (replay) {
           sendReplay(replay);
           return;
@@ -466,14 +489,14 @@ export function createServer({
             adjustedTargetIds
           }
         };
-        rememberResponse(body, 200, responseBody);
+        await rememberResponse(body, 200, responseBody);
         sendJson(res, 200, responseBody);
         return;
       }
 
       if (req.method === "POST" && pathname === "/v1/outcomes") {
         const body = await readBody(req, maxBodyBytes);
-        const replay = getReplay(body);
+        const replay = await getReplay(body);
         if (replay) {
           sendReplay(replay);
           return;
@@ -494,7 +517,7 @@ export function createServer({
             actualCostUsd: event.actualCostUsd,
             outcome: event.outcome
           });
-          rememberResponse(body, 200, event);
+          await rememberResponse(body, 200, event);
           sendJson(res, 200, event);
         } catch (error) {
           if (error instanceof Error && error.message === "decision_not_found") {
@@ -518,7 +541,7 @@ export function createServer({
 
       if (req.method === "POST" && pathname === "/v1/targets") {
         const body = await readBody(req, maxBodyBytes);
-        const replay = getReplay(body);
+        const replay = await getReplay(body);
         if (replay) {
           sendReplay(replay);
           return;
@@ -527,7 +550,7 @@ export function createServer({
         const target = await targetRegistry.register(body);
         if (targetFile) await targetRegistry.saveToFile(targetFile);
         const responseBody = await target.getSnapshot();
-        rememberResponse(body, 201, responseBody);
+        await rememberResponse(body, 201, responseBody);
         sendJson(res, 201, responseBody);
         return;
       }
@@ -542,7 +565,7 @@ export function createServer({
         }
 
         const body = await readBody(req, maxBodyBytes);
-        const replay = getReplay(body);
+        const replay = await getReplay(body);
         if (replay) {
           sendReplay(replay);
           return;
@@ -551,7 +574,7 @@ export function createServer({
         try {
           const snapshot = await targetRegistry.probe(id);
           if (targetFile) await targetRegistry.saveToFile(targetFile);
-          rememberResponse(body, 200, snapshot);
+          await rememberResponse(body, 200, snapshot);
           sendJson(res, 200, snapshot);
         } catch (error) {
           if (error instanceof Error && error.message === "target_not_found") {
@@ -577,7 +600,7 @@ export function createServer({
         }
 
         const body = await readBody(req, maxBodyBytes);
-        const replay = getReplay(body);
+        const replay = await getReplay(body);
         if (replay) {
           sendReplay(replay);
           return;
@@ -586,7 +609,7 @@ export function createServer({
         try {
           const updated = await targetRegistry.heartbeat(id, body);
           if (targetFile) await targetRegistry.saveToFile(targetFile);
-          rememberResponse(body, 200, updated);
+          await rememberResponse(body, 200, updated);
           sendJson(res, 200, updated);
         } catch (error) {
           if (error instanceof Error && error.message === "target_not_found") {
