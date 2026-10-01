@@ -11,6 +11,7 @@ import { planHybridExecution } from "../../../packages/planner/src/index.js";
 import { createLogger, createRequestId } from "../../../packages/observability/src/index.js";
 import { createIdempotencyStore } from "../../../packages/runtime/src/index.js";
 import { createRateLimiter, getClientKey } from "./rate-limit.js";
+import { loadProvidersFromFile } from "../../../packages/providers/src/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
@@ -86,6 +87,28 @@ async function serveWeb(res, pathname) {
   } catch {
     sendJson(res, 404, { error: "not_found" });
   }
+}
+
+export async function createConfiguredTargetRegistry({
+  targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null,
+  providerFile = process.env.LOCD_PROVIDERS_FILE?.trim() || null,
+  env = process.env,
+  fetchImpl = globalThis.fetch
+} = {}) {
+  const targetRegistry = createTargetRegistry();
+
+  if (targetFile) {
+    await targetRegistry.loadFromFile(targetFile);
+  }
+
+  if (providerFile) {
+    const providers = await loadProvidersFromFile(providerFile, env, fetchImpl);
+    for (const provider of providers) {
+      targetRegistry.register(provider);
+    }
+  }
+
+  return targetRegistry;
 }
 
 export function createServer({
@@ -426,11 +449,11 @@ if (isMain) {
   const port = Number(process.env.PORT || 8787);
   const targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null;
   const telemetryFile = process.env.LOCD_TELEMETRY_FILE?.trim() || null;
-  const targetRegistry = createTargetRegistry();
-
-  if (targetFile) {
-    await targetRegistry.loadFromFile(targetFile);
-  }
+  const providerFile = process.env.LOCD_PROVIDERS_FILE?.trim() || null;
+  const targetRegistry = await createConfiguredTargetRegistry({
+    targetFile,
+    providerFile
+  });
 
   const decisionStore = telemetryFile
     ? createFileDecisionStore({ filePath: telemetryFile, maxEntries: 5000 })

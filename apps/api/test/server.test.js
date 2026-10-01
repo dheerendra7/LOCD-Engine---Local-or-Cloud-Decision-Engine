@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createServer } from "../src/server.js";
+import { createConfiguredTargetRegistry, createServer } from "../src/server.js";
 import { createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { createLogger } from "../../../packages/observability/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -819,5 +819,74 @@ test("probe endpoint returns 501 when target adapter has no probe operation", as
     assert.deepEqual(await response.json(), { error: "target_does_not_support_probe" });
   } finally {
     await new Promise(resolve => probeServer.close(resolve));
+  }
+});
+
+test("server bootstrap loads provider adapters from config file without exposing secrets", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-provider-bootstrap-"));
+  const file = path.join(dir, "providers.json");
+
+  try {
+    await writeFile(file, JSON.stringify({
+      providers: [{
+        id: "bootstrap-provider",
+        targetId: "bootstrap-provider",
+        mode: "private",
+        baseUrl: "https://inference.example.com",
+        apiKeyEnv: "BOOTSTRAP_PROVIDER_KEY",
+        model: "demo-model"
+      }]
+    }), "utf8");
+
+    const registry = await createConfiguredTargetRegistry({
+      providerFile: file,
+      env: { BOOTSTRAP_PROVIDER_KEY: "not-exposed" },
+      fetchImpl: async () => new Response(JSON.stringify({ data: [] }), { status: 200 })
+    });
+
+    assert.equal(registry.has("bootstrap-provider"), true);
+    const snapshot = await registry.get("bootstrap-provider");
+    assert.equal(snapshot.available, false);
+    assert.equal("apiKey" in snapshot, false);
+    assert.equal(JSON.stringify(snapshot).includes("not-exposed"), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("server bootstrap fails on duplicate provider and target IDs", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-provider-bootstrap-dup-"));
+  const targetFile = path.join(dir, "targets.json");
+  const providerFile = path.join(dir, "providers.json");
+
+  try {
+    const target = {
+      id: "same-id",
+      mode: "local",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1
+    };
+    await writeFile(targetFile, JSON.stringify([target]), "utf8");
+    await writeFile(providerFile, JSON.stringify({
+      providers: [{
+        id: "same-id",
+        targetId: "same-id",
+        mode: "private",
+        baseUrl: "https://inference.example.com"
+      }]
+    }), "utf8");
+
+    await assert.rejects(
+      () => createConfiguredTargetRegistry({
+        targetFile,
+        providerFile,
+        fetchImpl: async () => new Response(JSON.stringify({ data: [] }), { status: 200 })
+      }),
+      /target already registered/
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 });

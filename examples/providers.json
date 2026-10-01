@@ -1,0 +1,33 @@
+{
+  "providers": [
+    {
+      "id": "local-ollama",
+      "targetId": "local-ollama",
+      "mode": "local",
+      "baseUrl": "http://localhost:11434",
+      "model": "llama3.2",
+      "privacy": 1,
+      "regions": ["local"],
+      "capabilities": ["text-generation"],
+      "initial": {
+        "available": false,
+        "health": 0
+      }
+    },
+    {
+      "id": "private-vllm",
+      "targetId": "private-vllm",
+      "mode": "private",
+      "baseUrl": "https://inference.example.com",
+      "apiKeyEnv": "PRIVATE_VLLM_API_KEY",
+      "model": "my-model",
+      "privacy": 0.95,
+      "regions": ["ap-south-1"],
+      "capabilities": ["text-generation"],
+      "initial": {
+        "available": false,
+        "health": 0
+      }
+    }
+  ]
+}
