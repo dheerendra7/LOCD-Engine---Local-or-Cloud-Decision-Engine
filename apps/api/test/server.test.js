@@ -2047,3 +2047,75 @@ test("decision feedback records target utilization for calibration", async () =>
   assert.equal(event.id, body.decisionId);
   assert.equal(event.targetUtilization, 0.82);
 });
+
+test("concurrent identical idempotency keys reject the in-progress duplicate", async () => {
+  const decisionStore = {
+    async record(event) {
+      await new Promise(resolve => setTimeout(resolve, 60));
+      return { ...event, id: "decision-concurrency-1" };
+    },
+    async recordOutcome() {
+      throw new Error("not used");
+    },
+    async list() {
+      return [];
+    },
+    async summary() {
+      return { totalDecisions: 0 };
+    }
+  };
+
+  const scopedServer = createServer({
+    decisionStore,
+    idempotencyLockTtlMs: 5000
+  });
+  await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + scopedServer.address().port;
+
+  const request = {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": "concurrent-key"
+    },
+    body: JSON.stringify({
+      workload: { type: "classification", sensitivity: "low" },
+      targets: [{
+        id: "concurrent-target",
+        mode: "local",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 10,
+        estimatedCostUsd: 0
+      }]
+    })
+  };
+
+  try {
+    const [first, second] = await Promise.all([
+      fetch(url + "/v1/decide", request),
+      fetch(url + "/v1/decide", request)
+    ]);
+
+    const statuses = [first.status, second.status].sort((a, b) => a - b);
+    assert.deepEqual(statuses, [200, 409]);
+
+    const conflict = first.status === 409 ? first : second;
+    assert.deepEqual(await conflict.json(), {
+      error: "idempotency_request_in_progress"
+    });
+
+    const success = first.status === 200 ? first : second;
+    assert.equal((await success.json()).decisionId, "decision-concurrency-1");
+  } finally {
+    await new Promise(resolve => scopedServer.close(resolve));
+  }
+});
+
+test("invalid idempotency lock TTL fails at server creation", () => {
+  assert.throws(
+    () => createServer({ idempotencyLockTtlMs: 0 }),
+    /idempotencyLockTtlMs must be >= 1/
+  );
+});

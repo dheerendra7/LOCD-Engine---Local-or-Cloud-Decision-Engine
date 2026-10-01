@@ -18,7 +18,11 @@ export function fingerprint(value) {
   return createHash("sha256").update(normalized).digest("hex");
 }
 
-export function createIdempotencyStore({ maxEntries = 1000, ttlMs = 300000 } = {}) {
+export function createIdempotencyStore({
+  maxEntries = 1000,
+  ttlMs = 300000,
+  clock = () => Date.now()
+} = {}) {
   if (!Number.isInteger(maxEntries) || maxEntries < 1) {
     throw new Error("maxEntries must be a positive integer");
   }
@@ -28,10 +32,10 @@ export function createIdempotencyStore({ maxEntries = 1000, ttlMs = 300000 } = {
 
   const entries = new Map();
 
-  function purge() {
-    const cutoff = Date.now() - ttlMs;
+  function purge(now = clock()) {
     for (const [key, entry] of entries) {
-      if (entry.createdAt < cutoff) entries.delete(key);
+      const expiresAt = entry.expiresAt ?? (entry.createdAt + ttlMs);
+      if (expiresAt <= now) entries.delete(key);
     }
     while (entries.size > maxEntries) {
       entries.delete(entries.keys().next().value);
@@ -69,11 +73,13 @@ export function createIdempotencyStore({ maxEntries = 1000, ttlMs = 300000 } = {
         throw new Error("idempotency_key_invalid");
       }
 
+      const now = clock();
       const composite = String(scope) + ":" + normalizedKey;
       entries.set(composite, {
         fingerprint: fingerprint(body),
         response: { ...response, replayed: false },
-        createdAt: Date.now()
+        createdAt: now,
+        expiresAt: now + ttlMs
       });
       purge();
     },
@@ -110,11 +116,13 @@ export function createIdempotencyStore({ maxEntries = 1000, ttlMs = 300000 } = {
         };
       }
 
+      const now = clock();
       entries.set(composite, {
         fingerprint: currentFingerprint,
         processing: true,
         response: null,
-        createdAt: Date.now()
+        createdAt: now,
+        expiresAt: now + lockTtlMs
       });
 
       return { claimed: true };
