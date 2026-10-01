@@ -105,6 +105,21 @@ export function createCoordinatedIdempotencyStore({
     }, { ttlMs });
   }
 
+  async function release(scope, key, body) {
+    if (!key) return false;
+
+    const storedKey = storageKey(scope, key);
+    const existing = await store.get(storedKey);
+    if (!existing) return false;
+
+    if (existing.fingerprint !== fingerprint(body)) {
+      throw new Error("idempotency_key_reused");
+    }
+
+    if (existing.processing !== true) return false;
+    return store.delete(storedKey);
+  }
+
   async function claim(scope, key, body, lockTtlMs = 30_000) {
     if (!key) return { claimed: false, reason: "no_key" };
 
@@ -137,6 +152,7 @@ export function createCoordinatedIdempotencyStore({
   return {
     lookup,
     remember,
-    claim
+    claim,
+    release
   };
 }
