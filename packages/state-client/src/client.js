@@ -71,7 +71,7 @@ export function createHTTPDecisionStore({
     },
 
     clear() {
-      return request(fetchImpl, baseUrl, apiKey, "/v1/state/clear", {
+      return request(fetchImpl, baseUrl, apiKey, "/v1/state/telemetry/clear", {
         method: "POST"
       });
     }
@@ -155,7 +155,7 @@ export function createHTTPCoordinationStore({
     },
 
     async clear() {
-      return request(fetchImpl, baseUrl, apiKey, "/v1/state/clear", {
+      return request(fetchImpl, baseUrl, apiKey, "/v1/state/coordination/clear", {
         method: "POST"
       });
     }
