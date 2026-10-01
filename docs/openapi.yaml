@@ -526,3 +526,7 @@ components:
 
 # Authentication note: when LOCD_API_KEY is configured, all /v1 operations
 # require bearerAuth or apiKeyHeader. /health remains public.
+
+# Scoped API keys are enforced by the server-side authorization policy.
+# API key scope names are read from LOCD_API_KEYS_FILE; OpenAPI API-key
+# security schemes remain unchanged because scopes are an application policy.
