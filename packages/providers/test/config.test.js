@@ -117,3 +117,20 @@ test("missing and malformed provider config files fail clearly", async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("provider base URLs cannot embed credentials", () => {
+  assert.throws(
+    () => createProviderFromConfig({
+      ...base,
+      baseUrl: "https://user:secret@example.com"
+    }, env),
+    /embedded credentials/
+  );
+});
+
+test("blank API key environment values are rejected", () => {
+  assert.throws(
+    () => createProviderFromConfig(base, { PRIVATE_PROVIDER_KEY: "   " }),
+    /API key environment variable is empty/
+  );
+});
