@@ -31,6 +31,21 @@ export function createInMemoryCoordinationStore() {
       return true;
     },
 
+    async setIfAbsent(key, value, { ttlMs = null } = {}) {
+      purge();
+      const normalized = String(key);
+      if (values.has(normalized)) return false;
+
+      values.set(normalized, structuredClone(value));
+      if (ttlMs == null) {
+        expiries.delete(normalized);
+      } else {
+        if (!Number.isFinite(ttlMs) || ttlMs < 1) throw new Error("ttlMs must be >= 1");
+        expiries.set(normalized, Date.now() + ttlMs);
+      }
+      return true;
+    },
+
     async delete(key) {
       purge();
       const normalized = String(key);
@@ -62,7 +77,7 @@ export function assertCoordinationStore(store) {
   if (!store || typeof store !== "object") {
     throw new Error("coordination store must be an object");
   }
-  for (const method of ["get", "set", "delete", "incr"]) {
+  for (const method of ["get", "set", "setIfAbsent", "delete", "incr"]) {
     if (typeof store[method] !== "function") {
       throw new Error("coordination store must implement " + method + "()");
     }
