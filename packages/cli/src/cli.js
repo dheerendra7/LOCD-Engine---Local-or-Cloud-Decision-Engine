@@ -122,14 +122,18 @@ export async function runCli(argv, { fetchImpl = globalThis.fetch, write = conso
   }
 
   if (command === "policies") {
-    write(JSON.stringify(await apiRequest(fetchImpl, baseUrl, "/v1/policies"), null, 2));
+    write(JSON.stringify(await apiRequest(fetchImpl, baseUrl, "/v1/policies", {
+      headers: authHeaders
+    }), null, 2));
     return 0;
   }
 
   if (command === "decisions") {
     const limit = positional[1] || "50";
     write(JSON.stringify(
-      await apiRequest(fetchImpl, baseUrl, "/v1/decisions?limit=" + encodeURIComponent(limit)),
+      await apiRequest(fetchImpl, baseUrl, "/v1/decisions?limit=" + encodeURIComponent(limit), {
+        headers: authHeaders
+      }),
       null,
       2
     ));
@@ -158,7 +162,7 @@ export async function runCli(argv, { fetchImpl = globalThis.fetch, write = conso
     if (!file) throw new Error("execute requires a JSON plan file path");
     const content = await readFile(path.resolve(file), "utf8");
     const plan = JSON.parse(content);
-    plan.mode = live ? "live" : (plan.mode || "dry-run");
+    plan.mode = live ? "live" : "dry-run";
     if (includeOutputs) plan.includeOutputs = true;
 
     write(JSON.stringify(
