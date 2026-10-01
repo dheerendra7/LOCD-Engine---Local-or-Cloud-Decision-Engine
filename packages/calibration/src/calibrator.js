@@ -2,14 +2,30 @@ const DEFAULT_ALPHA = 0.25;
 const DEFAULT_MIN_SAMPLES = 3;
 const DEFAULT_MIN_FACTOR = 0.25;
 const DEFAULT_MAX_FACTOR = 4;
+const DEFAULT_UTILIZATION_BANDS = Object.freeze({
+  low: 0.25,
+  moderate: 0.60,
+  high: 0.85
+});
 
 function finite(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
 
-function keyFor(targetId, workloadType) {
-  return String(targetId) + "::" + String(workloadType || "unknown");
+function keyFor(targetId, workloadType, utilizationBand = "unknown") {
+  return String(targetId) + "::" + String(workloadType || "unknown") + "::" + utilizationBand;
+}
+
+function utilizationBandFor(value, bands = DEFAULT_UTILIZATION_BANDS) {
+  const utilization = finite(value);
+  if (utilization == null) return "unknown";
+  const normalized = Math.min(1, Math.max(0, utilization));
+
+  if (normalized <= bands.low) return "low";
+  if (normalized <= bands.moderate) return "moderate";
+  if (normalized <= bands.high) return "high";
+  return "saturated";
 }
 
 function clampFactor(value, min, max) {
@@ -20,7 +36,8 @@ function validateOptions({
   alpha = DEFAULT_ALPHA,
   minSamples = DEFAULT_MIN_SAMPLES,
   minFactor = DEFAULT_MIN_FACTOR,
-  maxFactor = DEFAULT_MAX_FACTOR
+  maxFactor = DEFAULT_MAX_FACTOR,
+  utilizationBands = DEFAULT_UTILIZATION_BANDS
 } = {}) {
   if (!Number.isFinite(alpha) || alpha <= 0 || alpha > 1) {
     throw new Error("alpha must be > 0 and <= 1");
@@ -34,7 +51,30 @@ function validateOptions({
   if (!Number.isFinite(maxFactor) || maxFactor < minFactor) {
     throw new Error("maxFactor must be >= minFactor");
   }
-  return { alpha, minSamples, minFactor, maxFactor };
+
+  if (!utilizationBands || typeof utilizationBands !== "object") {
+    throw new Error("utilizationBands must be an object");
+  }
+  const bandValues = [utilizationBands.low, utilizationBands.moderate, utilizationBands.high]
+    .map(Number);
+  if (
+    bandValues.some(value => !Number.isFinite(value) || value < 0 || value > 1) ||
+    !(bandValues[0] < bandValues[1] && bandValues[1] < bandValues[2])
+  ) {
+    throw new Error("utilizationBands must be increasing values between 0 and 1");
+  }
+
+  return {
+    alpha,
+    minSamples,
+    minFactor,
+    maxFactor,
+    utilizationBands: {
+      low: bandValues[0],
+      moderate: bandValues[1],
+      high: bandValues[2]
+    }
+  };
 }
 
 function updateFactor(previous, ratio, alpha, minFactor, maxFactor) {
@@ -55,15 +95,18 @@ export function createCalibrator(options = {}) {
     actualLatencyMs,
     estimatedCostUsd,
     actualCostUsd,
-    outcome
+    outcome,
+    utilization = null
   } = {}) {
     if (!targetId) throw new Error("targetId is required");
     if (outcome === "pending") return null;
 
-    const key = keyFor(targetId, workloadType);
+    const utilizationBand = utilizationBandFor(utilization, config.utilizationBands);
+    const key = keyFor(targetId, workloadType, utilizationBand);
     const current = observations.get(key) || {
       targetId: String(targetId),
       workloadType: String(workloadType),
+      utilizationBand,
       samples: 0,
       latencyFactor: null,
       costFactor: null
@@ -117,15 +160,22 @@ export function createCalibrator(options = {}) {
           actualLatencyMs: event.actualLatencyMs,
           estimatedCostUsd: event.estimatedCostUsd,
           actualCostUsd: event.actualCostUsd,
-          outcome: event.outcome
+          outcome: event.outcome,
+          utilization: event.targetUtilization
+        
         });
       }
     }
     return snapshot();
   }
 
-  function get(targetId, workloadType = "unknown") {
-    const item = observations.get(keyFor(targetId, workloadType));
+  function get(targetId, workloadType = "unknown", utilization = null) {
+    const band = utilizationBandFor(utilization, config.utilizationBands);
+    const exact = observations.get(keyFor(targetId, workloadType, band));
+    const fallback = band === "unknown"
+      ? null
+      : observations.get(keyFor(targetId, workloadType, "unknown"));
+    const item = exact || fallback;
     return item ? { ...item } : null;
   }
 
@@ -133,7 +183,7 @@ export function createCalibrator(options = {}) {
     if (!Array.isArray(targets)) throw new Error("targets must be an array");
 
     return targets.map(target => {
-      const item = get(target?.id, workloadType);
+      const item = get(target?.id, workloadType, target?.capacity);
       if (!item || item.samples < config.minSamples) {
         return structuredClone(target);
       }
@@ -154,7 +204,13 @@ export function createCalibrator(options = {}) {
   }
 
   function snapshot() {
-    return [...observations.values()].map(item => ({ ...item }));
+    return [...observations.values()]
+      .map(item => ({ ...item }))
+      .sort((a, b) =>
+        String(a.targetId).localeCompare(String(b.targetId)) ||
+        String(a.workloadType).localeCompare(String(b.workloadType)) ||
+        String(a.utilizationBand).localeCompare(String(b.utilizationBand))
+      );
   }
 
   function clear() {
