@@ -78,6 +78,48 @@ export function createIdempotencyStore({ maxEntries = 1000, ttlMs = 300000 } = {
       purge();
     },
 
+    claim(scope, key, body, lockTtlMs = 30_000) {
+      if (!key) return { claimed: false, reason: "no_key" };
+      if (!Number.isFinite(lockTtlMs) || lockTtlMs < 1) {
+        throw new Error("idempotency_lock_ttl_invalid");
+      }
+
+      purge();
+      const normalizedKey = String(key).trim();
+      if (!normalizedKey || normalizedKey.length > 256) {
+        throw new Error("idempotency_key_invalid");
+      }
+
+      const composite = String(scope) + ":" + normalizedKey;
+      const currentFingerprint = fingerprint(body);
+      const existing = entries.get(composite);
+
+      if (existing) {
+        if (existing.fingerprint !== currentFingerprint) {
+          throw new Error("idempotency_key_reused");
+        }
+
+        if (existing.processing) {
+          return { claimed: false, reason: "in_progress" };
+        }
+
+        return {
+          claimed: false,
+          reason: "completed",
+          response: { ...existing.response, replayed: true }
+        };
+      }
+
+      entries.set(composite, {
+        fingerprint: currentFingerprint,
+        processing: true,
+        response: null,
+        createdAt: Date.now()
+      });
+
+      return { claimed: true };
+    },
+
     size() {
       purge();
       return entries.size;
