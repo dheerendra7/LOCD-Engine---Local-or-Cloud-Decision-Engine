@@ -54,7 +54,7 @@ test("HTTP coordination supports set-if-absent and increment", async () => {
   assert.equal(await store.setIfAbsent("lock", { owner: 1 }, { ttlMs: 1000 }), true);
   assert.equal(await store.incr("counter", { ttlMs: 1000 }), 3);
   assert.match(calls[0].url, /set-if-absent$/);
-  assert.match(calls[1].url, //incr$/);
+  assert.match(calls[1].url, /\/incr$/);
 });
 
 test("HTTP telemetry client maps decision and metric responses", async () => {
@@ -69,7 +69,7 @@ test("HTTP telemetry client maps decision and metric responses", async () => {
   await store.record({ id: "d-1", route: "local" });
   const events = await store.list({ limit: 10 });
 
-  assert.match(calls[0].url, //v1/state/decisions$/);
+  assert.match(calls[0].url, /\/v1\/state\/decisions$/);
   assert.deepEqual(events, [{ id: "d-1" }]);
 });
 
