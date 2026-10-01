@@ -72,3 +72,9 @@ LOCD emits structured JSON request lifecycle events to stdout. Use LOCD_LOG_LEVE
 Set LOCD_PROVIDERS_FILE to load server-side provider adapters at startup. Provider credentials are referenced by environment variable name inside the JSON config; do not place secrets in the file.
 
 Providers remain unavailable until their first successful probe unless explicitly configured with initial.available=true.
+
+## Health and shutdown
+
+Use `GET /health` for liveness and `GET /ready` for readiness. Both are intentionally public so load balancers and platform health checks can call them without application credentials.
+
+The application handles SIGTERM/SIGINT and stops the probe scheduler before closing the HTTP listener.
