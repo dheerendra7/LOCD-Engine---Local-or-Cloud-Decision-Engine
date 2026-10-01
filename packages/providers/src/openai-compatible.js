@@ -75,7 +75,8 @@ export function createOpenAICompatibleAdapter({
   allowInsecureHttp = false,
   timeoutMs = 5000,
   fetchImpl = globalThis.fetch,
-  initial = {}
+  initial = {},
+  pricing = null
 } = {}) {
   if (!id) throw new Error("id is required");
   if (!targetId) throw new Error("targetId is required");
@@ -92,6 +93,7 @@ export function createOpenAICompatibleAdapter({
     privacy: initial.privacy ?? privacy,
     estimatedLatencyMs: initial.estimatedLatencyMs ?? null,
     estimatedCostUsd: initial.estimatedCostUsd ?? estimatedCostUsd,
+    pricing: initial.pricing ?? pricing,
     availableMemoryGb: initial.availableMemoryGb ?? null,
     maxContextTokens: initial.maxContextTokens ?? null,
     lastHeartbeatAt: initial.lastHeartbeatAt ?? null,
