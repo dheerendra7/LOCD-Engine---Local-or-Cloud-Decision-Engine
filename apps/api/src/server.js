@@ -22,6 +22,13 @@ import { loadProvidersFromFile } from "../../../packages/providers/src/index.js"
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
 
+const SECURITY_HEADERS = Object.freeze({
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+  "referrer-policy": "no-referrer",
+  "permissions-policy": "camera=(), microphone=(), geolocation=()"
+});
+
 
 function safeSecretEqual(supplied, expected) {
   if (typeof supplied !== "string" || typeof expected !== "string") return false;
@@ -44,6 +51,7 @@ function isAuthorized(req, configuredApiKey) {
 
 function sendJson(res, status, body, extraHeaders = {}) {
   res.writeHead(status, {
+    ...SECURITY_HEADERS,
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
     ...extraHeaders
@@ -86,6 +94,7 @@ async function serveWeb(res, pathname) {
     };
     const type = types[extension] || "text/plain";
     res.writeHead(200, {
+      ...SECURITY_HEADERS,
       "content-type": type + "; charset=utf-8",
       "cache-control": "no-store"
     });
