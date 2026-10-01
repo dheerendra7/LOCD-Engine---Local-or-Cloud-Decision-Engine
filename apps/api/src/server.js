@@ -1,5 +1,5 @@
 import http from "node:http";
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,29 +18,11 @@ import {
   executePlan
 } from "../../../packages/execution/src/index.js";
 import { loadProvidersFromFile } from "../../../packages/providers/src/index.js";
+import { createAuthorizer, loadAuthorizerFromFile, requiredScopeForRequest } from "../../../packages/auth/src/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
 
-
-function safeSecretEqual(supplied, expected) {
-  if (typeof supplied !== "string" || typeof expected !== "string") return false;
-  const suppliedBuffer = Buffer.from(supplied);
-  const expectedBuffer = Buffer.from(expected);
-  if (suppliedBuffer.length !== expectedBuffer.length) return false;
-  return timingSafeEqual(suppliedBuffer, expectedBuffer);
-}
-
-function isAuthorized(req, configuredApiKey) {
-  if (!configuredApiKey) return true;
-
-  const authorization = req.headers.authorization || "";
-  const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
-  const headerKey = req.headers["x-locd-api-key"];
-  const supplied = bearer || headerKey;
-
-  return safeSecretEqual(supplied, configuredApiKey);
-}
 
 function sendJson(res, status, body, extraHeaders = {}) {
   res.writeHead(status, {
@@ -149,6 +131,27 @@ export function createConfiguredProbeScheduler({
   });
 }
 
+export async function createConfiguredAuthorizer({
+  legacyKey = process.env.LOCD_API_KEY?.trim() || null,
+  authFile = process.env.LOCD_API_KEYS_FILE?.trim() || null,
+  env = process.env
+} = {}) {
+  if (authFile) {
+    return loadAuthorizerFromFile({
+      filePath: authFile,
+      legacyKey,
+      env,
+      allowAnonymous: false
+    });
+  }
+
+  return createAuthorizer({
+    legacyKey,
+    env,
+    allowAnonymous: true
+  });
+}
+
 export async function createConfiguredTargetRegistry({
   targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null,
   providerFile = process.env.LOCD_PROVIDERS_FILE?.trim() || null,
@@ -187,7 +190,11 @@ export function createServer({
     level: process.env.LOCD_LOG_LEVEL || "info"
   }),
   executionRegistry = null,
-  executionEnabled = process.env.LOCD_EXECUTION_ENABLED === "true"
+  executionEnabled = process.env.LOCD_EXECUTION_ENABLED === "true",
+  authorizer = createAuthorizer({
+    legacyKey: apiKey,
+    allowAnonymous: true
+  })
 } = {}) {
   if (!Number.isFinite(maxBodyBytes) || maxBodyBytes < 1) {
     throw new Error("maxBodyBytes must be >= 1");
@@ -212,7 +219,8 @@ export function createServer({
             method: req.method,
             path: pathname,
             status: res.statusCode,
-            durationMs: Number(durationMs.toFixed(3))
+            durationMs: Number(durationMs.toFixed(3)),
+            principalId: principal.id
           });
         }
         return originalEnd(...args);
@@ -253,14 +261,35 @@ export function createServer({
         }
       }
 
-      if (pathname.startsWith("/v1/") && !isAuthorized(req, apiKey)) {
-        res.writeHead(401, {
-          "content-type": "application/json; charset=utf-8",
-          "cache-control": "no-store",
-          "www-authenticate": "Bearer"
-        });
-        res.end(JSON.stringify({ error: "unauthorized" }));
-        return;
+      let principal = {
+        id: "anonymous",
+        scopes: [],
+        authenticated: false
+      };
+
+      if (pathname.startsWith("/v1/")) {
+        const auth = authorizer.authenticate(req);
+
+        if (!auth.authenticated && authorizer.configured) {
+          res.writeHead(401, {
+            "content-type": "application/json; charset=utf-8",
+            "cache-control": "no-store",
+            "www-authenticate": "Bearer"
+          });
+          res.end(JSON.stringify({ error: "unauthorized" }));
+          return;
+        }
+
+        principal = auth.principal;
+
+        const requiredScope = requiredScopeForRequest(req.method, pathname);
+        if (!authorizer.authorize(principal, requiredScope)) {
+          sendJson(res, 403, {
+            error: "forbidden",
+            requiredScope
+          });
+          return;
+        }
       }
 
       if (req.method === "GET" && pathname === "/health") {
@@ -294,10 +323,6 @@ export function createServer({
         if (mode === "live") {
           if (!executionEnabled) {
             sendJson(res, 403, { error: "live_execution_disabled" });
-            return;
-          }
-          if (!apiKey) {
-            sendJson(res, 403, { error: "live_execution_requires_api_key" });
             return;
           }
         }
@@ -563,6 +588,12 @@ if (isMain) {
     providerFile
   });
 
+  const authFile = process.env.LOCD_API_KEYS_FILE?.trim() || null;
+  const authorizer = await createConfiguredAuthorizer({
+    legacyKey: process.env.LOCD_API_KEY?.trim() || null,
+    authFile
+  });
+
   const decisionStore = telemetryFile
     ? createFileDecisionStore({ filePath: telemetryFile, maxEntries: 5000 })
     : createDecisionStore({ maxEntries: 1000 });
@@ -578,7 +609,15 @@ if (isMain) {
     targetRegistry
   });
 
-  createServer({ targetFile, targetRegistry, decisionStore, logger, executionRegistry, executionEnabled: process.env.LOCD_EXECUTION_ENABLED === "true" }).listen(port, "0.0.0.0", () => {
+  createServer({
+    targetFile,
+    targetRegistry,
+    decisionStore,
+    logger,
+    authorizer,
+    executionRegistry,
+    executionEnabled: process.env.LOCD_EXECUTION_ENABLED === "true"
+  }).listen(port, "0.0.0.0", () => {
     if (probeScheduler) {
       probeScheduler.start();
       void probeScheduler.runOnce();
