@@ -54,3 +54,13 @@ A future adapter might wrap:
 The adapter should not contain routing policy. LOCD remains responsible for placement decisions and policy semantics.
 
 Live execution must be introduced as a separate, security-reviewed milestone because it creates a data-processing boundary and can incur provider costs.
+
+## Public execution API
+
+POST /v1/execute consumes a validated plan and routes it to server-registered execution adapters.
+
+Dry-run is the default and uses dry-run-only fallback adapters for static target snapshots.
+
+Live mode is gated by LOCD_EXECUTION_ENABLED=true and a configured LOCD_API_KEY. This prevents an accidental deployment from becoming an unauthenticated provider proxy.
+
+When includeOutputs=true, successful provider responses are returned directly to the caller. They are not written to execution receipts or decision telemetry.
