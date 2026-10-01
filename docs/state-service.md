@@ -26,7 +26,7 @@ Then point each LOCD API instance at:
     LOCD_COORDINATION_URL=http://localhost:8890
     LOCD_COORDINATION_API_KEY=change-me
 
-The API uses the remote coordination backend for rate limiting and idempotency. Decision telemetry remains local unless a network telemetry store is explicitly wired; the state service already exposes telemetry endpoints for that future path.
+The API can use LOCD_STATE_SERVICE_URL to share both decision telemetry and coordination state across API instances. LOCD_COORDINATION_URL remains available when only shared coordination is needed.
 
 ## Multi-host boundary
 

@@ -59,3 +59,7 @@ When LOCD_STATE_DB_FILE is also configured, the local SQLite coordination backen
 The reference state service in apps/state-service is backed by SQLite and exposes the coordination contract over authenticated HTTP. It is intended for a controlled internal network and does not by itself provide a highly available distributed datastore.
 
 Do not expose the state service directly to the public internet without an authenticated network boundary, TLS and additional operational controls.
+
+## Shared telemetry and coordination
+
+LOCD_STATE_SERVICE_URL is the combined network state mode. It uses the same State Service for telemetry and coordination, so separate API instances share decisions, outcomes, rate-limit counters and idempotency state.

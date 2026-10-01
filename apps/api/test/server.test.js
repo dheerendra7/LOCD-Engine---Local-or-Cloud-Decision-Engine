@@ -7,8 +7,11 @@ import { createCalibrator } from "../../../packages/calibration/src/index.js";
 import { createScopedAuthorizer } from "../../../packages/auth/src/index.js";
 import { createLogger } from "../../../packages/observability/src/index.js";
 import { createSQLiteStateStores } from "../../../packages/sqlite/src/index.js";
-import { createHTTPCoordinationStore } from "../../../packages/state-client/src/index.js";
 import { createStateServiceServer } from "../../state-service/src/server.js";
+import {
+  createHTTPStateStores,
+  createHTTPCoordinationStore
+} from "../../../packages/state-client/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
 import { createExecutionRegistry } from "../../../packages/execution/src/index.js";
 import { createInMemoryCoordinationStore } from "../../../packages/coordination/src/index.js";
@@ -1913,4 +1916,107 @@ test("two LOCD API instances can coordinate through network State Service", asyn
     await rm(dir, { recursive: true, force: true });
   }
 
+});
+
+
+test("network State Service can provide shared telemetry across API instances", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-network-telemetry-"));
+  const file = path.join(dir, "state.db");
+  const stateStores = createSQLiteStateStores({ filePath: file, maxEntries: 100 });
+  const stateServer = createStateServiceServer({
+    stores: stateStores,
+    apiKey: "telemetry-secret"
+  });
+
+  await new Promise(resolve => stateServer.listen(0, "127.0.0.1", resolve));
+  const stateUrl = "http://127.0.0.1:" + stateServer.address().port;
+
+  const stateA = createHTTPStateStores({
+    baseUrl: stateUrl,
+    apiKey: "telemetry-secret",
+    maxEntries: 100
+  });
+  const stateB = createHTTPStateStores({
+    baseUrl: stateUrl,
+    apiKey: "telemetry-secret",
+    maxEntries: 100
+  });
+
+  const serverA = createServer({
+    decisionStore: stateA.telemetry,
+    coordinationStore: stateA.coordination,
+    calibrationEnabled: false,
+    rateLimitMaxRequests: 100
+  });
+  const serverB = createServer({
+    decisionStore: stateB.telemetry,
+    coordinationStore: stateB.coordination,
+    calibrationEnabled: false,
+    rateLimitMaxRequests: 100
+  });
+
+  await Promise.all([
+    new Promise(resolve => serverA.listen(0, "127.0.0.1", resolve)),
+    new Promise(resolve => serverB.listen(0, "127.0.0.1", resolve))
+  ]);
+
+  const urlA = "http://127.0.0.1:" + serverA.address().port;
+  const urlB = "http://127.0.0.1:" + serverB.address().port;
+
+  try {
+    const decision = await fetch(urlA + "/v1/decide", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workload: {
+          type: "network-telemetry",
+          sensitivity: "low"
+        },
+        targets: [{
+          id: "network-telemetry-target",
+          mode: "local",
+          health: 1,
+          capacity: 0.1,
+          privacy: 1,
+          estimatedLatencyMs: 100,
+          estimatedCostUsd: 0.01
+        }]
+      })
+    });
+
+    assert.equal(decision.status, 200);
+    const decisionBody = await decision.json();
+
+    const history = await fetch(urlB + "/v1/decisions?limit=10");
+    assert.equal(history.status, 200);
+    const decisions = await history.json();
+    assert.equal(decisions.decisions.length, 1);
+    assert.equal(decisions.decisions[0].id, decisionBody.decisionId);
+
+    const outcome = await fetch(urlB + "/v1/outcomes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decisionId: decisionBody.decisionId,
+        outcome: "success",
+        actualLatencyMs: 125,
+        actualCostUsd: 0.012
+      })
+    });
+    assert.equal(outcome.status, 200);
+
+    const metrics = await fetch(urlA + "/v1/metrics");
+    assert.equal(metrics.status, 200);
+    const metricBody = await metrics.json();
+    assert.equal(metricBody.successRate, 1);
+    assert.equal(metricBody.meanAbsoluteLatencyErrorMs, 25);
+  } finally {
+    await Promise.all([
+      new Promise(resolve => serverA.close(resolve)),
+      new Promise(resolve => serverB.close(resolve)),
+      new Promise(resolve => stateServer.close(resolve))
+    ]);
+    stateStores.close();
+    await rm(dir, { recursive: true, force: true });
+  }
 });
