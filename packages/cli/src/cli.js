@@ -72,7 +72,15 @@ async function apiRequest(fetchImpl, baseUrl, pathname, options = {}) {
 }
 
 export async function runCli(argv, { fetchImpl = globalThis.fetch, write = console.log } = {}) {
-  const { baseUrl, apiKey, idempotencyKey, live, includeOutputs, positional } = parseArgs(argv);
+  const {
+    baseUrl,
+    apiKey: parsedApiKey,
+    idempotencyKey,
+    live,
+    includeOutputs,
+    positional
+  } = parseArgs(argv);
+  const apiKey = parsedApiKey || process.env.LOCD_API_KEY || null;
   const command = positional[0];
 
   const authHeaders = apiKey ? { "x-locd-api-key": apiKey } : {};
