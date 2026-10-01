@@ -7,9 +7,11 @@ import { createCalibrator } from "../../../packages/calibration/src/index.js";
 import { createScopedAuthorizer } from "../../../packages/auth/src/index.js";
 import { createLogger } from "../../../packages/observability/src/index.js";
 import { createSQLiteStateStores } from "../../../packages/sqlite/src/index.js";
-import { createHTTPStateStores } from "../../../packages/state-client/src/index.js";
 import { createStateServiceServer } from "../../state-service/src/server.js";
-import { createHTTPCoordinationStore } from "../../../packages/state-client/src/index.js";
+import {
+  createHTTPStateStores,
+  createHTTPCoordinationStore
+} from "../../../packages/state-client/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
 import { createExecutionRegistry } from "../../../packages/execution/src/index.js";
 import { createInMemoryCoordinationStore } from "../../../packages/coordination/src/index.js";
