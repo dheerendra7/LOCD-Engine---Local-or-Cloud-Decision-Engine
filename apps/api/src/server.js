@@ -11,6 +11,7 @@ import { planHybridExecution } from "../../../packages/planner/src/index.js";
 import { createLogger, createRequestId } from "../../../packages/observability/src/index.js";
 import { createIdempotencyStore } from "../../../packages/runtime/src/index.js";
 import { createRateLimiter, getClientKey } from "./rate-limit.js";
+import { createProbeScheduler } from "../../../packages/probing/src/index.js";
 import { loadProvidersFromFile } from "../../../packages/providers/src/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -87,6 +88,33 @@ async function serveWeb(res, pathname) {
   } catch {
     sendJson(res, 404, { error: "not_found" });
   }
+}
+
+export function createConfiguredProbeScheduler({
+  registry,
+  intervalMs = Number(process.env.LOCD_PROBE_INTERVAL_MS || 0),
+  maxConcurrent = Number(process.env.LOCD_PROBE_MAX_CONCURRENT || 4),
+  logger = createLogger({ level: process.env.LOCD_LOG_LEVEL || "info" })
+} = {}) {
+  if (!registry) throw new Error("registry is required");
+  if (intervalMs <= 0) return null;
+
+  return createProbeScheduler({
+    registry,
+    intervalMs,
+    maxConcurrent,
+    onResult: result => {
+      logger.info({
+        event: "target_probe",
+        targetId: result.targetId,
+        status: result.status,
+        errorClass: result.errorClass || null,
+        available: result.snapshot?.available,
+        health: result.snapshot?.health,
+        latencyMs: result.snapshot?.estimatedLatencyMs
+      });
+    }
+  });
 }
 
 export async function createConfiguredTargetRegistry({
@@ -459,7 +487,19 @@ if (isMain) {
     ? createFileDecisionStore({ filePath: telemetryFile, maxEntries: 5000 })
     : createDecisionStore({ maxEntries: 1000 });
 
-  createServer({ targetFile, targetRegistry, decisionStore }).listen(port, "0.0.0.0", () => {
+  const logger = createLogger({ level: process.env.LOCD_LOG_LEVEL || "info" });
+  const probeScheduler = createConfiguredProbeScheduler({
+    registry: targetRegistry,
+    intervalMs: Number(process.env.LOCD_PROBE_INTERVAL_MS || 0),
+    maxConcurrent: Number(process.env.LOCD_PROBE_MAX_CONCURRENT || 4),
+    logger
+  });
+
+  createServer({ targetFile, targetRegistry, decisionStore, logger }).listen(port, "0.0.0.0", () => {
+    if (probeScheduler) {
+      probeScheduler.start();
+      void probeScheduler.runOnce();
+    }
     console.log("LOCD Engine API listening on 0.0.0.0:" + port);
   });
 }
