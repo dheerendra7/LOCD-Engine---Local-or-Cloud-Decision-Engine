@@ -89,6 +89,28 @@ async function serveWeb(res, pathname) {
   }
 }
 
+export async function createConfiguredTargetRegistry({
+  targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null,
+  providerFile = process.env.LOCD_PROVIDERS_FILE?.trim() || null,
+  env = process.env,
+  fetchImpl = globalThis.fetch
+} = {}) {
+  const targetRegistry = createTargetRegistry();
+
+  if (targetFile) {
+    await targetRegistry.loadFromFile(targetFile);
+  }
+
+  if (providerFile) {
+    const providers = await loadProvidersFromFile(providerFile, env, fetchImpl);
+    for (const provider of providers) {
+      targetRegistry.register(provider);
+    }
+  }
+
+  return targetRegistry;
+}
+
 export function createServer({
   apiKey = process.env.LOCD_API_KEY?.trim() || null,
   decisionStore = createDecisionStore({ maxEntries: 1000 }),
@@ -428,18 +450,10 @@ if (isMain) {
   const targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null;
   const telemetryFile = process.env.LOCD_TELEMETRY_FILE?.trim() || null;
   const providerFile = process.env.LOCD_PROVIDERS_FILE?.trim() || null;
-  const targetRegistry = createTargetRegistry();
-
-  if (targetFile) {
-    await targetRegistry.loadFromFile(targetFile);
-  }
-
-  if (providerFile) {
-    const providers = await loadProvidersFromFile(providerFile);
-    for (const provider of providers) {
-      targetRegistry.register(provider);
-    }
-  }
+  const targetRegistry = await createConfiguredTargetRegistry({
+    targetFile,
+    providerFile
+  });
 
   const decisionStore = telemetryFile
     ? createFileDecisionStore({ filePath: telemetryFile, maxEntries: 5000 })
