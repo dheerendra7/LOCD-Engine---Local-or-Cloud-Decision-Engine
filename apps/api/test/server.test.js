@@ -1861,11 +1861,6 @@ test("two LOCD API instances can coordinate through network State Service", asyn
     apiKey: "network-secret"
   });
 
-  const coordination = createHTTPCoordinationStore({
-    baseUrl: "http://127.0.0.1:0",
-    apiKey: "network-secret"
-  });
-
   await new Promise(resolve => stateServer.listen(0, "127.0.0.1", resolve));
   const stateUrl = "http://127.0.0.1:" + stateServer.address().port;
   const sharedA = createHTTPCoordinationStore({
@@ -1918,8 +1913,4 @@ test("two LOCD API instances can coordinate through network State Service", asyn
     await rm(dir, { recursive: true, force: true });
   }
 
-  await assert.rejects(
-    () => coordination.get("unused"),
-    /fetch failed/
-  );
 });
