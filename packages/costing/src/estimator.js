@@ -1,6 +1,7 @@
 const UNITS = new Set(["flat", "per-request", "per-1k-tokens"]);
 
 function finite(value) {
+  if (value == null || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
