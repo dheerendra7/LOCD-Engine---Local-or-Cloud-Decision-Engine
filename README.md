@@ -115,7 +115,7 @@ The core is independent of HTTP, storage and UI so it can later power SDKs, a CL
 
 ### Shipped foundation
 
-Decision core, hard/soft policy semantics, workload-aware policy rules, explainability, hybrid planning, target registry, resource-fit checks, metadata-only telemetry with outcome feedback, durable single-process telemetry, optional telemetry calibration, browser dashboard, HTTP API, SDK, CLI, scoped authentication, request IDs/idempotency, rate limiting, provider probes, automatic probe scheduling, OpenAI-compatible and native Ollama provider adapters, gated execution API, readiness/status endpoints, graceful shutdown, shared coordination contract, Docker/Render deployment config, tests and CI.
+Decision core, hard/soft policy semantics, workload-aware policy rules, explainability, hybrid planning, target registry, resource-fit checks, metadata-only telemetry with outcome feedback, durable single-process telemetry, optional telemetry calibration, browser dashboard, HTTP API, SDK, CLI, scoped authentication, request IDs/idempotency, rate limiting, provider probes, automatic probe scheduling, OpenAI-compatible and native Ollama provider adapters, gated execution API, readiness/status endpoints, graceful shutdown, shared coordination contract, SQLite-backed state option, Docker/Render deployment config, tests and CI.
 
 ### Next
 
