@@ -84,3 +84,13 @@ The application handles SIGTERM/SIGINT and stops the probe scheduler before clos
 LOCD_CALIBRATION_ENABLED enables outcome-driven latency/cost estimate correction. For reproducible rollout, enable it only after the telemetry pipeline and outcome data are trustworthy.
 
 Calibration state can be rebuilt from durable telemetry on restart.
+
+## SQLite state backend
+
+Set LOCD_STATE_DB_FILE to a persistent SQLite database path to enable durable decision telemetry and shared coordination from one local state database.
+
+Node.js 22.5.0+ provides the node:sqlite module; Node 24.15.0 and later document it as a release candidate. LOCD's CI matrix verifies the repository on Node 22 and 24.
+
+SQLite state is suitable for a single host or a shared filesystem. It is not a substitute for a networked shared database across unrelated hosts or containers. Use WAL mode and a persistent filesystem; the application configures a busy timeout for concurrent writers.
+
+When LOCD_STATE_DB_FILE is set, it takes precedence over LOCD_TELEMETRY_FILE for telemetry persistence and also enables the shared coordination backend for rate limiting and idempotency.
