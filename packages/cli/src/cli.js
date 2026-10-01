@@ -26,7 +26,7 @@ function usage() {
 export function parseArgs(argv) {
   const args = [...argv];
   let baseUrl = "http://localhost:8787";
-  let apiKey = process.env.LOCD_API_KEY || null;
+  let apiKey = null;
   let idempotencyKey = null;
   let live = false;
   let includeOutputs = false;
