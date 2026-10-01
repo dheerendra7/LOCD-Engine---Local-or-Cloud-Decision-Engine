@@ -219,6 +219,7 @@ export function createServer({
   rateLimitMaxRequests = Number(process.env.LOCD_RATE_LIMIT_RPM || 0),
   rateLimitWindowMs = 60_000,
   trustProxy = process.env.LOCD_TRUST_PROXY === "true",
+  idempotencyLockTtlMs = Number(process.env.LOCD_IDEMPOTENCY_LOCK_TTL_MS || 30_000),
   logger = createLogger({
     level: process.env.LOCD_LOG_LEVEL || "info"
   }),
@@ -305,11 +306,34 @@ export function createServer({
       const idempotencyKey = String(req.headers["idempotency-key"] || "").trim() || null;
       const getReplay = async body => {
         if (!idempotencyKey || !["POST", "PUT", "PATCH"].includes(req.method)) return null;
-        return await effectiveIdempotencyStore.lookup(
-          req.method + " " + pathname,
-          idempotencyKey,
-          body
-        );
+        const scope = req.method + " " + pathname;
+
+        if (typeof effectiveIdempotencyStore.claim === "function") {
+          const claim = await effectiveIdempotencyStore.claim(
+            scope,
+            idempotencyKey,
+            body,
+            idempotencyLockTtlMs
+          );
+
+          if (claim.claimed) return null;
+
+          if (claim.reason === "in_progress") {
+            return {
+              status: 409,
+              body: { error: "idempotency_request_in_progress" }
+            };
+          }
+
+          if (claim.reason === "completed" && claim.response) {
+            return {
+              ...claim.response,
+              replayed: true
+            };
+          }
+        }
+
+        return await effectiveIdempotencyStore.lookup(scope, idempotencyKey, body);
       };
       const rememberResponse = async (body, status, responseBody) => {
         if (!idempotencyKey) return;
