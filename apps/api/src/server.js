@@ -20,6 +20,7 @@ import {
 } from "../../../packages/execution/src/index.js";
 import { loadProvidersFromFile } from "../../../packages/providers/src/index.js";
 import { loadScopedAuthFromEnv } from "../../../packages/auth/src/index.js";
+import { createSQLiteStateStores } from "../../../packages/sqlite/src/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
@@ -724,15 +725,24 @@ if (isMain) {
   const port = Number(process.env.PORT || 8787);
   const targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null;
   const telemetryFile = process.env.LOCD_TELEMETRY_FILE?.trim() || null;
+  const stateDbFile = process.env.LOCD_STATE_DB_FILE?.trim() || null;
   const providerFile = process.env.LOCD_PROVIDERS_FILE?.trim() || null;
   const targetRegistry = await createConfiguredTargetRegistry({
     targetFile,
     providerFile
   });
 
-  const decisionStore = telemetryFile
-    ? createFileDecisionStore({ filePath: telemetryFile, maxEntries: 5000 })
-    : createDecisionStore({ maxEntries: 1000 });
+  const stateStores = stateDbFile
+    ? createSQLiteStateStores({ filePath: stateDbFile, maxEntries: 5000 })
+    : null;
+
+  const decisionStore = stateStores
+    ? stateStores.telemetry
+    : telemetryFile
+      ? createFileDecisionStore({ filePath: telemetryFile, maxEntries: 5000 })
+      : createDecisionStore({ maxEntries: 1000 });
+
+  const coordinationStore = stateStores?.coordination || null;
 
   const logger = createLogger({ level: process.env.LOCD_LOG_LEVEL || "info" });
   const probeScheduler = createConfiguredProbeScheduler({
@@ -752,13 +762,15 @@ if (isMain) {
     logger,
     executionRegistry,
     probeScheduler,
+    coordinationStore,
     executionEnabled: process.env.LOCD_EXECUTION_ENABLED === "true"
   });
 
   const shutdown = createGracefulShutdown({
     server,
     probeScheduler,
-    logger
+    logger,
+    onClosed: () => stateStores?.close()
   });
 
   process.once("SIGTERM", () => { void shutdown("SIGTERM"); });
