@@ -235,3 +235,24 @@ test("registry lists only targets with probe support", async () => {
     ["probeable"]
   );
 });
+
+test("registry exposes only execution-capable adapters", () => {
+  const registry = createTargetRegistry([
+    {
+      id: "live",
+      targetId: "live",
+      async getSnapshot() { return { id: "live", mode: "private" }; },
+      async execute() {}
+    },
+    {
+      id: "static",
+      async getSnapshot() { return { id: "static", mode: "local" }; }
+    }
+  ]);
+
+  assert.deepEqual(
+    registry.listExecutionAdapters().map(adapter => adapter.id),
+    ["live"]
+  );
+});
+
