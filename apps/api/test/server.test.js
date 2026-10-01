@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createConfiguredExecutionRegistry, createConfiguredProbeScheduler, createConfiguredTargetRegistry, createServer } from "../src/server.js";
 import { createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
+import { createScopedAuthorizer } from "../../../packages/auth/src/index.js";
+import { createExecutionRegistry } from "../../../packages/execution/src/index.js";
 import { createLogger } from "../../../packages/observability/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
 import { createExecutionRegistry } from "../../../packages/execution/src/index.js";
@@ -1215,3 +1217,139 @@ test("live execution rejects static target fallbacks", async () => {
   }
 });
 
+
+
+test("scoped API keys enforce route permissions", async () => {
+  const authorizer = createScopedAuthorizer({
+    keys: [
+      { id: "reader", secret: "reader-secret", scopes: ["read"] },
+      { id: "decider", secret: "decider-secret", scopes: ["decide", "telemetry"] },
+      { id: "executor", secret: "executor-secret", scopes: ["execute", "read"] }
+    ]
+  });
+
+  const scopedServer = createServer({ authorizer });
+  await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + scopedServer.address().port;
+
+  try {
+    const read = await fetch(url + "/v1/policies", {
+      headers: { authorization: "Bearer reader-secret" }
+    });
+    assert.equal(read.status, 200);
+
+    const readDecide = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer reader-secret",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        workload: { type: "classification" },
+        targets: [{ id: "x", mode: "local" }]
+      })
+    });
+    assert.equal(readDecide.status, 403);
+    assert.deepEqual(await readDecide.json(), { error: "insufficient_scope" });
+
+    const decide = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer decider-secret",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        workload: { type: "classification" },
+        targets: [{
+          id: "decider-target",
+          mode: "local",
+          health: 1,
+          capacity: 0.1,
+          privacy: 1,
+          estimatedLatencyMs: 25,
+          estimatedCostUsd: 0
+        }]
+      })
+    });
+    assert.equal(decide.status, 200);
+
+    const targetRead = await fetch(url + "/v1/targets", {
+      headers: { authorization: "Bearer decider-secret" }
+    });
+    assert.equal(targetRead.status, 403);
+    assert.deepEqual(await targetRead.json(), { error: "insufficient_scope" });
+
+    const outcome = await fetch(url + "/v1/outcomes", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer decider-secret",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        decisionId: "missing",
+        outcome: "failure"
+      })
+    });
+    assert.equal(outcome.status, 404);
+  } finally {
+    await new Promise(resolve => scopedServer.close(resolve));
+  }
+});
+
+test("live execution requires execute scope even when execution is enabled", async () => {
+  const authorizer = createScopedAuthorizer({
+    keys: [
+      { id: "reader", secret: "reader-secret", scopes: ["read"] },
+      { id: "executor", secret: "executor-secret", scopes: ["execute"] }
+    ]
+  });
+
+  const executionRegistry = createExecutionRegistry([{
+    id: "live",
+    targetId: "live-target",
+    async execute() {
+      return { status: "ok" };
+    }
+  }]);
+
+  const scopedServer = createServer({
+    authorizer,
+    executionEnabled: true,
+    executionRegistry
+  });
+  await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + scopedServer.address().port;
+
+  const plan = {
+    valid: true,
+    steps: [{ id: "step-1", targetId: "live-target", purpose: "inference" }]
+  };
+
+  try {
+    const denied = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer reader-secret",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ plan, mode: "live" })
+    });
+    assert.equal(denied.status, 403);
+    assert.deepEqual(await denied.json(), { error: "insufficient_scope" });
+
+    const allowed = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer executor-secret",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ plan, mode: "live" })
+    });
+    assert.equal(allowed.status, 200);
+    const body = await allowed.json();
+    assert.equal(body.status, "completed");
+    assert.equal(body.receipts[0].adapterId, "live");
+  } finally {
+    await new Promise(resolve => scopedServer.close(resolve));
+  }
+});
