@@ -12,6 +12,9 @@ function assertSafeBaseUrl(value, { allowInsecureHttp = false } = {}) {
 
   const hostname = url.hostname.toLowerCase();
   const local = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  if (url.username || url.password) {
+    throw new Error("baseUrl must not contain embedded credentials");
+  }
   if (url.protocol === "http:" && !local && !allowInsecureHttp) {
     throw new Error("insecure remote HTTP requires allowInsecureHttp=true");
   }
@@ -83,7 +86,7 @@ export function createOpenAICompatibleAdapter({
   let snapshot = normalizeSnapshot({
     id: targetId,
     mode,
-    available: initial.available !== false,
+    available: initial.available === true,
     health: initial.health ?? 0,
     capacity: initial.capacity ?? 1,
     privacy: initial.privacy ?? privacy,
