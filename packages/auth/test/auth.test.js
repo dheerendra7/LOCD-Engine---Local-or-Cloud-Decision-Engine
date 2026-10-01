@@ -135,6 +135,7 @@ test("scope mapping is explicit and denies unknown v1 routes by default", () => 
   assert.equal(requiredScopeForRequest("POST", "/v1/outcomes"), "telemetry:write");
   assert.equal(requiredScopeForRequest("POST", "/v1/execute"), "read");
   assert.equal(requiredScopeForRequest("PATCH", "/v1/unknown"), "admin");
+  assert.equal(requiredScopeForRequest("GET", "/v1/unknown"), "admin");
 });
 
 test("blank scoped key environment values fail closed", () => {
