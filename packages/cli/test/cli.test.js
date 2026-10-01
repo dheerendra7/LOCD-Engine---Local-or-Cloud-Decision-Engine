@@ -8,7 +8,14 @@ import { parseArgs, runCli } from "../src/index.js";
 test("parseArgs extracts base URL and positional arguments", () => {
   assert.deepEqual(
     parseArgs(["--base-url", "http://example.test", "metrics"]),
-    { baseUrl: "http://example.test", positional: ["metrics"] }
+    {
+      baseUrl: "http://example.test",
+      apiKey: process.env.LOCD_API_KEY || null,
+      idempotencyKey: null,
+      live: false,
+      includeOutputs: false,
+      positional: ["metrics"]
+    }
   );
 });
 
