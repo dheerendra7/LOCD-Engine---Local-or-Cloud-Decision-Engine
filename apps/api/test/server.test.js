@@ -2028,13 +2028,22 @@ test("concurrent API execution claims prevent duplicate live work", async () => 
     keys: [{ id: "executor", secret: "executor-secret", scopes: ["execute"] }]
   });
   let executions = 0;
+  let executionStarted;
+  const started = new Promise(resolve => {
+    executionStarted = resolve;
+  });
+  let releaseExecution;
+  const executionGate = new Promise(resolve => {
+    releaseExecution = resolve;
+  });
 
   const executionRegistry = createExecutionRegistry([{
     id: "slow-live",
     targetId: "slow-live-target",
     async execute() {
       executions += 1;
-      await new Promise(resolve => setTimeout(resolve, 60));
+      executionStarted();
+      await executionGate;
       return { ok: true };
     }
   }]);
@@ -2081,7 +2090,7 @@ test("concurrent API execution claims prevent duplicate live work", async () => 
       body
     });
 
-    await new Promise(resolve => setTimeout(resolve, 5));
+    await started;
 
     const second = await fetch(urlB + "/v1/execute", {
       method: "POST",
@@ -2089,12 +2098,14 @@ test("concurrent API execution claims prevent duplicate live work", async () => 
       body
     });
 
-    const first = await firstPromise;
-    const statuses = [first.status, second.status].sort((a, b) => a - b);
-
-    assert.deepEqual(statuses, [200, 409]);
-    assert.equal(executions, 1);
+    assert.equal(second.status, 409);
     assert.deepEqual(await second.json(), { error: "idempotency_request_in_progress" });
+    assert.equal(executions, 1);
+
+    releaseExecution();
+    const first = await firstPromise;
+    assert.equal(first.status, 200);
+    assert.equal((await first.json()).status, "completed");
   } finally {
     await Promise.all([
       new Promise(resolve => serverA.close(resolve)),
@@ -2147,7 +2158,8 @@ test("failed execution releases an idempotency claim for a retry", async () => {
       headers,
       body
     });
-    assert.equal(first.status, 400);
+    assert.equal(first.status, 200);
+    assert.equal((await first.json()).status, "failed");
 
     const second = await fetch(url + "/v1/execute", {
       method: "POST",
