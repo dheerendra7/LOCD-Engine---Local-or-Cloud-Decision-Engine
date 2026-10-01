@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createConfiguredExecutionRegistry, createConfiguredProbeScheduler, createConfiguredTargetRegistry, createGracefulShutdown, createServer } from "../src/server.js";
 import { createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
+import { createCalibrator } from "../../../packages/calibration/src/index.js";
 import { createScopedAuthorizer } from "../../../packages/auth/src/index.js";
 import { createLogger } from "../../../packages/observability/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
@@ -1511,4 +1512,126 @@ test("graceful shutdown stops scheduler and closes the server only once", async 
     "scheduler_stop",
     "shutdown_complete"
   ]);
+});
+
+
+test("API calibration improves estimates after observed outcomes", async () => {
+  const calibrator = createCalibrator({
+    minSamples: 1,
+    alpha: 1,
+    minFactor: 0.25,
+    maxFactor: 4
+  });
+  const calibrationServer = createServer({
+    calibrator,
+    calibrationEnabled: true
+  });
+
+  await new Promise(resolve => calibrationServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + calibrationServer.address().port;
+
+  try {
+    const request = {
+      workload: { type: "calibration-test", sensitivity: "low" },
+      targets: [{
+        id: "calibration-target",
+        mode: "local",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 100,
+        estimatedCostUsd: 0.01
+      }]
+    };
+
+    const first = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request)
+    });
+    assert.equal(first.status, 200);
+    const firstBody = await first.json();
+    assert.equal(firstBody.estimated.latencyMs, 100);
+    assert.deepEqual(firstBody.calibration.adjustedTargetIds, []);
+
+    const outcome = await fetch(url + "/v1/outcomes", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": "calibration-outcome-1"
+      },
+      body: JSON.stringify({
+        decisionId: firstBody.decisionId,
+        outcome: "success",
+        actualLatencyMs: 200,
+        actualCostUsd: 0.02
+      })
+    });
+    assert.equal(outcome.status, 200);
+
+    const second = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request)
+    });
+    assert.equal(second.status, 200);
+    const secondBody = await second.json();
+    assert.equal(secondBody.estimated.latencyMs, 200);
+    assert.equal(secondBody.estimated.costUsd, 0.02);
+    assert.deepEqual(secondBody.calibration.adjustedTargetIds, ["calibration-target"]);
+
+    const state = await fetch(url + "/v1/calibration");
+    assert.equal(state.status, 200);
+    const stateBody = await state.json();
+    assert.equal(stateBody.enabled, true);
+    assert.equal(stateBody.entries[0].samples, 1);
+    assert.equal(stateBody.entries[0].latencyFactor, 2);
+  } finally {
+    await new Promise(resolve => calibrationServer.close(resolve));
+  }
+});
+
+test("API calibration rehydrates from durable telemetry without double counting", async () => {
+  const telemetryDir = await mkdtemp(path.join(os.tmpdir(), "locd-calibration-hydrate-"));
+  const telemetryFile = path.join(telemetryDir, "events.json");
+
+  try {
+    const store = createFileDecisionStore({ filePath: telemetryFile, maxEntries: 100 });
+    store.record({
+      id: "hydration-event",
+      route: "local",
+      targetId: "hydrate-target",
+      workloadType: "hydrate-test",
+      estimatedLatencyMs: 100,
+      estimatedCostUsd: 0.01,
+      confidence: 0.9,
+      outcome: "success",
+      actualLatencyMs: 150,
+      actualCostUsd: 0.015
+    });
+    await new Promise(resolve => setTimeout(resolve, 1));
+
+    const calibrator = createCalibrator({
+      minSamples: 1,
+      alpha: 1
+    });
+    const hydrationServer = createServer({
+      decisionStore: createFileDecisionStore({ filePath: telemetryFile, maxEntries: 100 }),
+      calibrator,
+      calibrationEnabled: true
+    });
+
+    await new Promise(resolve => hydrationServer.listen(0, "127.0.0.1", resolve));
+    try {
+      const state = await fetch("http://127.0.0.1:" + hydrationServer.address().port + "/v1/calibration");
+      assert.equal(state.status, 200);
+      const body = await state.json();
+      assert.equal(body.entries[0].samples, 1);
+      assert.equal(body.entries[0].latencyFactor, 1.5);
+    } finally {
+      await new Promise(resolve => hydrationServer.close(resolve));
+    }
+  } finally {
+    await rm(telemetryDir, { recursive: true, force: true });
+  }
 });
