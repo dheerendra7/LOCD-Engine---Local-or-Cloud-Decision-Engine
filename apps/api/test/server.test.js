@@ -2161,3 +2161,82 @@ test("failed execution releases an idempotency claim for a retry", async () => {
     await new Promise(resolve => server.close(resolve));
   }
 });
+
+
+test("handled target failures release idempotency claims", async () => {
+  const authorizer = createScopedAuthorizer({
+    keys: [{ id: "operator", secret: "operator-secret", scopes: ["targets"] }]
+  });
+
+  const targetRegistry = createTargetRegistry([{
+    id: "no-probe",
+    async getSnapshot() {
+      return { id: "no-probe", mode: "local" };
+    }
+  }]);
+
+  const server = createServer({
+    authorizer,
+    targetRegistry
+  });
+
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + server.address().port;
+
+  try {
+    const headers = {
+      authorization: "Bearer operator-secret",
+      "content-type": "application/json",
+      "idempotency-key": "probe-retry-key"
+    };
+
+    const first = await fetch(url + "/v1/targets/no-probe/probe", {
+      method: "POST",
+      headers,
+      body: "{}"
+    });
+    assert.equal(first.status, 501);
+
+    const second = await fetch(url + "/v1/targets/no-probe/probe", {
+      method: "POST",
+      headers,
+      body: "{}"
+    });
+    assert.equal(second.status, 501);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test("unknown outcome IDs release their idempotency claim for retry", async () => {
+  const server = createServer();
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + server.address().port;
+
+  try {
+    const headers = {
+      "content-type": "application/json",
+      "idempotency-key": "missing-outcome-retry"
+    };
+    const body = JSON.stringify({
+      decisionId: "missing",
+      outcome: "failure"
+    });
+
+    const first = await fetch(url + "/v1/outcomes", {
+      method: "POST",
+      headers,
+      body
+    });
+    assert.equal(first.status, 404);
+
+    const second = await fetch(url + "/v1/outcomes", {
+      method: "POST",
+      headers,
+      body
+    });
+    assert.equal(second.status, 404);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
