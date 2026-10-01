@@ -71,6 +71,8 @@ paths:
       responses:
         "200":
           description: Execution result
+        "409":
+          description: Idempotency key is already in progress or conflicts with a different payload
         "400":
           description: Invalid execution request
         "401":
@@ -108,6 +110,8 @@ paths:
           description: Request body too large
         "429":
           description: Rate limit exceeded
+        "409":
+          description: Idempotency key is already in progress or conflicts with a different payload
         "400":
           description: Invalid request
         "401":
@@ -176,6 +180,8 @@ paths:
           description: Request body too large
         "429":
           description: Rate limit exceeded
+        "409":
+          description: Idempotency key is already in progress or conflicts with a different payload
         "400":
           description: Invalid target
   /v1/targets/{id}:
@@ -218,6 +224,8 @@ paths:
           description: Request body too large
         "429":
           description: Rate limit exceeded
+        "409":
+          description: Idempotency key is already in progress or conflicts with a different payload
         "400":
           description: Invalid plan request
         "401":
@@ -290,6 +298,8 @@ paths:
           description: Request body too large
         "429":
           description: Rate limit exceeded
+        "409":
+          description: Idempotency key is already in progress or conflicts with a different payload
         "400":
           description: Invalid heartbeat
         "401":
@@ -321,6 +331,8 @@ paths:
           description: Request body too large
         "429":
           description: Rate limit exceeded
+        "409":
+          description: Idempotency key is already in progress or conflicts with a different payload
         "400":
           description: Invalid outcome request
         "401":
