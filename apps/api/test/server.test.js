@@ -848,7 +848,7 @@ test("server bootstrap loads provider adapters from config file without exposing
     const snapshot = await registry.get("bootstrap-provider");
     assert.equal(snapshot.available, false);
     assert.equal("apiKey" in snapshot, false);
-    assert.equal("not-exposed" in JSON.stringify(snapshot), false);
+    assert.equal(JSON.stringify(snapshot).includes("not-exposed"), false);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
