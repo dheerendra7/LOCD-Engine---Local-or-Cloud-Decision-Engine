@@ -313,3 +313,13 @@ It includes target count, probeable target count, execution adapter count, decis
 ### Graceful shutdown
 
 The production bootstrap handles SIGTERM and SIGINT by stopping automatic probing first and then closing the HTTP server. Shutdown events are emitted through the structured logger.
+
+## Telemetry calibration
+
+Set LOCD_CALIBRATION_ENABLED=true to allow completed outcome telemetry to adjust target latency and cost estimates per target/workload pair.
+
+Calibration waits for a configurable minimum sample count before changing estimates. Factors are bounded to prevent a single anomalous observation from producing an unbounded routing shift.
+
+GET /v1/calibration returns the current calibration configuration and in-memory model state.
+
+When durable telemetry is enabled, the API rebuilds calibration state from retained completed decision events at startup.
