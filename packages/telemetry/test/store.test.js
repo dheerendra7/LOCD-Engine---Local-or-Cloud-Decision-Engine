@@ -29,7 +29,8 @@ test("decision events normalize only routing metadata", () => {
     outcome: "pending",
     actualLatencyMs: null,
     actualCostUsd: null,
-    errorClass: null
+    errorClass: null,
+    outcomeTimestamp: null
   });
   assert.equal("prompt" in event, false);
 });
