@@ -228,7 +228,8 @@ export function createServer({
   probeScheduler = null,
   serviceVersion = "0.1.0",
   calibrator = createCalibrator(),
-  calibrationEnabled = process.env.LOCD_CALIBRATION_ENABLED === "true"
+  calibrationEnabled = process.env.LOCD_CALIBRATION_ENABLED === "true",
+  coordinationBackend = null
 } = {}) {
   if (!Number.isFinite(maxBodyBytes) || maxBodyBytes < 1) {
 
@@ -695,11 +696,8 @@ export function createServer({
             automaticProbing: Boolean(probeScheduler?.isRunning?.()),
             calibrationEnabled: Boolean(calibrationEnabled),
             sharedCoordination: Boolean(coordinationStore),
-            coordinationBackend: stateDbFile
-              ? "sqlite"
-              : coordinationUrl
-                ? "network"
-                : "process-local",
+            coordinationBackend: coordinationBackend ||
+              (coordinationStore ? "shared" : "process-local"),
             rateLimitMode: coordinationStore ? "shared" : "process-local",
             idempotencyMode: coordinationStore ? "shared" : "process-local"
           },
@@ -790,6 +788,11 @@ if (isMain) {
     executionRegistry,
     probeScheduler,
     coordinationStore,
+    coordinationBackend: stateDbFile
+      ? "sqlite"
+      : coordinationUrl
+        ? "network"
+        : "process-local",
     executionEnabled: process.env.LOCD_EXECUTION_ENABLED === "true"
   });
 
