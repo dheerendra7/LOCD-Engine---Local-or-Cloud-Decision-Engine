@@ -8,6 +8,7 @@ import { createScopedAuthorizer } from "../../../packages/auth/src/index.js";
 import { createLogger } from "../../../packages/observability/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
 import { createExecutionRegistry } from "../../../packages/execution/src/index.js";
+import { createInMemoryCoordinationStore } from "../../../packages/coordination/src/index.js";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -1633,5 +1634,99 @@ test("API calibration rehydrates from durable telemetry without double counting"
     }
   } finally {
     await rm(telemetryDir, { recursive: true, force: true });
+  }
+});
+
+
+test("two API instances can share coordination state through an async coordination backend", async () => {
+  const coordination = createInMemoryCoordinationStore();
+  const serverA = createServer({
+    coordinationStore: coordination,
+    rateLimitMaxRequests: 1,
+    rateLimitWindowMs: 60_000
+  });
+  const serverB = createServer({
+    coordinationStore: coordination,
+    rateLimitMaxRequests: 1,
+    rateLimitWindowMs: 60_000
+  });
+
+  await Promise.all([
+    new Promise(resolve => serverA.listen(0, "127.0.0.1", resolve)),
+    new Promise(resolve => serverB.listen(0, "127.0.0.1", resolve))
+  ]);
+
+  const urlA = "http://127.0.0.1:" + serverA.address().port;
+  const urlB = "http://127.0.0.1:" + serverB.address().port;
+
+  try {
+    const first = await fetch(urlA + "/v1/metrics", {
+      headers: { "x-request-id": "coord-a" }
+    });
+    assert.equal(first.status, 200);
+
+    const second = await fetch(urlB + "/v1/metrics", {
+      headers: { "x-request-id": "coord-b" }
+    });
+    assert.equal(second.status, 429);
+  } finally {
+    await Promise.all([
+      new Promise(resolve => serverA.close(resolve)),
+      new Promise(resolve => serverB.close(resolve))
+    ]);
+  }
+});
+
+test("two API instances share idempotency responses through the same backend", async () => {
+  const coordination = createInMemoryCoordinationStore();
+  const serverA = createServer({ coordinationStore: coordination });
+  const serverB = createServer({ coordinationStore: coordination });
+
+  await Promise.all([
+    new Promise(resolve => serverA.listen(0, "127.0.0.1", resolve)),
+    new Promise(resolve => serverB.listen(0, "127.0.0.1", resolve))
+  ]);
+
+  const urlA = "http://127.0.0.1:" + serverA.address().port;
+  const urlB = "http://127.0.0.1:" + serverB.address().port;
+  const headers = {
+    "content-type": "application/json",
+    "idempotency-key": "shared-idem"
+  };
+  const body = JSON.stringify({
+    workload: { type: "classification", sensitivity: "low" },
+    targets: [{
+      id: "shared-idem-target",
+      mode: "local",
+      health: 1,
+      capacity: 0.1,
+      privacy: 1,
+      estimatedLatencyMs: 25,
+      estimatedCostUsd: 0
+    }]
+  });
+
+  try {
+    const first = await fetch(urlA + "/v1/decide", {
+      method: "POST",
+      headers,
+      body
+    });
+    assert.equal(first.status, 200);
+    const firstBody = await first.json();
+
+    const second = await fetch(urlB + "/v1/decide", {
+      method: "POST",
+      headers,
+      body
+    });
+    assert.equal(second.status, 200);
+    assert.equal(second.headers.get("idempotency-replayed"), "true");
+    assert.equal((await second.json()).decisionId, firstBody.decisionId);
+  } finally {
+    await Promise.all([
+      new Promise(resolve => serverA.close(resolve)),
+      new Promise(resolve => serverB.close(resolve))
+    ]);
   }
 });
