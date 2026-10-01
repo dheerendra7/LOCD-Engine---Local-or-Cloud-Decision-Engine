@@ -92,3 +92,9 @@ Set LOCD_STATE_DB_FILE to a persistent SQLite database path to enable durable de
 The SQLite path uses Node's built-in node:sqlite, WAL mode and a busy timeout for concurrent writers. It is appropriate for a single host or deployment that provides a reliable shared filesystem. It is not a network database for unrelated hosts.
 
 When LOCD_STATE_DB_FILE is set, it becomes the source for telemetry persistence and coordination-backed rate limiting/idempotency.
+
+## Network coordination service
+
+For multiple LOCD API instances on different hosts, set LOCD_COORDINATION_URL and LOCD_COORDINATION_API_KEY to use the reference network state service.
+
+The local SQLite mode remains the simpler single-host option. The network service is a coordination endpoint, not a public-facing application API.
