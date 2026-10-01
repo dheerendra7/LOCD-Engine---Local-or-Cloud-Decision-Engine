@@ -86,3 +86,26 @@ test("HTTP state client surfaces non-2xx errors", async () => {
     error => error.status === 403 && error.body.error === "forbidden"
   );
 });
+
+
+test("telemetry and coordination clear endpoints stay domain-specific", async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify({ cleared: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+
+  const stores = createHTTPStateStores({
+    baseUrl: "http://state.internal",
+    fetchImpl
+  });
+
+  await stores.telemetry.clear();
+  await stores.coordination.clear();
+
+  assert.equal(calls[0].url, "http://state.internal/v1/state/telemetry/clear");
+  assert.equal(calls[1].url, "http://state.internal/v1/state/coordination/clear");
+});
