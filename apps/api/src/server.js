@@ -303,14 +303,45 @@ export function createServer({
       res.setHeader("x-request-id", requestId);
 
       const idempotencyKey = String(req.headers["idempotency-key"] || "").trim() || null;
-      const getReplay = async body => {
+      let activeIdempotencyClaim = null;
+
+      const claimOrReplay = async body => {
         if (!idempotencyKey || !["POST", "PUT", "PATCH"].includes(req.method)) return null;
-        return await effectiveIdempotencyStore.lookup(
-          req.method + " " + pathname,
-          idempotencyKey,
-          body
-        );
+
+        const scope = req.method + " " + pathname;
+        if (typeof effectiveIdempotencyStore.claim === "function") {
+          const result = await effectiveIdempotencyStore.claim(
+            scope,
+            idempotencyKey,
+            body
+          );
+
+          if (result.claimed) {
+            activeIdempotencyClaim = { scope, body };
+            return null;
+          }
+
+          if (result.reason === "completed") {
+            return result.response;
+          }
+
+          if (result.reason === "in_progress") {
+            throw new Error("idempotency_request_in_progress");
+          }
+        }
+
+        return await effectiveIdempotencyStore.lookup(scope, idempotencyKey, body);
       };
+
+      const releaseIdempotencyClaim = async () => {
+        if (!activeIdempotencyClaim || typeof effectiveIdempotencyStore.release !== "function") {
+          return;
+        }
+        const { scope, body } = activeIdempotencyClaim;
+        activeIdempotencyClaim = null;
+        await effectiveIdempotencyStore.release(scope, idempotencyKey, body);
+      };
+
       const rememberResponse = async (body, status, responseBody) => {
         if (!idempotencyKey) return;
         await effectiveIdempotencyStore.remember(
@@ -319,6 +350,7 @@ export function createServer({
           body,
           { status, body: responseBody }
         );
+        activeIdempotencyClaim = null;
       };
       const sendReplay = replay => sendJson(res, replay.status, replay.body, {
         "idempotency-replayed": "true"
@@ -384,7 +416,7 @@ export function createServer({
 
       if (req.method === "POST" && pathname === "/v1/execute") {
         const body = await readBody(req, maxBodyBytes);
-        const replay = await getReplay(body);
+        const replay = await claimOrReplay(body);
         if (replay) {
           sendReplay(replay);
           return;
@@ -430,7 +462,7 @@ export function createServer({
 
       if (req.method === "POST" && pathname === "/v1/hybrid-plan") {
         const body = await readBody(req, maxBodyBytes);
-        const replay = await getReplay(body);
+        const replay = await claimOrReplay(body);
         if (replay) {
           sendReplay(replay);
           return;
@@ -454,7 +486,7 @@ export function createServer({
       if (req.method === "POST" && pathname === "/v1/decide") {
         await calibrationReady;
         const body = await readBody(req, maxBodyBytes);
-        const replay = await getReplay(body);
+        const replay = await claimOrReplay(body);
         if (replay) {
           sendReplay(replay);
           return;
@@ -513,7 +545,7 @@ export function createServer({
 
       if (req.method === "POST" && pathname === "/v1/outcomes") {
         const body = await readBody(req, maxBodyBytes);
-        const replay = await getReplay(body);
+        const replay = await claimOrReplay(body);
         if (replay) {
           sendReplay(replay);
           return;
@@ -558,7 +590,7 @@ export function createServer({
 
       if (req.method === "POST" && pathname === "/v1/targets") {
         const body = await readBody(req, maxBodyBytes);
-        const replay = await getReplay(body);
+        const replay = await claimOrReplay(body);
         if (replay) {
           sendReplay(replay);
           return;
@@ -582,7 +614,7 @@ export function createServer({
         }
 
         const body = await readBody(req, maxBodyBytes);
-        const replay = await getReplay(body);
+        const replay = await claimOrReplay(body);
         if (replay) {
           sendReplay(replay);
           return;
@@ -617,7 +649,7 @@ export function createServer({
         }
 
         const body = await readBody(req, maxBodyBytes);
-        const replay = await getReplay(body);
+        const replay = await claimOrReplay(body);
         if (replay) {
           sendReplay(replay);
           return;
@@ -724,12 +756,22 @@ export function createServer({
       sendJson(res, 405, { error: "method_not_allowed" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "bad_request";
+      try {
+        if (activeIdempotencyClaim) await releaseIdempotencyClaim();
+      } catch {
+        // Preserve the original request error.
+      }
+
       if (message === "idempotency_key_reused") {
         sendJson(res, 409, { error: message });
         return;
       }
       if (message === "idempotency_key_invalid") {
         sendJson(res, 400, { error: message });
+        return;
+      }
+      if (message === "idempotency_request_in_progress") {
+        sendJson(res, 409, { error: message });
         return;
       }
       if (message === "request body too large") {
