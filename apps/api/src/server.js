@@ -687,7 +687,9 @@ export function createServer({
           capabilities: {
             executionEnabled: Boolean(executionEnabled),
             persistentTargets: Boolean(targetFile),
-            persistentTelemetry: Boolean(process.env.LOCD_TELEMETRY_FILE?.trim()),
+            persistentTelemetry: Boolean(
+              process.env.LOCD_TELEMETRY_FILE?.trim() || process.env.LOCD_STATE_DB_FILE?.trim()
+            ),
             automaticProbing: Boolean(probeScheduler?.isRunning?.()),
             calibrationEnabled: Boolean(calibrationEnabled),
             sharedCoordination: Boolean(coordinationStore),
