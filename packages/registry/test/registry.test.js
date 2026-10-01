@@ -216,3 +216,22 @@ test("registry probe rejects invalid probe responses", async () => {
     /probe_returned_invalid_snapshot/
   );
 });
+
+test("registry lists only targets with probe support", async () => {
+  const registry = createTargetRegistry([
+    {
+      id: "probeable",
+      async getSnapshot() { return { id: "probeable", mode: "private" }; },
+      async probe() { return { id: "probeable", mode: "private", available: true }; }
+    },
+    {
+      id: "static",
+      async getSnapshot() { return { id: "static", mode: "local" }; }
+    }
+  ]);
+
+  assert.deepEqual(
+    (await registry.listProbeable()).map(item => item.id),
+    ["probeable"]
+  );
+});
