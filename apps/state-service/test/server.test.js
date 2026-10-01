@@ -147,3 +147,75 @@ test("state service limits request body size", async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+
+test("state service keeps telemetry and coordination cleanup isolated", async () => {
+  const instance = await startServer();
+
+  try {
+    const headers = {
+      authorization: "Bearer state-secret",
+      "content-type": "application/json"
+    };
+
+    await fetch(instance.url + "/v1/state/decisions", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        id: "clear-isolation",
+        route: "local",
+        workloadType: "batch"
+      })
+    });
+
+    await fetch(instance.url + "/v1/state/kv/keep", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ value: { keep: true } })
+    });
+
+    const telemetryClear = await fetch(instance.url + "/v1/state/telemetry/clear", {
+      method: "POST",
+      headers
+    });
+    assert.equal(telemetryClear.status, 200);
+
+    const coordinationStillThere = await fetch(instance.url + "/v1/state/kv/keep", {
+      headers: { authorization: "Bearer state-secret" }
+    });
+    assert.deepEqual(await coordinationStillThere.json(), { value: { keep: true } });
+
+    const telemetryEmpty = await fetch(instance.url + "/v1/state/metrics", {
+      headers: { authorization: "Bearer state-secret" }
+    });
+    assert.equal((await telemetryEmpty.json()).totalDecisions, 0);
+
+    await fetch(instance.url + "/v1/state/decisions", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        id: "clear-isolation-2",
+        route: "cloud",
+        workloadType: "batch"
+      })
+    });
+
+    const coordinationClear = await fetch(instance.url + "/v1/state/coordination/clear", {
+      method: "POST",
+      headers
+    });
+    assert.equal(coordinationClear.status, 200);
+
+    const telemetryStillThere = await fetch(instance.url + "/v1/state/metrics", {
+      headers: { authorization: "Bearer state-secret" }
+    });
+    assert.equal((await telemetryStillThere.json()).totalDecisions, 1);
+
+    const coordinationEmpty = await fetch(instance.url + "/v1/state/kv/keep", {
+      headers: { authorization: "Bearer state-secret" }
+    });
+    assert.deepEqual(await coordinationEmpty.json(), { value: null });
+  } finally {
+    await instance.cleanup();
+  }
+});
