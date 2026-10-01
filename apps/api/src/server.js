@@ -702,8 +702,7 @@ export function createServer({
             sharedCoordination: Boolean(coordinationStore),
             coordinationBackend: coordinationBackend ||
               (coordinationStore ? "shared" : "process-local"),
-            telemetryBackend: telemetryBackend ||
-              (decisionStore ? "configured" : "process-local"),
+            telemetryBackend: telemetryBackend || "process-local",
             rateLimitMode: coordinationStore ? "shared" : "process-local",
             idempotencyMode: coordinationStore ? "shared" : "process-local"
           },
