@@ -97,3 +97,15 @@ test("authorization header and x-api-key header share the same verifier", () => 
     headers: { "x-locd-api-key": "read-secret" }
   }, "read").ok, true);
 });
+
+test("duplicate API secret values are rejected even with different IDs", () => {
+  assert.throws(
+    () => createScopedAuthorizer({
+      keys: [
+        { id: "one", secret: "same-secret", scopes: ["read"] },
+        { id: "two", secret: "same-secret", scopes: ["execute"] }
+      ]
+    }),
+    /duplicate auth key secret/
+  );
+});
