@@ -563,8 +563,8 @@ test("policy rules can match required capabilities", () => {
       }]
     },
     targets: [
-      { id: "local", mode: "local", health: 1, privacy: 1 },
-      { id: "private", mode: "private", health: 1, privacy: 1 }
+      { id: "local", mode: "local", health: 1, privacy: 1, capabilities: ["vision", "text-generation"] },
+      { id: "private", mode: "private", health: 1, privacy: 1, capabilities: ["vision", "text-generation"] }
     ]
   });
 
