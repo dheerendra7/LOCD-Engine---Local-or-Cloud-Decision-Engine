@@ -1730,3 +1730,24 @@ test("two API instances share idempotency responses through the same backend", a
     ]);
   }
 });
+
+
+test("status endpoint reports shared coordination mode", async () => {
+  const coordination = createInMemoryCoordinationStore();
+  const statusServer = createServer({ coordinationStore: coordination });
+
+  await new Promise(resolve => statusServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + statusServer.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/status");
+    assert.equal(response.status, 200);
+    const body = await response.json();
+
+    assert.equal(body.capabilities.sharedCoordination, true);
+    assert.equal(body.capabilities.rateLimitMode, "shared");
+    assert.equal(body.capabilities.idempotencyMode, "shared");
+  } finally {
+    await new Promise(resolve => statusServer.close(resolve));
+  }
+});
