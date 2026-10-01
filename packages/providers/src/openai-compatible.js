@@ -52,6 +52,9 @@ function normalizeSnapshot(snapshot) {
     privacy: Number.isFinite(Number(snapshot.privacy)) ? Math.min(1, Math.max(0, Number(snapshot.privacy))) : 0,
     estimatedLatencyMs: Number.isFinite(Number(snapshot.estimatedLatencyMs)) ? Math.max(0, Number(snapshot.estimatedLatencyMs)) : null,
     estimatedCostUsd: Number.isFinite(Number(snapshot.estimatedCostUsd)) ? Math.max(0, Number(snapshot.estimatedCostUsd)) : null,
+    pricing: snapshot.pricing && typeof snapshot.pricing === "object"
+      ? structuredClone(snapshot.pricing)
+      : null,
     availableMemoryGb: Number.isFinite(Number(snapshot.availableMemoryGb)) ? Math.max(0, Number(snapshot.availableMemoryGb)) : null,
     maxContextTokens: Number.isFinite(Number(snapshot.maxContextTokens)) ? Math.max(0, Number(snapshot.maxContextTokens)) : null,
     lastHeartbeatAt: snapshot.lastHeartbeatAt ? new Date(snapshot.lastHeartbeatAt).toISOString() : null,
