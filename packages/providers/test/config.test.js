@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createProviderFromConfig, createProvidersFromConfig } from "../src/index.js";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import {
+  createProviderFromConfig,
+  createProvidersFromConfig,
+  loadProvidersFromFile
+} from "../src/index.js";
 
 const env = { PRIVATE_PROVIDER_KEY: "secret" };
 
@@ -75,4 +82,38 @@ test("provider list creates multiple adapters", () => {
 
   assert.equal(adapters.length, 2);
   assert.equal(adapters[1].targetId, "local-provider");
+});
+
+test("provider config file loader creates adapters from JSON", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-provider-config-"));
+  const file = path.join(dir, "providers.json");
+
+  try {
+    await writeFile(file, JSON.stringify({ providers: [base] }), "utf8");
+    const adapters = await loadProvidersFromFile(file, env, async () => new Response("{}", { status: 200 }));
+    assert.equal(adapters.length, 1);
+    assert.equal(adapters[0].targetId, "private-provider");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("missing and malformed provider config files fail clearly", async () => {
+  await assert.rejects(
+    () => loadProvidersFromFile("/tmp/locd-provider-config-does-not-exist.json", env),
+    /provider config file not found/
+  );
+
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-provider-config-invalid-"));
+  const file = path.join(dir, "providers.json");
+
+  try {
+    await writeFile(file, "{not-json}", "utf8");
+    await assert.rejects(
+      () => loadProvidersFromFile(file, env),
+      /provider config file is invalid JSON/
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
