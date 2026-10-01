@@ -54,3 +54,16 @@ A future adapter might wrap:
 The adapter should not contain routing policy. LOCD remains responsible for placement decisions and policy semantics.
 
 Live execution must be introduced as a separate, security-reviewed milestone because it creates a data-processing boundary and can incur provider costs.
+
+## API execution
+
+The public execution endpoint is POST /v1/execute.
+
+For safety, live mode has two explicit gates:
+
+1. LOCD_EXECUTION_ENABLED=true
+2. LOCD_API_KEY configured and supplied by the caller
+
+This prevents a server that has been deployed with provider credentials from accidentally becoming a public execution proxy.
+
+Configured provider adapters are registered from LOCD_PROVIDERS_FILE and become live execution targets. Static target snapshots do not expose live execution and receive a dry-run-only fallback.
