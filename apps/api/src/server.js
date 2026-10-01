@@ -8,6 +8,11 @@ import { createDecisionStore, createFileDecisionStore } from "../../../packages/
 import { listPolicyProfiles } from "../../../packages/policy/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
 import { planHybridExecution } from "../../../packages/planner/src/index.js";
+import {
+  createDryRunExecutionAdapter,
+  createExecutionRegistry,
+  executePlan
+} from "../../../packages/execution/src/index.js";
 import { createLogger, createRequestId } from "../../../packages/observability/src/index.js";
 import { createIdempotencyStore } from "../../../packages/runtime/src/index.js";
 import { createRateLimiter, getClientKey } from "./rate-limit.js";
@@ -90,6 +95,32 @@ async function serveWeb(res, pathname) {
   }
 }
 
+export async function createConfiguredExecutionRegistry({
+  targetRegistry
+} = {}) {
+  if (!targetRegistry) throw new Error("targetRegistry is required");
+
+  const executionRegistry = createExecutionRegistry(
+    typeof targetRegistry.listExecutionAdapters === "function"
+      ? targetRegistry.listExecutionAdapters()
+      : []
+  );
+
+  const snapshots = await targetRegistry.list();
+  for (const target of snapshots) {
+    if (!executionRegistry.has(target.id)) {
+      executionRegistry.register(
+        createDryRunExecutionAdapter({
+          id: "dry-run:" + target.id,
+          targetId: target.id
+        })
+      );
+    }
+  }
+
+  return executionRegistry;
+}
+
 export function createConfiguredProbeScheduler({
   registry,
   intervalMs = Number(process.env.LOCD_PROBE_INTERVAL_MS || 0),
@@ -153,7 +184,9 @@ export function createServer({
   trustProxy = process.env.LOCD_TRUST_PROXY === "true",
   logger = createLogger({
     level: process.env.LOCD_LOG_LEVEL || "info"
-  })
+  }),
+  executionRegistry = null,
+  executionEnabled = process.env.LOCD_EXECUTION_ENABLED === "true"
 } = {}) {
   if (!Number.isFinite(maxBodyBytes) || maxBodyBytes < 1) {
     throw new Error("maxBodyBytes must be >= 1");
@@ -235,6 +268,52 @@ export function createServer({
           service: "locd-api",
           version: "0.1.0"
         });
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/v1/execute") {
+        const body = await readBody(req, maxBodyBytes);
+        const replay = getReplay(body);
+        if (replay) {
+          sendReplay(replay);
+          return;
+        }
+
+        if (!body.plan) {
+          sendJson(res, 400, { error: "plan is required" });
+          return;
+        }
+
+        const mode = body.mode || "dry-run";
+        if (!["dry-run", "live"].includes(mode)) {
+          sendJson(res, 400, { error: "execution mode must be dry-run or live" });
+          return;
+        }
+
+        if (mode === "live") {
+          if (!executionEnabled) {
+            sendJson(res, 403, { error: "live_execution_disabled" });
+            return;
+          }
+          if (!apiKey) {
+            sendJson(res, 403, { error: "live_execution_requires_api_key" });
+            return;
+          }
+        }
+
+        const registry = executionRegistry ||
+          await createConfiguredExecutionRegistry({ targetRegistry });
+
+        const responseBody = await executePlan(body.plan, {
+          registry,
+          mode,
+          timeoutMs: body.timeoutMs,
+          failFast: body.failFast !== false,
+          includeOutputs: body.includeOutputs === true
+        });
+
+        rememberResponse(body, 200, responseBody);
+        sendJson(res, 200, responseBody);
         return;
       }
 
@@ -494,8 +573,18 @@ if (isMain) {
     maxConcurrent: Number(process.env.LOCD_PROBE_MAX_CONCURRENT || 4),
     logger
   });
+  const executionRegistry = await createConfiguredExecutionRegistry({
+    targetRegistry
+  });
 
-  createServer({ targetFile, targetRegistry, decisionStore, logger }).listen(port, "0.0.0.0", () => {
+  createServer({
+    targetFile,
+    targetRegistry,
+    decisionStore,
+    logger,
+    executionRegistry,
+    executionEnabled: process.env.LOCD_EXECUTION_ENABLED === "true"
+  }).listen(port, "0.0.0.0", () => {
     if (probeScheduler) {
       probeScheduler.start();
       void probeScheduler.runOnce();
