@@ -124,3 +124,33 @@ test("registry rejects duplicate target adapters", () => {
     /already registered/
   );
 });
+
+test("execution outputs are caller-scoped and omitted by default", async () => {
+  const registry = createExecutionRegistry([{
+    id: "provider",
+    targetId: "local",
+    async execute({ payload }) {
+      return { echoed: payload.prompt };
+    }
+  }]);
+
+  const planWithPayload = {
+    ...plan(),
+    steps: [{ id: "infer", targetId: "local", purpose: "inference", payload: { prompt: "hello" } }]
+  };
+
+  const hidden = await executePlan(planWithPayload, { registry });
+  assert.deepEqual(hidden.results, []);
+  assert.equal("payload" in hidden.receipts[0], false);
+
+  const visible = await executePlan(planWithPayload, {
+    registry,
+    includeOutputs: true
+  });
+  assert.deepEqual(visible.results, [{
+    stepId: "infer",
+    targetId: "local",
+    result: { echoed: "hello" }
+  }]);
+  assert.equal("payload" in visible.receipts[0], false);
+});
