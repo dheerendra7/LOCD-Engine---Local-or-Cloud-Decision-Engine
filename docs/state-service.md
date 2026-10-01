@@ -52,6 +52,8 @@ Authenticated state endpoints:
     GET  /v1/state/decisions?limit=50
     GET  /v1/state/metrics
     POST /v1/state/outcomes/:id
+    POST /v1/state/telemetry/clear
+    POST /v1/state/coordination/clear
 
     GET    /v1/state/kv/:key
     PUT    /v1/state/kv/:key
@@ -60,3 +62,4 @@ Authenticated state endpoints:
     DELETE /v1/state/kv/:key
 
 The coordination endpoints expose only primitive shared-state operations. Product routing policy remains in the LOCD API/core engine.
+The two clear operations are intentionally separate so telemetry cleanup cannot reset coordination state and vice versa.
