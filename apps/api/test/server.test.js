@@ -1399,6 +1399,7 @@ test("readiness endpoint reports public service readiness", async () => {
 test("status endpoint exposes safe operational counts", async () => {
   const probeable = {
     id: "ops-probeable",
+    targetId: "ops-probeable",
     async getSnapshot() {
       return {
         id: "ops-probeable",
