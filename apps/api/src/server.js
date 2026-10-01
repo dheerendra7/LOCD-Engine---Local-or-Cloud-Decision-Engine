@@ -475,6 +475,10 @@ export function createServer({
 
         const decision = decide(request);
 
+        const selectedTarget = calibratedTargets.find(
+          target => String(target?.id) === String(decision.targetId)
+        );
+
         const event = await decisionStore.record({
           decisionVersion: decision.decisionVersion,
           workloadType: body.workload?.type,
@@ -483,6 +487,7 @@ export function createServer({
           confidence: decision.confidence,
           estimatedLatencyMs: decision.estimated?.latencyMs,
           estimatedCostUsd: decision.estimated?.costUsd,
+          targetUtilization: selectedTarget?.capacity,
           outcome: "pending"
         });
 
@@ -532,7 +537,8 @@ export function createServer({
             actualLatencyMs: event.actualLatencyMs,
             estimatedCostUsd: event.estimatedCostUsd,
             actualCostUsd: event.actualCostUsd,
-            outcome: event.outcome
+            outcome: event.outcome,
+            utilization: event.targetUtilization
           });
           await rememberResponse(body, 200, event);
           sendJson(res, 200, event);
