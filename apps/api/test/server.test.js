@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createConfiguredTargetRegistry, createServer } from "../src/server.js";
+import { createConfiguredProbeScheduler, createConfiguredTargetRegistry, createServer } from "../src/server.js";
 import { createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { createLogger } from "../../../packages/observability/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
@@ -889,4 +889,46 @@ test("server bootstrap fails on duplicate provider and target IDs", async () => 
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+
+test("configured probe scheduler can be disabled with zero interval", () => {
+  const scheduler = createConfiguredProbeScheduler({
+    registry: {
+      async listProbeable() { return []; },
+      async probe() { return {}; }
+    },
+    intervalMs: 0
+  });
+  assert.equal(scheduler, null);
+});
+
+test("configured probe scheduler emits normalized probe logs", async () => {
+  const logs = [];
+  const scheduler = createConfiguredProbeScheduler({
+    registry: {
+      async listProbeable() { return [{ id: "configured-target" }]; },
+      async probe() {
+        return {
+          id: "configured-target",
+          available: true,
+          health: 0.97,
+          estimatedLatencyMs: 31
+        };
+      }
+    },
+    intervalMs: 1000,
+    logger: {
+      info(event) {
+        logs.push(event);
+      }
+    }
+  });
+
+  const results = await scheduler.runOnce();
+  assert.equal(results[0].status, "success");
+  assert.equal(logs[0].event, "target_probe");
+  assert.equal(logs[0].targetId, "configured-target");
+  assert.equal(logs[0].health, 0.97);
+  assert.equal(logs[0].latencyMs, 31);
 });
