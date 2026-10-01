@@ -183,7 +183,12 @@ export async function loadAuthorizerFromFile({
 }
 
 export function requiredScopeForRequest(method, pathname) {
-  if (method === "GET") return "read";
+  if (
+    method === "GET" &&
+    ["/v1/policies", "/v1/targets", "/v1/decisions", "/v1/metrics"].includes(pathname)
+  ) {
+    return "read";
+  }
 
   if (method === "POST" && (
     pathname === "/v1/decide" ||
