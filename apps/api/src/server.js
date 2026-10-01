@@ -229,7 +229,8 @@ export function createServer({
   serviceVersion = "0.1.0",
   calibrator = createCalibrator(),
   calibrationEnabled = process.env.LOCD_CALIBRATION_ENABLED === "true",
-  coordinationBackend = null
+  coordinationBackend = null,
+  telemetryBackend = null
 } = {}) {
   if (!Number.isFinite(maxBodyBytes) || maxBodyBytes < 1) {
 
@@ -240,16 +241,19 @@ export function createServer({
       typeof calibrator.hydrate !== "function") {
     throw new Error("calibrator must implement apply, observe and hydrate");
   }
-  try {
-    if (calibrator.snapshot().length === 0) {
-      calibrator.hydrate(decisionStore.list({ limit: 5000 }));
+  const calibrationReady = (async () => {
+    try {
+      if (calibrator.snapshot().length === 0) {
+        const events = await decisionStore.list({ limit: 5000 });
+        if (Array.isArray(events)) calibrator.hydrate(events);
+      }
+    } catch (error) {
+      logger.warn({
+        event: "calibration_hydrate_failed",
+        errorClass: error instanceof Error ? error.message : "calibration_hydrate_failed"
+      });
     }
-  } catch (error) {
-    logger.warn({
-      event: "calibration_hydrate_failed",
-      errorClass: error instanceof Error ? error.message : "calibration_hydrate_failed"
-    });
-  }
+  })();
   const auth = authorizer || loadScopedAuthFromEnv({
     legacyApiKey: apiKey
   });
@@ -448,6 +452,7 @@ export function createServer({
       }
 
       if (req.method === "POST" && pathname === "/v1/decide") {
+        await calibrationReady;
         const body = await readBody(req, maxBodyBytes);
         const replay = await getReplay(body);
         if (replay) {
@@ -470,7 +475,7 @@ export function createServer({
 
         const decision = decide(request);
 
-        const event = decisionStore.record({
+        const event = await decisionStore.record({
           decisionVersion: decision.decisionVersion,
           workloadType: body.workload?.type,
           route: decision.route,
@@ -519,7 +524,7 @@ export function createServer({
         }
 
         try {
-          const event = decisionStore.recordOutcome(body.decisionId, body);
+          const event = await decisionStore.recordOutcome(body.decisionId, body);
           calibrator.observe({
             targetId: event.targetId,
             workloadType: event.workloadType,
@@ -655,12 +660,12 @@ export function createServer({
 
       if (req.method === "GET" && pathname === "/v1/decisions") {
         const limit = new URL(req.url || "/", "http://localhost").searchParams.get("limit") || "50";
-        sendJson(res, 200, { decisions: decisionStore.list({ limit }) });
+        sendJson(res, 200, { decisions: await decisionStore.list({ limit }) });
         return;
       }
 
       if (req.method === "GET" && pathname === "/v1/metrics") {
-        sendJson(res, 200, decisionStore.summary());
+        sendJson(res, 200, await decisionStore.summary());
         return;
       }
 
@@ -690,14 +695,15 @@ export function createServer({
             executionEnabled: Boolean(executionEnabled),
             persistentTargets: Boolean(targetFile),
             persistentTelemetry: Boolean(
-              process.env.LOCD_TELEMETRY_FILE?.trim() ||
-              process.env.LOCD_STATE_DB_FILE?.trim()
+              telemetryBackend && telemetryBackend !== "process-local"
             ),
             automaticProbing: Boolean(probeScheduler?.isRunning?.()),
             calibrationEnabled: Boolean(calibrationEnabled),
             sharedCoordination: Boolean(coordinationStore),
             coordinationBackend: coordinationBackend ||
               (coordinationStore ? "shared" : "process-local"),
+            telemetryBackend: telemetryBackend ||
+              (decisionStore ? "configured" : "process-local"),
             rateLimitMode: coordinationStore ? "shared" : "process-local",
             idempotencyMode: coordinationStore ? "shared" : "process-local"
           },
@@ -705,7 +711,7 @@ export function createServer({
             targets: targets.length,
             probeableTargets: probeableTargets.length,
             executionAdapters: executionAdapters.length,
-            decisions: decisionStore.summary().totalDecisions
+            decisions: (await decisionStore.summary()).totalDecisions
           }
         });
         return;
@@ -743,6 +749,8 @@ if (isMain) {
   const targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null;
   const telemetryFile = process.env.LOCD_TELEMETRY_FILE?.trim() || null;
   const stateDbFile = process.env.LOCD_STATE_DB_FILE?.trim() || null;
+  const stateServiceUrl = process.env.LOCD_STATE_SERVICE_URL?.trim() || null;
+  const stateServiceApiKey = process.env.LOCD_STATE_SERVICE_API_KEY?.trim() || null;
   const coordinationUrl = process.env.LOCD_COORDINATION_URL?.trim() || null;
   const coordinationApiKey = process.env.LOCD_COORDINATION_API_KEY?.trim() || null;
   const providerFile = process.env.LOCD_PROVIDERS_FILE?.trim() || null;
@@ -755,13 +763,24 @@ if (isMain) {
     ? createSQLiteStateStores({ filePath: stateDbFile, maxEntries: 5000 })
     : null;
 
+  const networkState = !stateDbFile && stateServiceUrl
+    ? createHTTPStateStores({
+        baseUrl: stateServiceUrl,
+        apiKey: stateServiceApiKey,
+        maxEntries: 5000
+      })
+    : null;
+
   const decisionStore = stateStores
     ? stateStores.telemetry
-    : telemetryFile
-      ? createFileDecisionStore({ filePath: telemetryFile, maxEntries: 5000 })
-      : createDecisionStore({ maxEntries: 1000 });
+    : networkState?.telemetry
+      ? networkState.telemetry
+      : telemetryFile
+        ? createFileDecisionStore({ filePath: telemetryFile, maxEntries: 5000 })
+        : createDecisionStore({ maxEntries: 1000 });
 
   const coordinationStore = stateStores?.coordination ||
+    networkState?.coordination ||
     (coordinationUrl
       ? createHTTPCoordinationStore({
           baseUrl: coordinationUrl,
@@ -790,8 +809,13 @@ if (isMain) {
     coordinationStore,
     coordinationBackend: stateDbFile
       ? "sqlite"
-      : coordinationUrl
+      : (coordinationUrl || stateServiceUrl)
         ? "network"
+        : "process-local",
+    telemetryBackend: stateDbFile
+      ? "sqlite"
+      : (stateServiceUrl || telemetryFile)
+        ? (stateServiceUrl ? "network" : "file")
         : "process-local",
     executionEnabled: process.env.LOCD_EXECUTION_ENABLED === "true"
   });
