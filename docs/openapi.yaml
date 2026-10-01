@@ -447,9 +447,6 @@ components:
                       - {type: array, items: {type: string}}
               set:
                 type: object
-        policyRulesApplied:
-          type: array
-          items: {type: string}
     DecisionRequest:
       type: object
       required: [workload]
@@ -475,6 +472,9 @@ components:
         confidence: {type: number, minimum: 0, maximum: 1}
         score: {type: number, minimum: 0, maximum: 1}
         decisionId: {type: string}
+        policyRulesApplied:
+          type: array
+          items: {type: string}
         estimated:
           type: [object, "null"]
           properties:
