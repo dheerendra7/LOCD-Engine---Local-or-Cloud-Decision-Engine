@@ -9,3 +9,8 @@ dist/
 *.tmp
 .vscode/
 .idea/
+
+# Local SQLite state files
+*.sqlite
+*.sqlite3
+*.db
