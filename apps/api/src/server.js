@@ -21,6 +21,7 @@ import {
 import { loadProvidersFromFile } from "../../../packages/providers/src/index.js";
 import { loadScopedAuthFromEnv } from "../../../packages/auth/src/index.js";
 import { createSQLiteStateStores } from "../../../packages/sqlite/src/index.js";
+import { createHTTPCoordinationStore } from "../../../packages/state-client/src/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
@@ -694,6 +695,11 @@ export function createServer({
             automaticProbing: Boolean(probeScheduler?.isRunning?.()),
             calibrationEnabled: Boolean(calibrationEnabled),
             sharedCoordination: Boolean(coordinationStore),
+            coordinationBackend: stateDbFile
+              ? "sqlite"
+              : coordinationUrl
+                ? "network"
+                : "process-local",
             rateLimitMode: coordinationStore ? "shared" : "process-local",
             idempotencyMode: coordinationStore ? "shared" : "process-local"
           },
@@ -739,6 +745,8 @@ if (isMain) {
   const targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null;
   const telemetryFile = process.env.LOCD_TELEMETRY_FILE?.trim() || null;
   const stateDbFile = process.env.LOCD_STATE_DB_FILE?.trim() || null;
+  const coordinationUrl = process.env.LOCD_COORDINATION_URL?.trim() || null;
+  const coordinationApiKey = process.env.LOCD_COORDINATION_API_KEY?.trim() || null;
   const providerFile = process.env.LOCD_PROVIDERS_FILE?.trim() || null;
   const targetRegistry = await createConfiguredTargetRegistry({
     targetFile,
@@ -755,7 +763,13 @@ if (isMain) {
       ? createFileDecisionStore({ filePath: telemetryFile, maxEntries: 5000 })
       : createDecisionStore({ maxEntries: 1000 });
 
-  const coordinationStore = stateStores?.coordination || null;
+  const coordinationStore = stateStores?.coordination ||
+    (coordinationUrl
+      ? createHTTPCoordinationStore({
+          baseUrl: coordinationUrl,
+          apiKey: coordinationApiKey
+        })
+      : null);
 
   const logger = createLogger({ level: process.env.LOCD_LOG_LEVEL || "info" });
   const probeScheduler = createConfiguredProbeScheduler({
