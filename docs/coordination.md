@@ -38,3 +38,9 @@ The status values reflect the server instance configuration.
 ## Operational recommendation
 
 Use shared coordination before putting more than one LOCD API instance behind a load balancer. Keep telemetry storage, rate limiting and idempotency semantics on the same operational consistency model.
+
+## SQLite backend
+
+The repository also provides a SQLite-backed implementation of the coordination contract. It uses an on-disk database with WAL mode and atomic writer transactions.
+
+This provides cross-process coordination when instances share the same database file/filesystem. It does not provide network-level multi-host coordination.
