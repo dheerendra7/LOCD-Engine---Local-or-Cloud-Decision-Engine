@@ -115,3 +115,24 @@ test("partial heartbeat updates preserve existing target fields", async () => {
   assert.equal(updated.capacity, 0.1);
   assert.equal(updated.lastHeartbeatAt, "2026-09-30T00:00:00.000Z");
 });
+
+test("target pricing metadata is normalized and preserved", async () => {
+  const adapter = createStaticTargetAdapter({
+    id: "priced-target",
+    mode: "cloud",
+    pricing: {
+      unit: "per-1k-tokens",
+      currency: "USD",
+      inputUsdPer1kTokens: 0.002,
+      outputUsdPer1kTokens: 0.004
+    }
+  });
+
+  const snapshot = await adapter.getSnapshot();
+  assert.deepEqual(snapshot.pricing, {
+    unit: "per-1k-tokens",
+    currency: "USD",
+    inputUsdPer1kTokens: 0.002,
+    outputUsdPer1kTokens: 0.004
+  });
+});
