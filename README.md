@@ -120,15 +120,15 @@ Decision core, hard/soft policy semantics, workload-aware policy rules, explaina
 
 ### Next
 
-Shared database/event telemetry, distributed rate-limit and idempotency coordination, utilization-aware calibration, richer provider-specific adapters and multi-instance deployment hardening.
+Managed/shared database and event backends beyond the current SQLite/network state modes, multi-tenant control-plane isolation, richer provider-specific execution adapters, fleet-level policy management, and production deployment hardening for shared infrastructure.
 
 ### Later
 
-Multi-tenant control plane and advanced optimization across fleets/providers.
+Adaptive optimization across fleets/providers, advanced placement models, automated capacity planning, and deeper enterprise governance.
 
 ## Status
 
-Early engineering foundation. Not production-certified yet. Provider availability, telemetry and cost estimates must be validated in the target environment.
+Early engineering foundation. The repository has a production-oriented architecture and CI baseline, but it is not production-certified yet. Provider availability, telemetry and cost estimates must be validated in the target environment.
 
 ## License
 
