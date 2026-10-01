@@ -265,3 +265,24 @@ A target without probe support returns HTTP 501. Unknown targets return HTTP 404
 
 The built-in OpenAI-compatible adapter probes GET /v1/models and measures round-trip latency.
 
+
+## Execution
+
+### POST /v1/execute
+
+Executes a previously validated execution plan against server-registered execution adapters.
+
+Request fields:
+
+- plan: validated plan containing target IDs and optional step payloads
+- mode: dry-run or live; dry-run is the default
+- includeOutputs: optional boolean; when true, successful adapter results are returned to the caller and are not written to telemetry
+- timeoutMs: optional execution timeout
+- failFast: optional boolean, default true
+
+Live execution is disabled unless LOCD_EXECUTION_ENABLED=true. The API also requires LOCD_API_KEY to be configured before live execution is accepted.
+
+Dry-run execution uses metadata-only fallback adapters for static targets.
+
+Execution telemetry receipts contain step metadata, status, timing and error class only. Raw request payloads are not written to receipts or telemetry.
+
