@@ -36,3 +36,96 @@ test("unknown profiles fail clearly", () => {
     /unknown policy profile/
   );
 });
+
+test("resolvePolicy applies matching rules in deterministic priority order", () => {
+  const resolved = resolvePolicy({
+    profile: "balanced",
+    rules: [
+      {
+        id: "low",
+        priority: 1,
+        when: { workloadType: "legal" },
+        set: { sensitiveDataMode: "prefer-local" }
+      },
+      {
+        id: "high",
+        priority: 10,
+        when: { workloadType: "legal" },
+        set: { sensitiveDataMode: "private-only" }
+      }
+    ]
+  }, {
+    workload: { type: "legal", sensitivity: "high" }
+  });
+
+  assert.equal(resolved.sensitiveDataMode, "private-only");
+  assert.deepEqual(resolved.matchedRules, ["low", "high"]);
+});
+
+test("non-matching policy rules do not mutate resolved policy", () => {
+  const resolved = resolvePolicy({
+    sensitiveDataMode: "balanced",
+    rules: [{
+      id: "finance-only",
+      priority: 100,
+      when: { workloadType: "finance" },
+      set: { sensitiveDataMode: "private-only" }
+    }]
+  }, {
+    workload: { type: "general", sensitivity: "low" }
+  });
+
+  assert.equal(resolved.sensitiveDataMode, "balanced");
+  assert.deepEqual(resolved.matchedRules, []);
+});
+
+test("invalid policy rule shapes fail before decision evaluation", () => {
+  assert.throws(
+    () => resolvePolicy({
+      rules: [{ id: "missing-set", when: { workloadType: "x" } }]
+    }, { workload: { type: "x" } }),
+    /policy rule set must be an object/
+  );
+
+  assert.throws(
+    () => resolvePolicy({
+      rules: [{ id: "bad-priority", priority: 1.5, set: { sensitiveDataMode: "balanced" } }]
+    }, { workload: { type: "x" } }),
+    /priority must be an integer/
+  );
+});
+
+test("rule capability matching requires all declared capabilities", () => {
+  const matched = resolvePolicy({
+    rules: [{
+      id: "vision-and-text",
+      priority: 1,
+      when: { requiredCapability: ["vision", "text-generation"] },
+      set: { allowedModes: ["private"] }
+    }]
+  }, {
+    workload: {
+      type: "vision",
+      sensitivity: "low",
+      requiredCapabilities: ["vision", "text-generation"]
+    }
+  });
+
+  const unmatched = resolvePolicy({
+    rules: [{
+      id: "vision-and-text",
+      priority: 1,
+      when: { requiredCapability: ["vision", "text-generation"] },
+      set: { allowedModes: ["private"] }
+    }]
+  }, {
+    workload: {
+      type: "vision",
+      sensitivity: "low",
+      requiredCapabilities: ["vision"]
+    }
+  });
+
+  assert.deepEqual(matched.matchedRules, ["vision-and-text"]);
+  assert.deepEqual(unmatched.matchedRules, []);
+});

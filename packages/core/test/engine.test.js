@@ -423,3 +423,151 @@ test("negative heartbeat age policy is rejected", () => {
     /policy.maxHeartbeatAgeMs must be >= 0/
   );
 });
+
+
+test("policy rules can apply workload-specific hard constraints", () => {
+  const result = decide({
+    workload: {
+      type: "legal-llm",
+      sensitivity: "high"
+    },
+    policy: {
+      rules: [
+        {
+          id: "legal-local-only",
+          priority: 100,
+          when: { workloadType: "legal-llm", sensitivity: "high" },
+          set: { sensitiveDataMode: "local-only", allowedModes: ["local"] }
+        }
+      ]
+    },
+    targets: [
+      { id: "cloud", mode: "cloud", health: 1, privacy: 1, estimatedLatencyMs: 20, estimatedCostUsd: 0 },
+      { id: "local", mode: "local", health: 1, privacy: 1, estimatedLatencyMs: 30, estimatedCostUsd: 0 }
+    ]
+  });
+
+  assert.equal(result.targetId, "local");
+  assert.deepEqual(result.policyRulesApplied, ["legal-local-only"]);
+  assert.equal(result.reasons.includes("policy_rule_applied:legal-local-only"), true);
+});
+
+test("higher-priority rules win deterministic scalar conflicts", () => {
+  const result = decide({
+    workload: {
+      type: "finance",
+      sensitivity: "medium"
+    },
+    policy: {
+      rules: [
+        {
+          id: "low-priority",
+          priority: 10,
+          when: { workloadType: "finance" },
+          set: { allowedModes: ["local"] }
+        },
+        {
+          id: "high-priority",
+          priority: 100,
+          when: { workloadType: "finance" },
+          set: { allowedModes: ["private"] }
+        }
+      ]
+    },
+    targets: [
+      { id: "local", mode: "local", health: 1, privacy: 1, estimatedLatencyMs: 20, estimatedCostUsd: 0 },
+      { id: "private", mode: "private", health: 1, privacy: 0.9, estimatedLatencyMs: 40, estimatedCostUsd: 0 }
+    ]
+  });
+
+  assert.equal(result.targetId, "private");
+  assert.deepEqual(result.policyRulesApplied, ["low-priority", "high-priority"]);
+});
+
+test("later rule of the same priority wins by deterministic declaration order", () => {
+  const result = decide({
+    workload: {
+      type: "finance",
+      sensitivity: "low"
+    },
+    policy: {
+      rules: [
+        {
+          id: "first",
+          priority: 50,
+          when: { workloadType: "finance" },
+          set: { allowedModes: ["local"] }
+        },
+        {
+          id: "second",
+          priority: 50,
+          when: { workloadType: "finance" },
+          set: { allowedModes: ["cloud"] }
+        }
+      ]
+    },
+    targets: [
+      { id: "local", mode: "local", health: 1, privacy: 1, estimatedLatencyMs: 10, estimatedCostUsd: 0 },
+      { id: "cloud", mode: "cloud", health: 1, privacy: 0.8, estimatedLatencyMs: 20, estimatedCostUsd: 0 }
+    ]
+  });
+
+  assert.equal(result.targetId, "cloud");
+  assert.deepEqual(result.policyRulesApplied, ["first", "second"]);
+});
+
+test("invalid policy rule configuration fails early", () => {
+  assert.throws(
+    () => decide({
+      workload: { type: "x" },
+      policy: {
+        rules: [{
+          id: "bad-mode",
+          when: { workloadType: "x" },
+          set: { allowedModes: ["satellite"] }
+        }]
+      },
+      targets: [{ id: "local", mode: "local" }]
+    }),
+    /policy rule allowedModes contains an invalid mode/
+  );
+
+  assert.throws(
+    () => decide({
+      workload: { type: "x" },
+      policy: {
+        rules: [{
+          id: "bad-sensitivity-mode",
+          set: { sensitiveDataMode: "top-secret" }
+        }]
+      },
+      targets: [{ id: "local", mode: "local" }]
+    }),
+    /policy rule sensitiveDataMode is invalid/
+  );
+});
+
+test("policy rules can match required capabilities", () => {
+  const result = decide({
+    workload: {
+      type: "vision",
+      sensitivity: "low",
+      requiredCapabilities: ["vision"]
+    },
+    policy: {
+      rules: [{
+        id: "vision-private",
+        priority: 20,
+        when: { requiredCapability: "vision" },
+        set: { allowedModes: ["private"] }
+      }]
+    },
+    targets: [
+      { id: "local", mode: "local", health: 1, privacy: 1, capabilities: ["vision", "text-generation"] },
+      { id: "private", mode: "private", health: 1, privacy: 1, capabilities: ["vision", "text-generation"] }
+    ]
+  });
+
+  assert.equal(result.targetId, "private");
+  assert.deepEqual(result.policyRulesApplied, ["vision-private"]);
+});

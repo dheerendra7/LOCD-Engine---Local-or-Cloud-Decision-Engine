@@ -291,3 +291,9 @@ The API accepts either the legacy LOCD_API_KEY or scoped credentials configured 
 Scoped credentials are resolved from environment-variable references. A valid credential without the required route scope returns HTTP 403 with insufficient_scope.
 
 Live execution requires execute or admin scope in addition to LOCD_EXECUTION_ENABLED=true.
+
+## Policy rules
+
+A decision request may include policy.rules for workload-aware overrides. Rules match workload context and are applied from low to high priority, with declaration order breaking ties.
+
+Decision responses expose policyRulesApplied and include policy_rule_applied:<id> in explanation reasons for matched rules.

@@ -1,4 +1,7 @@
 const MODES = ["local", "private", "cloud", "hybrid"];
+const SENSITIVE_MODES = ["balanced", "prefer-local", "local-only", "private-only"];
+const SCALAR_RULE_FIELDS = new Set(["sensitiveDataMode", "maxHeartbeatAgeMs"]);
+const ARRAY_RULE_FIELDS = new Set(["allowedModes", "blockedModes", "allowedRegions"]);
 
 const PRESETS = Object.freeze({
   balanced: {
@@ -42,6 +45,89 @@ const PRESETS = Object.freeze({
   }
 });
 
+function asList(value) {
+  if (value == null) return [];
+  return Array.isArray(value) ? value.map(String) : [String(value)];
+}
+
+function matchingField(value, expected) {
+  if (expected == null) return true;
+  return asList(expected).includes(String(value));
+}
+
+function matchesRule(rule, context) {
+  const when = rule.when || {};
+  const workload = context.workload || {};
+
+  if (!matchingField(workload.type, when.workloadType)) return false;
+  if (!matchingField(workload.sensitivity, when.sensitivity)) return false;
+
+  const required = asList(workload.requiredCapabilities);
+  const requiredByRule = asList(when.requiredCapability);
+  if (requiredByRule.length && !requiredByRule.every(value => required.includes(value))) {
+    return false;
+  }
+
+  return true;
+}
+
+function validateRule(rule, index) {
+  if (!rule || typeof rule !== "object") {
+    throw new Error("policy rule at index " + index + " must be an object");
+  }
+
+  const id = String(rule.id || "");
+  if (!id) throw new Error("policy rule id is required at index " + index);
+
+  const priority = Number(rule.priority ?? 0);
+  if (!Number.isInteger(priority)) {
+    throw new Error("policy rule priority must be an integer: " + id);
+  }
+
+  if (rule.when != null && typeof rule.when !== "object") {
+    throw new Error("policy rule when must be an object: " + id);
+  }
+
+  if (!rule.set || typeof rule.set !== "object") {
+    throw new Error("policy rule set must be an object: " + id);
+  }
+
+  for (const key of Object.keys(rule.set)) {
+    if (!SCALAR_RULE_FIELDS.has(key) && !ARRAY_RULE_FIELDS.has(key) && key !== "weights") {
+      throw new Error("policy rule field is not supported: " + key);
+    }
+
+    if (key === "sensitiveDataMode" && !SENSITIVE_MODES.includes(String(rule.set[key]))) {
+      throw new Error("policy rule sensitiveDataMode is invalid: " + id);
+    }
+
+    if (ARRAY_RULE_FIELDS.has(key)) {
+      const values = asList(rule.set[key]);
+      if (key !== "allowedRegions" && values.some(value => !MODES.includes(value))) {
+        throw new Error("policy rule " + key + " contains an invalid mode: " + id);
+      }
+    }
+
+    if (key === "maxHeartbeatAgeMs" && (!Number.isFinite(Number(rule.set[key])) || Number(rule.set[key]) < 0)) {
+      throw new Error("policy rule maxHeartbeatAgeMs must be >= 0: " + id);
+    }
+
+    if (key === "weights") {
+      if (!rule.set.weights || typeof rule.set.weights !== "object") {
+        throw new Error("policy rule weights must be an object: " + id);
+      }
+    }
+  }
+
+  return {
+    id,
+    priority,
+    order: index,
+    when: structuredClone(rule.when || {}),
+    set: structuredClone(rule.set)
+  };
+}
+
 export function listPolicyProfiles() {
   return Object.entries(PRESETS).map(([id, profile]) => ({
     id,
@@ -57,7 +143,7 @@ export function getPolicyProfile(id = "balanced") {
   return structuredClone({ id, ...profile });
 }
 
-export function resolvePolicy(policy = {}) {
+export function resolvePolicy(policy = {}, context = {}) {
   const profile = policy.profile ? getPolicyProfile(policy.profile) : getPolicyProfile("balanced");
   const merged = {
     ...profile,
@@ -67,9 +153,53 @@ export function resolvePolicy(policy = {}) {
       ...(policy.weights || {})
     }
   };
+
   delete merged.profile;
   delete merged.id;
   delete merged.name;
   delete merged.description;
+
+  const rawRules = policy.rules || [];
+  if (!Array.isArray(rawRules)) {
+    throw new Error("policy.rules must be an array");
+  }
+
+  const rules = rawRules.map(validateRule);
+  const sorted = [...rules].sort((a, b) => a.priority - b.priority || a.order - b.order);
+  const matchedRules = [];
+
+  for (const rule of sorted) {
+    if (!matchesRule(rule, context)) continue;
+
+    matchedRules.push(rule.id);
+
+    for (const [key, value] of Object.entries(rule.set)) {
+      if (key === "weights") {
+        merged.weights = {
+          ...merged.weights,
+          ...value
+        };
+      } else if (ARRAY_RULE_FIELDS.has(key)) {
+        merged[key] = asList(value);
+      } else {
+        merged[key] = value;
+      }
+    }
+  }
+
+  if (merged.allowedModes) {
+    const invalid = asList(merged.allowedModes).find(mode => !MODES.includes(mode));
+    if (invalid) throw new Error("policy.allowedModes contains invalid mode: " + invalid);
+    merged.allowedModes = asList(merged.allowedModes);
+  }
+
+  if (merged.blockedModes) {
+    const invalid = asList(merged.blockedModes).find(mode => !MODES.includes(mode));
+    if (invalid) throw new Error("policy.blockedModes contains invalid mode: " + invalid);
+    merged.blockedModes = asList(merged.blockedModes);
+  }
+
+  merged.rules = rules;
+  merged.matchedRules = matchedRules;
   return merged;
 }
