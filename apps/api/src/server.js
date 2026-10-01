@@ -210,7 +210,9 @@ export function createServer({
   }),
   executionRegistry = null,
   executionEnabled = process.env.LOCD_EXECUTION_ENABLED === "true",
-  authorizer = null
+  authorizer = null,
+  probeScheduler = null,
+  serviceVersion = "0.1.0"
 } = {}) {
   if (!Number.isFinite(maxBodyBytes) || maxBodyBytes < 1) {
 
