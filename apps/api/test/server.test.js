@@ -4,6 +4,9 @@ import { createConfiguredExecutionRegistry, createConfiguredProbeScheduler, crea
 import { createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { createLogger } from "../../../packages/observability/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
+import { createAuthorizer } from "../../../packages/auth/src/index.js";
+import { createExecutionRegistry } from "../../../packages/execution/src/index.js";
+
 import { createExecutionRegistry } from "../../../packages/execution/src/index.js";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -11,6 +14,15 @@ import path from "node:path";
 
 let server;
 let baseUrl;
+
+
+function createAuthorizerForTest({ keys, env }) {
+  return createAuthorizer({
+    keyEntries: keys,
+    env,
+    allowAnonymous: false
+  });
+}
 
 test.before(async () => {
   server = createServer();
@@ -1215,3 +1227,138 @@ test("live execution rejects static target fallbacks", async () => {
   }
 });
 
+
+test("scoped read key can read metrics but cannot mutate targets", async () => {
+  const authorizer = createConfiguredAuthorizer ? await createConfiguredAuthorizer({
+    legacyKey: null,
+    authFile: null,
+    env: {}
+  }) : null;
+
+  const scoped = createAuthorizerForTest({
+    keys: [{
+      id: "reader",
+      keyEnv: "READER_KEY",
+      scopes: ["read"]
+    }],
+    env: { READER_KEY: "reader-secret" }
+  });
+
+  const testServer = createServer({
+    authorizer: scoped,
+    targetRegistry: createTargetRegistry(),
+    executionEnabled: false
+  });
+
+  await new Promise(resolve => testServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + testServer.address().port;
+
+  try {
+    const read = await fetch(url + "/v1/metrics", {
+      headers: { "x-locd-api-key": "reader-secret" }
+    });
+    assert.equal(read.status, 200);
+
+    const write = await fetch(url + "/v1/targets", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-locd-api-key": "reader-secret"
+      },
+      body: JSON.stringify({
+        id: "blocked-target",
+        mode: "local"
+      })
+    });
+    assert.equal(write.status, 403);
+    assert.deepEqual(await write.json(), {
+      error: "forbidden",
+      requiredScope: "targets:write"
+    });
+  } finally {
+    await new Promise(resolve => testServer.close(resolve));
+  }
+});
+
+test("executor-scoped key can perform live execution when feature flag is enabled", async () => {
+  const scoped = createAuthorizerForTest({
+    keys: [{
+      id: "executor",
+      keyEnv: "EXECUTOR_KEY",
+      scopes: ["read", "execute"]
+    }],
+    env: { EXECUTOR_KEY: "executor-secret" }
+  });
+
+  const testServer = createServer({
+    authorizer: scoped,
+    executionEnabled: true,
+    targetRegistry: createTargetRegistry([{
+      id: "live-target",
+      mode: "private",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1
+    }]),
+    executionRegistry: createExecutionRegistry([{
+      id: "live-adapter",
+      targetId: "live-target",
+      async execute() {
+        return { ok: true };
+      }
+    }])
+  });
+
+  await new Promise(resolve => testServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + testServer.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-locd-api-key": "executor-secret"
+      },
+      body: JSON.stringify({
+        mode: "live",
+        includeOutputs: true,
+        plan: {
+          valid: true,
+          steps: [{ id: "live-step", targetId: "live-target" }]
+        }
+      })
+    });
+
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.status, "completed");
+    assert.deepEqual(body.results[0].result, { ok: true });
+  } finally {
+    await new Promise(resolve => testServer.close(resolve));
+  }
+});
+
+test("invalid scoped credentials return 401 before route handling", async () => {
+  const scoped = createAuthorizerForTest({
+    keys: [{
+      id: "reader",
+      keyEnv: "READER_KEY",
+      scopes: ["read"]
+    }],
+    env: { READER_KEY: "reader-secret" }
+  });
+
+  const testServer = createServer({ authorizer: scoped });
+  await new Promise(resolve => testServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + testServer.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/metrics", {
+      headers: { "x-locd-api-key": "wrong-secret" }
+    });
+    assert.equal(response.status, 401);
+  } finally {
+    await new Promise(resolve => testServer.close(resolve));
+  }
+});
