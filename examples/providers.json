@@ -3,8 +3,9 @@
     {
       "id": "local-ollama",
       "targetId": "local-ollama",
+      "type": "ollama",
       "mode": "local",
-      "baseUrl": "http://localhost:11434",
+      "baseUrl": "http://localhost:11434/api",
       "model": "llama3.2",
       "privacy": 1,
       "regions": ["local"],
@@ -17,6 +18,7 @@
     {
       "id": "private-vllm",
       "targetId": "private-vllm",
+      "type": "openai-compatible",
       "mode": "private",
       "baseUrl": "https://inference.example.com",
       "apiKeyEnv": "PRIVATE_VLLM_API_KEY",

@@ -135,3 +135,57 @@ test("blank API key environment values are rejected", () => {
     /API key environment variable is empty/
   );
 });
+
+test("provider config can create a native Ollama adapter", () => {
+  const adapter = createProviderFromConfig({
+    ...base,
+    id: "ollama-local",
+    targetId: "ollama-local",
+    type: "ollama",
+    mode: "local",
+    baseUrl: "http://localhost:11434/api",
+    apiKeyEnv: undefined
+  }, env);
+
+  assert.equal(adapter.id, "ollama-local");
+  assert.equal(adapter.targetId, "ollama-local");
+});
+
+test("provider config rejects unsupported adapter types", () => {
+  assert.throws(
+    () => createProviderFromConfig({
+      ...base,
+      type: "unknown-provider"
+    }, env),
+    /provider type is invalid/
+  );
+});
+
+test("provider config file can load a native Ollama provider", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-provider-ollama-"));
+  const file = path.join(dir, "providers.json");
+
+  try {
+    await writeFile(file, JSON.stringify({
+      providers: [{
+        id: "ollama-local",
+        targetId: "ollama-local",
+        type: "ollama",
+        mode: "local",
+        baseUrl: "http://localhost:11434/api",
+        model: "llama3.2"
+      }]
+    }), "utf8");
+
+    const adapters = await loadProvidersFromFile(
+      file,
+      {},
+      async () => new Response(JSON.stringify({ models: [] }), { status: 200 })
+    );
+
+    assert.equal(adapters.length, 1);
+    assert.equal(adapters[0].id, "ollama-local");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

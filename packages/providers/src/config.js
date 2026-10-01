@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { createOpenAICompatibleAdapter } from "./openai-compatible.js";
+import { createOllamaAdapter } from "./ollama.js";
 
 function requiredString(value, field) {
   if (!value || typeof value !== "string") throw new Error(field + " is required");
@@ -30,13 +31,20 @@ function validateProviderConfig(provider) {
   if (provider.mode && !["local", "private", "cloud", "hybrid"].includes(provider.mode)) {
     throw new Error("provider mode is invalid");
   }
+  if (provider.type && !["openai-compatible", "ollama"].includes(provider.type)) {
+    throw new Error("provider type is invalid");
+  }
 }
 
 export function createProviderFromConfig(config, env = process.env, fetchImpl = globalThis.fetch) {
   validateProviderConfig(config);
   const apiKey = loadApiKey(config.apiKeyEnv, env);
 
-  return createOpenAICompatibleAdapter({
+  const Adapter = config.type === "ollama"
+    ? createOllamaAdapter
+    : createOpenAICompatibleAdapter;
+
+  return Adapter({
     ...config,
     apiKey,
     fetchImpl
