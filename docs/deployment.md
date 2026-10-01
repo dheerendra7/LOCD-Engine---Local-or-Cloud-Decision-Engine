@@ -66,3 +66,9 @@ Rate limiting is intentionally local to a process; distributed deployments need 
 ## Structured logs
 
 LOCD emits structured JSON request lifecycle events to stdout. Use LOCD_LOG_LEVEL to control verbosity. The logger redacts credentials and other sensitive fields and does not log request bodies.
+
+## Provider adapters
+
+Set LOCD_PROVIDERS_FILE to load server-side provider adapters at startup. Provider credentials are referenced by environment variable name inside the JSON config; do not place secrets in the file.
+
+Providers remain unavailable until their first successful probe unless explicitly configured with initial.available=true.
