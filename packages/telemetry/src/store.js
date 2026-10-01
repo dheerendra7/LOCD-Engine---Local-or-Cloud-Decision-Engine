@@ -40,7 +40,7 @@ export function normalizeDecisionEvent(event) {
   const outcome = event.outcome ? String(event.outcome) : "pending";
   if (!OUTCOMES.has(outcome)) throw new Error("decision event outcome is invalid");
 
-  return {
+  const normalized = {
     id: String(event.id || randomUUID()),
     timestamp: iso(event.timestamp),
     decisionVersion: String(event.decisionVersion || "1.0"),
@@ -55,6 +55,15 @@ export function normalizeDecisionEvent(event) {
     actualCostUsd: nonNegative(event.actualCostUsd),
     errorClass: event.errorClass ? String(event.errorClass) : null
   };
+
+  if ("targetUtilization" in event) {
+    const utilization = finite(event.targetUtilization);
+    normalized.targetUtilization = utilization == null
+      ? null
+      : Math.min(1, Math.max(0, utilization));
+  }
+
+  return normalized;
 }
 
 export function createDecisionStore({ maxEntries = 500, initialEvents = [] } = {}) {
