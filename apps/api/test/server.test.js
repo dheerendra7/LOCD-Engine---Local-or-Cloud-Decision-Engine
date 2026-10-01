@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createConfiguredExecutionRegistry, createConfiguredProbeScheduler, createConfiguredTargetRegistry, createServer } from "../src/server.js";
+import { createConfiguredExecutionRegistry, createConfiguredProbeScheduler, createConfiguredTargetRegistry, createGracefulShutdown, createServer } from "../src/server.js";
 import { createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { createScopedAuthorizer } from "../../../packages/auth/src/index.js";
 import { createLogger } from "../../../packages/observability/src/index.js";
@@ -1382,4 +1382,131 @@ test("server provider config loads native Ollama adapter into the target registr
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+
+test("readiness endpoint reports public service readiness", async () => {
+  const response = await fetch(baseUrl + "/ready");
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    status: "ready",
+    service: "locd-api",
+    version: "0.1.0"
+  });
+});
+
+test("status endpoint exposes safe operational counts", async () => {
+  const probeable = {
+    id: "ops-probeable",
+    async getSnapshot() {
+      return {
+        id: "ops-probeable",
+        mode: "local",
+        available: true,
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 10,
+        estimatedCostUsd: 0
+      };
+    },
+    async probe() {
+      return {
+        id: "ops-probeable",
+        mode: "local",
+        available: true,
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 10,
+        estimatedCostUsd: 0
+      };
+    },
+    async execute() {
+      return { ok: true };
+    }
+  };
+
+  const staticOnly = {
+    id: "ops-static",
+    mode: "cloud",
+    health: 1,
+    capacity: 0.2,
+    privacy: 0.1
+  };
+
+  const targetRegistry = createTargetRegistry([probeable, staticOnly]);
+  const executionRegistry = createExecutionRegistry([probeable]);
+  const opsServer = createServer({ targetRegistry, executionRegistry });
+
+  await new Promise(resolve => opsServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + opsServer.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/status");
+    assert.equal(response.status, 200);
+
+    const body = await response.json();
+    assert.equal(body.status, "ok");
+    assert.equal(body.counts.targets, 2);
+    assert.equal(body.counts.probeableTargets, 1);
+    assert.equal(body.counts.executionAdapters, 1);
+    assert.equal(typeof body.capabilities.executionEnabled, "boolean");
+    assert.equal("apiKey" in body, false);
+  } finally {
+    await new Promise(resolve => opsServer.close(resolve));
+  }
+});
+
+test("status endpoint respects read authorization scope", async () => {
+  const scopedServer = createServer({
+    authorizer: createScopedAuthorizer({
+      keys: [{ id: "reader", secret: "reader-secret", scopes: ["read"] }]
+    })
+  });
+  await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + scopedServer.address().port;
+
+  try {
+    const allowed = await fetch(url + "/v1/status", {
+      headers: { authorization: "Bearer reader-secret" }
+    });
+    assert.equal(allowed.status, 200);
+
+    const denied = await fetch(url + "/v1/status", {
+      headers: { authorization: "Bearer wrong-secret" }
+    });
+    assert.equal(denied.status, 401);
+  } finally {
+    await new Promise(resolve => scopedServer.close(resolve));
+  }
+});
+
+test("graceful shutdown stops scheduler and closes the server only once", async () => {
+  const events = [];
+  const server = http.createServer((req, res) => res.end("ok"));
+  const scheduler = {
+    stopped: false,
+    stop() {
+      this.stopped = true;
+      events.push("scheduler_stop");
+    }
+  };
+  const logger = {
+    info(event) {
+      events.push(event.event);
+    }
+  };
+
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const shutdown = createGracefulShutdown({ server, probeScheduler: scheduler, logger });
+
+  assert.equal(await shutdown("SIGTERM"), true);
+  assert.equal(await shutdown("SIGTERM"), false);
+  assert.equal(scheduler.stopped, true);
+  assert.deepEqual(events, [
+    "shutdown_started",
+    "scheduler_stop",
+    "shutdown_complete"
+  ]);
 });
