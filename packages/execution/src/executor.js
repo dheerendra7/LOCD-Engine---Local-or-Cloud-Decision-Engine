@@ -102,6 +102,7 @@ export async function executePlan(
     mode = "dry-run",
     timeoutMs = 30000,
     failFast = true,
+    includeOutputs = false,
     clock
   } = {}
 ) {
