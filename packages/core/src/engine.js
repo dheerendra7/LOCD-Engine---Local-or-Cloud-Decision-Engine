@@ -20,8 +20,8 @@ function unique(values) {
   return [...new Set(Array.isArray(values) ? values : [])];
 }
 
-function normalizePolicy(policy = {}) {
-  const resolved = resolvePolicy(policy);
+function normalizePolicy(policy = {}, workload = {}) {
+  const resolved = resolvePolicy(policy, { workload });
   const sensitiveDataMode = resolved.sensitiveDataMode || "balanced";
   if (!SENSITIVE_MODES.includes(sensitiveDataMode)) {
     throw new Error("policy.sensitiveDataMode must be one of: " + SENSITIVE_MODES.join(", "));
@@ -39,7 +39,8 @@ function normalizePolicy(policy = {}) {
       capacity: clamp(resolved.weights?.capacity ?? 0.10),
       reliability: clamp(resolved.weights?.reliability ?? 0.15)
     },
-    maxHeartbeatAgeMs: finiteOrNull(resolved.maxHeartbeatAgeMs)
+    maxHeartbeatAgeMs: finiteOrNull(resolved.maxHeartbeatAgeMs),
+    matchedRules: Array.isArray(resolved.matchedRules) ? [...resolved.matchedRules] : []
   };
 }
 
@@ -78,7 +79,7 @@ function normalizeRequest(input) {
     throw new Error("workload.requiredContextTokens must be >= 0");
   }
 
-  const policy = normalizePolicy(input.policy);
+  const policy = normalizePolicy(input.policy, input.workload);
   if (policy.maxHeartbeatAgeMs !== null && policy.maxHeartbeatAgeMs < 0) {
     throw new Error("policy.maxHeartbeatAgeMs must be >= 0");
   }
@@ -287,6 +288,7 @@ export function decide(input) {
       reasons: ["no_eligible_target"],
       alternatives: [],
       rejected: evaluations.map(({ targetId, rejected }) => ({ targetId, reasons: rejected })),
+      policyRulesApplied: request.policy.matchedRules,
       evaluated: evaluations.map(item => ({
         targetId: item.targetId,
         mode: item.target?.mode ?? null,
@@ -305,7 +307,8 @@ export function decide(input) {
     winner.factors.reliability >= 0.95 ? "high_reliability_signal" : null,
     request.policy.sensitiveDataMode === "prefer-local" && winner.target.mode === "local"
       ? "local_preference_applied"
-      : null
+      : null,
+    ...request.policy.matchedRules.map(id => "policy_rule_applied:" + id)
   ].filter(Boolean);
 
   return {
@@ -319,6 +322,7 @@ export function decide(input) {
       costUsd: finiteOrNull(winner.target.estimatedCostUsd)
     },
     reasons,
+    policyRulesApplied: request.policy.matchedRules,
     alternatives: eligible.slice(1).map(item => ({
       targetId: item.targetId,
       route: item.target.mode,
