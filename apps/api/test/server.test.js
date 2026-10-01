@@ -1215,3 +1215,39 @@ test("live execution rejects static target fallbacks", async () => {
   }
 });
 
+
+test("API responses include baseline security headers", async () => {
+  const response = await fetch(baseUrl + "/health");
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(response.headers.get("x-frame-options"), "DENY");
+  assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+  assert.equal(
+    response.headers.get("permissions-policy"),
+    "camera=(), microphone=(), geolocation=()"
+  );
+});
+
+test("unauthorized API responses keep security headers", async () => {
+  const scoped = createAuthorizer({
+    keyEntries: [{
+      id: "reader",
+      keyEnv: "READER_KEY",
+      scopes: ["read"]
+    }],
+    env: { READER_KEY: "reader-secret" },
+    allowAnonymous: false
+  });
+
+  const protectedServer = createServer({ authorizer: scoped });
+  await new Promise(resolve => protectedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + protectedServer.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/metrics");
+    assert.equal(response.status, 401);
+    assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+    assert.equal(response.headers.get("x-frame-options"), "DENY");
+  } finally {
+    await new Promise(resolve => protectedServer.close(resolve));
+  }
+});
