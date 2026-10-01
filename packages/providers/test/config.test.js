@@ -135,3 +135,28 @@ test("blank API key environment values are rejected", () => {
     /API key environment variable is empty/
   );
 });
+
+test("provider config can create a native Ollama adapter", () => {
+  const adapter = createProviderFromConfig({
+    ...base,
+    id: "ollama-local",
+    targetId: "ollama-local",
+    type: "ollama",
+    mode: "local",
+    baseUrl: "http://localhost:11434/api",
+    apiKeyEnv: undefined
+  }, env);
+
+  assert.equal(adapter.id, "ollama-local");
+  assert.equal(adapter.targetId, "ollama-local");
+});
+
+test("provider config rejects unsupported adapter types", () => {
+  assert.throws(
+    () => createProviderFromConfig({
+      ...base,
+      type: "unknown-provider"
+    }, env),
+    /provider type is invalid/
+  );
+});
