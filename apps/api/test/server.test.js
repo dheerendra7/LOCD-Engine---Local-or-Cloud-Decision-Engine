@@ -1229,12 +1229,6 @@ test("live execution rejects static target fallbacks", async () => {
 
 
 test("scoped read key can read metrics but cannot mutate targets", async () => {
-  const authorizer = createConfiguredAuthorizer ? await createConfiguredAuthorizer({
-    legacyKey: null,
-    authFile: null,
-    env: {}
-  }) : null;
-
   const scoped = createAuthorizerForTest({
     keys: [{
       id: "reader",
