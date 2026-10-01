@@ -283,3 +283,11 @@ Live execution requires LOCD_EXECUTION_ENABLED=true and LOCD_API_KEY to be confi
 Static target snapshots receive dry-run-only execution adapters. They cannot be used for live execution.
 
 Execution receipts remain metadata-only. Caller-scoped results are not written to telemetry.
+
+## Scoped authorization
+
+The API accepts either the legacy LOCD_API_KEY or scoped credentials configured through LOCD_API_KEYS_JSON.
+
+Scoped credentials are resolved from environment-variable references. A valid credential without the required route scope returns HTTP 403 with insufficient_scope.
+
+Live execution requires execute or admin scope in addition to LOCD_EXECUTION_ENABLED=true.

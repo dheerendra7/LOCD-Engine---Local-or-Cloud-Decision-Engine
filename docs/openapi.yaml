@@ -526,3 +526,12 @@ components:
 
 # Authentication note: when LOCD_API_KEY is configured, all /v1 operations
 # require bearerAuth or apiKeyHeader. /health remains public.
+
+# Authorization scopes
+# read: GET /v1/*
+# decide: POST /v1/decide and /v1/hybrid-plan
+# telemetry: POST /v1/outcomes
+# targets: target registration/removal/heartbeat/probe
+# execute: POST /v1/execute
+# admin: all scopes
+# Missing credentials -> 401; valid credential without required scope -> 403.
