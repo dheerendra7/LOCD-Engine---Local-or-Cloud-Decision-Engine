@@ -56,6 +56,10 @@ export function createScopedAuthorizer({
     const secret = String(entry.secret || "");
     if (!secret.trim()) throw new Error("auth key secret is required: " + entry.id);
 
+    if (entries.some(existing => safeEqual(existing.secret, secret))) {
+      throw new Error("duplicate auth key secret is not allowed: " + entry.id);
+    }
+
     entries.push({
       id: entry.id,
       secret,
