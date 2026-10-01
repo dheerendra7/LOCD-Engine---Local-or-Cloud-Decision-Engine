@@ -16,6 +16,63 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Health"
+  /v1/execute:
+    post:
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+      summary: Execute a validated plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan]
+              properties:
+                mode:
+                  type: string
+                  enum: [dry-run, live]
+                  default: dry-run
+                includeOutputs:
+                  type: boolean
+                  default: false
+                timeoutMs:
+                  type: number
+                  minimum: 1
+                failFast:
+                  type: boolean
+                  default: true
+                plan:
+                  type: object
+                  required: [valid, steps]
+                  properties:
+                    valid: {type: boolean}
+                    steps:
+                      type: array
+                      minItems: 1
+                      items:
+                        type: object
+                        required: [id, targetId]
+                        properties:
+                          id: {type: string}
+                          targetId: {type: string}
+                          purpose: {type: string}
+                          payload: {type: object}
+      responses:
+        "200":
+          description: Execution receipt and optional caller-scoped results
+        "400":
+          description: Invalid execution request
+        "403":
+          description: Live execution is disabled or not safely configured
+        "401":
+          description: Authentication required
+        "413":
+          description: Request body too large
+        "429":
+          description: Rate limit exceeded
+
   /v1/decide:
     post:
       parameters:
