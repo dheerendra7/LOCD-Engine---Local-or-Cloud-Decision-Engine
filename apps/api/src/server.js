@@ -234,8 +234,10 @@ export function createServer({
   telemetryBackend = null
 } = {}) {
   if (!Number.isFinite(maxBodyBytes) || maxBodyBytes < 1) {
-
     throw new Error("maxBodyBytes must be >= 1");
+  }
+  if (!Number.isFinite(idempotencyLockTtlMs) || idempotencyLockTtlMs < 1) {
+    throw new Error("idempotencyLockTtlMs must be >= 1");
   }
   if (!calibrator || typeof calibrator.apply !== "function" ||
       typeof calibrator.observe !== "function" ||
