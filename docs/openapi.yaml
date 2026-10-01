@@ -260,16 +260,15 @@ paths:
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/RequestId"
-      security:
-        - bearerAuth: []
-        - apiKeyHeader: []
-      summary: Update execution target heartbeat telemetry
-      parameters:
         - name: id
           in: path
           required: true
           schema:
             type: string
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+      summary: Update execution target heartbeat telemetry
       requestBody:
         required: true
         content:
