@@ -571,6 +571,7 @@ components:
           enum: [success, failure]
         actualLatencyMs: {type: number, minimum: 0}
         actualCostUsd: {type: number, minimum: 0}
+        targetUtilization: {type: [number, "null"], minimum: 0, maximum: 1}
         errorClass: {type: string}
         timestamp: {type: string, format: date-time}
     Health:
