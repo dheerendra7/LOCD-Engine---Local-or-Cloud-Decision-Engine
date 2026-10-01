@@ -1,5 +1,6 @@
 export { createOpenAICompatibleAdapter } from "./openai-compatible.js";
 export {
   createProviderFromConfig,
-  createProvidersFromConfig
+  createProvidersFromConfig,
+  loadProvidersFromFile
 } from "./config.js";
