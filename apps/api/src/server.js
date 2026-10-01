@@ -325,6 +325,13 @@ export function createServer({
             sendJson(res, 403, { error: "live_execution_disabled" });
             return;
           }
+          if (!authorizer.authorize(principal, "execute")) {
+            sendJson(res, 403, {
+              error: "forbidden",
+              requiredScope: "execute"
+            });
+            return;
+          }
         }
 
         const registry = executionRegistry ||
