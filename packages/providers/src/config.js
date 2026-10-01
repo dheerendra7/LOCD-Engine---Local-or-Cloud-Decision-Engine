@@ -12,7 +12,11 @@ function loadApiKey(ref, env = process.env) {
   if (!(name in env)) {
     throw new Error("provider API key environment variable is not set: " + name);
   }
-  return env[name];
+  const value = String(env[name] ?? "");
+  if (!value.trim()) {
+    throw new Error("provider API key environment variable is empty: " + name);
+  }
+  return value;
 }
 
 function validateProviderConfig(provider) {
