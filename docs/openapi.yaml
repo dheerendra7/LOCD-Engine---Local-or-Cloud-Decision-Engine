@@ -427,6 +427,29 @@ components:
           type: string
           enum: [balanced, prefer-local, local-only, private-only]
         maxHeartbeatAgeMs: {type: number, minimum: 0}
+        rules:
+          type: array
+          description: Workload-aware deterministic policy rules.
+          items:
+            type: object
+            required: [id, set]
+            properties:
+              id: {type: string}
+              priority: {type: integer}
+              when:
+                type: object
+                properties:
+                  workloadType: {oneOf: [{type: string}, {type: array, items: {type: string}}]}
+                  sensitivity: {oneOf: [{type: string}, {type: array, items: {type: string}}]}
+                  requiredCapability:
+                    oneOf:
+                      - {type: string}
+                      - {type: array, items: {type: string}}
+              set:
+                type: object
+        policyRulesApplied:
+          type: array
+          items: {type: string}
     DecisionRequest:
       type: object
       required: [workload]
