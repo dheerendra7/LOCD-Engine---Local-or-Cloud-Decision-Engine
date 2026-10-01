@@ -26,7 +26,7 @@ function usage() {
 export function parseArgs(argv) {
   const args = [...argv];
   let baseUrl = "http://localhost:8787";
-  let apiKey = process.env.LOCD_API_KEY || null;
+  let apiKey = null;
   let idempotencyKey = null;
   let live = false;
   let includeOutputs = false;
@@ -72,7 +72,15 @@ async function apiRequest(fetchImpl, baseUrl, pathname, options = {}) {
 }
 
 export async function runCli(argv, { fetchImpl = globalThis.fetch, write = console.log } = {}) {
-  const { baseUrl, apiKey, idempotencyKey, live, includeOutputs, positional } = parseArgs(argv);
+  const {
+    baseUrl,
+    apiKey: parsedApiKey,
+    idempotencyKey,
+    live,
+    includeOutputs,
+    positional
+  } = parseArgs(argv);
+  const apiKey = parsedApiKey || process.env.LOCD_API_KEY || null;
   const command = positional[0];
 
   const authHeaders = apiKey ? { "x-locd-api-key": apiKey } : {};

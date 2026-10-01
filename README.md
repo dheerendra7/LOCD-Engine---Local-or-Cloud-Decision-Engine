@@ -137,5 +137,8 @@ The repository also includes a dependency-free CLI package.
     node packages/cli/bin/locd.mjs health
     node packages/cli/bin/locd.mjs metrics
     node packages/cli/bin/locd.mjs decide examples/decision-request.json
+    node packages/cli/bin/locd.mjs targets
+    node packages/cli/bin/locd.mjs probe local-ollama
+    node packages/cli/bin/locd.mjs execute examples/execution-plan.json
 
-Use --base-url to target a remote LOCD deployment.
+Use --base-url to target a remote LOCD deployment. Set LOCD_API_KEY in the environment for protected /v1 APIs. The execute command is dry-run by default; add --live only when live execution has been explicitly enabled on the server.

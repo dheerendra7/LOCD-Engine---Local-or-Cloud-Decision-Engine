@@ -10,7 +10,7 @@ test("parseArgs extracts base URL and positional arguments", () => {
     parseArgs(["--base-url", "http://example.test", "metrics"]),
     {
       baseUrl: "http://example.test",
-      apiKey: process.env.LOCD_API_KEY || null,
+      apiKey: null,
       idempotencyKey: null,
       live: false,
       includeOutputs: false,
