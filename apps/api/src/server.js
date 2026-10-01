@@ -1,5 +1,4 @@
 import http from "node:http";
-import { randomUUID, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,25 +22,6 @@ import { loadScopedAuthFromEnv } from "../../../packages/auth/src/index.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
 
-
-function safeSecretEqual(supplied, expected) {
-  if (typeof supplied !== "string" || typeof expected !== "string") return false;
-  const suppliedBuffer = Buffer.from(supplied);
-  const expectedBuffer = Buffer.from(expected);
-  if (suppliedBuffer.length !== expectedBuffer.length) return false;
-  return timingSafeEqual(suppliedBuffer, expectedBuffer);
-}
-
-function isAuthorized(req, configuredApiKey) {
-  if (!configuredApiKey) return true;
-
-  const authorization = req.headers.authorization || "";
-  const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
-  const headerKey = req.headers["x-locd-api-key"];
-  const supplied = bearer || headerKey;
-
-  return safeSecretEqual(supplied, configuredApiKey);
-}
 
 function requiredScope(method, pathname) {
   if (method === "GET") return "read";
