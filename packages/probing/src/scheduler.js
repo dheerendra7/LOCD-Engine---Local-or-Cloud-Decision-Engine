@@ -33,21 +33,28 @@ export function createProbeScheduler({
 
     inFlight.add(id);
     try {
-      const snapshot = await registry.probe(id);
-      const result = {
-        targetId: id,
-        status: "success",
-        snapshot
-      };
-      await onResult(result);
-      return result;
-    } catch (error) {
-      const result = {
-        targetId: id,
-        status: "failed",
-        errorClass: error instanceof Error ? error.message : "probe_failed"
-      };
-      await onResult(result);
+      let result;
+      try {
+        const snapshot = await registry.probe(id);
+        result = {
+          targetId: id,
+          status: "success",
+          snapshot
+        };
+      } catch (error) {
+        result = {
+          targetId: id,
+          status: "failed",
+          errorClass: error instanceof Error ? error.message : "probe_failed"
+        };
+      }
+
+      try {
+        await onResult(result);
+      } catch {
+        // Observability must not change probe outcome semantics.
+      }
+
       return result;
     } finally {
       inFlight.delete(id);
