@@ -340,3 +340,7 @@ A target can provide optional pricing metadata:
 Workloads can provide inputTokens, outputTokens and requests. When target.estimatedCostUsd is absent, the decision engine derives estimatedCostUsd from pricing. Explicit target estimates always take precedence.
 
 Supported pricing units are flat, per-request and per-1k-tokens. Unsupported currencies are rejected instead of silently converting or inventing exchange rates.
+
+When claim-based idempotency is available, a concurrent request using the same key and identical body receives HTTP 409 with idempotency_request_in_progress while the first request is still processing.
+
+If the owning request fails before a response is stored, its claim is released so a retry can execute normally. Successful responses replace the processing claim and remain replayable until the configured retention window expires.
