@@ -115,6 +115,35 @@ export async function createConfiguredExecutionRegistry({
   return executionRegistry;
 }
 
+export function createGracefulShutdown({
+  server,
+  probeScheduler = null,
+  logger = createLogger({ level: "info" })
+} = {}) {
+  if (!server || typeof server.close !== "function") {
+    throw new Error("server is required");
+  }
+
+  let shuttingDown = false;
+
+  return signal => new Promise(resolve => {
+    if (shuttingDown) {
+      resolve(false);
+      return;
+    }
+
+    shuttingDown = true;
+    logger.info({ event: "shutdown_started", signal });
+
+    if (probeScheduler) probeScheduler.stop();
+
+    server.close(() => {
+      logger.info({ event: "shutdown_complete", signal });
+      resolve(true);
+    });
+  });
+}
+
 export function createConfiguredProbeScheduler({
   registry,
   intervalMs = Number(process.env.LOCD_PROBE_INTERVAL_MS || 0),
@@ -181,7 +210,9 @@ export function createServer({
   }),
   executionRegistry = null,
   executionEnabled = process.env.LOCD_EXECUTION_ENABLED === "true",
-  authorizer = null
+  authorizer = null,
+  probeScheduler = null,
+  serviceVersion = "0.1.0"
 } = {}) {
   if (!Number.isFinite(maxBodyBytes) || maxBodyBytes < 1) {
 
@@ -280,7 +311,16 @@ export function createServer({
         sendJson(res, 200, {
           status: "ok",
           service: "locd-api",
-          version: "0.1.0"
+          version: serviceVersion
+        });
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/ready") {
+        sendJson(res, 200, {
+          status: "ready",
+          service: "locd-api",
+          version: serviceVersion
         });
         return;
       }
@@ -539,6 +579,35 @@ export function createServer({
         return;
       }
 
+      if (req.method === "GET" && pathname === "/v1/status") {
+        const targets = await targetRegistry.list();
+        const probeableTargets = typeof targetRegistry.listProbeable === "function"
+          ? await targetRegistry.listProbeable()
+          : [];
+        const executionAdapters = executionRegistry && typeof executionRegistry.list === "function"
+          ? executionRegistry.list()
+          : [];
+
+        sendJson(res, 200, {
+          service: "locd-api",
+          version: serviceVersion,
+          status: "ok",
+          capabilities: {
+            executionEnabled: Boolean(executionEnabled),
+            persistentTargets: Boolean(targetFile),
+            persistentTelemetry: Boolean(process.env.LOCD_TELEMETRY_FILE?.trim()),
+            automaticProbing: Boolean(probeScheduler?.isRunning?.())
+          },
+          counts: {
+            targets: targets.length,
+            probeableTargets: probeableTargets.length,
+            executionAdapters: executionAdapters.length,
+            decisions: decisionStore.summary().totalDecisions
+          }
+        });
+        return;
+      }
+
       if (req.method === "GET") {
         await serveWeb(res, pathname);
         return;
@@ -591,7 +660,26 @@ if (isMain) {
     targetRegistry
   });
 
-  createServer({ targetFile, targetRegistry, decisionStore, logger, executionRegistry, executionEnabled: process.env.LOCD_EXECUTION_ENABLED === "true" }).listen(port, "0.0.0.0", () => {
+  const server = createServer({
+    targetFile,
+    targetRegistry,
+    decisionStore,
+    logger,
+    executionRegistry,
+    probeScheduler,
+    executionEnabled: process.env.LOCD_EXECUTION_ENABLED === "true"
+  });
+
+  const shutdown = createGracefulShutdown({
+    server,
+    probeScheduler,
+    logger
+  });
+
+  process.once("SIGTERM", () => { void shutdown("SIGTERM"); });
+  process.once("SIGINT", () => { void shutdown("SIGINT"); });
+
+  server.listen(port, "0.0.0.0", () => {
     if (probeScheduler) {
       probeScheduler.start();
       void probeScheduler.runOnce();

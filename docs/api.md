@@ -297,3 +297,19 @@ Live execution requires execute or admin scope in addition to LOCD_EXECUTION_ENA
 A decision request may include policy.rules for workload-aware overrides. Rules match workload context and are applied from low to high priority, with declaration order breaking ties.
 
 Decision responses expose policyRulesApplied and include policy_rule_applied:<id> in explanation reasons for matched rules.
+
+## Operational endpoints
+
+### GET /ready
+
+Public readiness endpoint. Returns HTTP 200 when the API process is initialized.
+
+### GET /v1/status
+
+Authenticated operational snapshot for operators and dashboards. The response contains safe counts and capability flags, not credentials or workload payloads.
+
+It includes target count, probeable target count, execution adapter count, decision count, execution-enabled state, persistence flags and automatic-probing state.
+
+### Graceful shutdown
+
+The production bootstrap handles SIGTERM and SIGINT by stopping automatic probing first and then closing the HTTP server. Shutdown events are emitted through the structured logger.

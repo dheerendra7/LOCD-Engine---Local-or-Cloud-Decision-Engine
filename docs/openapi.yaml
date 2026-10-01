@@ -6,6 +6,12 @@ info:
 servers:
   - url: http://localhost:8787
 paths:
+  /ready:
+    get:
+      summary: Readiness probe
+      responses:
+        "200":
+          description: API is ready
   /health:
     get:
       summary: Service health
@@ -110,6 +116,17 @@ paths:
           description: No registered execution targets
 
 
+  /v1/status:
+    get:
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+      summary: Safe operational status
+      responses:
+        "200":
+          description: Operational status snapshot
+        "401":
+          description: Authentication required
   /v1/policies:
     get:
       security:
