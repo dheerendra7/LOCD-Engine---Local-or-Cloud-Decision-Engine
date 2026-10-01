@@ -1,0 +1,149 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { createStateServiceServer } from "../src/server.js";
+import { createSQLiteStateStores } from "../../../packages/sqlite/src/index.js";
+
+async function startServer(apiKey = "state-secret") {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-state-service-"));
+  const file = path.join(dir, "state.db");
+  const stores = createSQLiteStateStores({ filePath: file, maxEntries: 100 });
+  const server = createStateServiceServer({ stores, apiKey });
+
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  return {
+    server,
+    stores,
+    url: "http://127.0.0.1:" + server.address().port,
+    cleanup: async () => {
+      await new Promise(resolve => server.close(resolve));
+      stores.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  };
+}
+
+test("state service exposes public health and protects state APIs", async () => {
+  const instance = await startServer();
+
+  try {
+    const health = await fetch(instance.url + "/health");
+    assert.equal(health.status, 200);
+
+    const denied = await fetch(instance.url + "/v1/state/metrics");
+    assert.equal(denied.status, 401);
+
+    const allowed = await fetch(instance.url + "/v1/state/metrics", {
+      headers: { authorization: "Bearer state-secret" }
+    });
+    assert.equal(allowed.status, 200);
+  } finally {
+    await instance.cleanup();
+  }
+});
+
+test("state service stores telemetry and outcomes", async () => {
+  const instance = await startServer();
+
+  try {
+    const headers = {
+      authorization: "Bearer state-secret",
+      "content-type": "application/json"
+    };
+
+    const saved = await fetch(instance.url + "/v1/state/decisions", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        id: "state-d1",
+        route: "local",
+        targetId: "gpu",
+        workloadType: "llm",
+        estimatedLatencyMs: 100,
+        estimatedCostUsd: 0.01
+      })
+    });
+    assert.equal(saved.status, 201);
+
+    const outcome = await fetch(instance.url + "/v1/state/outcomes/state-d1", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        outcome: "success",
+        actualLatencyMs: 120,
+        actualCostUsd: 0.012
+      })
+    });
+    assert.equal(outcome.status, 200);
+
+    const metrics = await fetch(instance.url + "/v1/state/metrics", {
+      headers: { authorization: "Bearer state-secret" }
+    });
+    const summary = await metrics.json();
+    assert.equal(summary.successRate, 1);
+    assert.equal(summary.meanAbsoluteLatencyErrorMs, 20);
+  } finally {
+    await instance.cleanup();
+  }
+});
+
+test("state service provides atomic coordination operations", async () => {
+  const instance = await startServer();
+
+  try {
+    const headers = {
+      authorization: "Bearer state-secret",
+      "content-type": "application/json"
+    };
+
+    const first = await fetch(instance.url + "/v1/state/kv/lock/set-if-absent", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ value: { owner: "one" }, ttlMs: 1000 })
+    });
+    const second = await fetch(instance.url + "/v1/state/kv/lock/set-if-absent", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ value: { owner: "two" }, ttlMs: 1000 })
+    });
+
+    assert.deepEqual(await first.json(), { claimed: true });
+    assert.deepEqual(await second.json(), { claimed: false });
+
+    const increment = await fetch(instance.url + "/v1/state/kv/counter/incr", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ ttlMs: 1000 })
+    });
+    assert.deepEqual(await increment.json(), { value: 1 });
+  } finally {
+    await instance.cleanup();
+  }
+});
+
+test("state service limits request body size", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-state-body-"));
+  const file = path.join(dir, "state.db");
+  const stores = createSQLiteStateStores({ filePath: file });
+  const server = createStateServiceServer({ stores, apiKey: "secret", maxBodyBytes: 10 });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + server.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/state/kv/x", {
+      method: "PUT",
+      headers: {
+        authorization: "Bearer secret",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ value: "this is too large" })
+    });
+    assert.equal(response.status, 413);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    stores.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
