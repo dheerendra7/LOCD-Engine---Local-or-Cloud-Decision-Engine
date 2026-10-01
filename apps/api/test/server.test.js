@@ -2020,3 +2020,30 @@ test("network State Service can provide shared telemetry across API instances", 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("decision feedback records target utilization for calibration", async () => {
+  const response = await fetch(baseUrl + "/v1/decide", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      workload: { type: "classification", sensitivity: "low" },
+      targets: [{
+        id: "utilization-target",
+        mode: "local",
+        health: 1,
+        capacity: 0.82,
+        privacy: 1,
+        estimatedLatencyMs: 100,
+        estimatedCostUsd: 0
+      }]
+    })
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+
+  const history = await (await fetch(baseUrl + "/v1/decisions?limit=1")).json();
+  const event = history.decisions[0];
+  assert.equal(event.id, body.decisionId);
+  assert.equal(event.targetUtilization, 0.82);
+});
