@@ -1,4 +1,4 @@
-import { createOpenAICompatibleAdapter } from "../../../packages/providers/src/index.js";
+import { createOpenAICompatibleAdapter } from "./openai-compatible.js";
 
 function requiredString(value, field) {
   if (!value || typeof value !== "string") throw new Error(field + " is required");
