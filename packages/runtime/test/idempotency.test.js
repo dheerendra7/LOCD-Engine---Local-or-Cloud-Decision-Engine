@@ -104,3 +104,44 @@ test("invalid local idempotency lock TTL fails clearly", () => {
     /idempotency_lock_ttl_invalid/
   );
 });
+
+test("processing claims expire using their own lock TTL", () => {
+  let now = 1000;
+  const store = createIdempotencyStore({
+    ttlMs: 60000,
+    clock: () => now
+  });
+
+  assert.deepEqual(
+    store.claim("scope", "key", { x: 1 }, 100),
+    { claimed: true }
+  );
+
+  now = 1050;
+  assert.deepEqual(
+    store.claim("scope", "key", { x: 1 }, 100),
+    { claimed: false, reason: "in_progress" }
+  );
+
+  now = 1100;
+  assert.deepEqual(
+    store.claim("scope", "key", { x: 1 }, 100),
+    { claimed: true }
+  );
+});
+
+test("completed responses keep the normal retention TTL", () => {
+  let now = 1000;
+  const store = createIdempotencyStore({
+    ttlMs: 100,
+    clock: () => now
+  });
+
+  store.remember("scope", "key", { x: 1 }, { status: 200, body: {} });
+
+  now = 1099;
+  assert.notEqual(store.lookup("scope", "key", { x: 1 }), null);
+
+  now = 1100;
+  assert.equal(store.lookup("scope", "key", { x: 1 }), null);
+});
