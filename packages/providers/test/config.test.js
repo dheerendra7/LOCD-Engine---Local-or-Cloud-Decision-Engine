@@ -37,7 +37,8 @@ test("provider config never stores API key in target snapshot", async () => {
 
   const probe = await adapter.probe();
   assert.equal("apiKey" in probe, false);
-  assert.equal("PRIVATE_PROVIDER_KEY" in JSON.stringify(probe), false);
+  assert.equal(JSON.stringify(probe).includes("PRIVATE_PROVIDER_KEY"), false);
+  assert.equal(JSON.stringify(probe).includes("secret"), false);
 });
 
 test("missing API key env is rejected", () => {
