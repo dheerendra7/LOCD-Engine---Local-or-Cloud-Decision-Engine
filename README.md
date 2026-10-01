@@ -41,6 +41,7 @@ Possible destinations:
 - Gated execution API with dry-run fallbacks and explicit live-execution controls.
 - Structured request observability with secret redaction.
 - Durable metadata-only telemetry option for single-process restart persistence.
+- Utilization-aware calibration by target/workload load bands.
 - Node built-in tests and GitHub Actions CI.
 
 ## Quick start

@@ -340,3 +340,17 @@ A target can provide optional pricing metadata:
 Workloads can provide inputTokens, outputTokens and requests. When target.estimatedCostUsd is absent, the decision engine derives estimatedCostUsd from pricing. Explicit target estimates always take precedence.
 
 Supported pricing units are flat, per-request and per-1k-tokens. Unsupported currencies are rejected instead of silently converting or inventing exchange rates.
+
+## Utilization-aware calibration
+
+Calibration is bucketed by target utilization so estimates can adapt to load conditions.
+
+Default bands:
+- low: utilization <= 0.25
+- moderate: utilization <= 0.60
+- high: utilization <= 0.85
+- saturated: utilization > 0.85
+
+Targets use their capacity value as the current utilization signal. Historical telemetry without utilization remains in an unknown bucket and can be used as a fallback until enough band-specific observations exist.
+
+The calibration endpoint exposes these bands through config.utilizationBands.
