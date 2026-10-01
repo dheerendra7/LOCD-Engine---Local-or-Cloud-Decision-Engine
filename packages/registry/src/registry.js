@@ -89,6 +89,12 @@ export function createTargetRegistry(initialTargets = []) {
       );
       return collectTargetSnapshots(probeable);
     },
+
+    listExecutionAdapters() {
+      return [...adapters.values()].filter(
+        adapter => typeof adapter.execute === "function"
+      );
+    },
     count() {
       return adapters.size;
     },
