@@ -5,6 +5,7 @@ import { createConfiguredExecutionRegistry, createConfiguredProbeScheduler, crea
 import { createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { createCalibrator } from "../../../packages/calibration/src/index.js";
 import { createScopedAuthorizer } from "../../../packages/auth/src/index.js";
+import { createSQLiteStateStores } from "../../../packages/sqlite/src/index.js";
 import { createLogger } from "../../../packages/observability/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
 import { createExecutionRegistry } from "../../../packages/execution/src/index.js";
@@ -1749,5 +1750,99 @@ test("status endpoint reports shared coordination mode", async () => {
     assert.equal(body.capabilities.idempotencyMode, "shared");
   } finally {
     await new Promise(resolve => statusServer.close(resolve));
+  }
+});
+
+
+test("SQLite state can back multiple API instances for telemetry and coordination", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-api-sqlite-state-"));
+  const file = path.join(dir, "state.db");
+  const stateA = createSQLiteStateStores({ filePath: file, maxEntries: 100 });
+  const stateB = createSQLiteStateStores({ filePath: file, maxEntries: 100 });
+
+  const serverA = createServer({
+    decisionStore: stateA.telemetry,
+    coordinationStore: stateA.coordination,
+    rateLimitMaxRequests: 1,
+    rateLimitWindowMs: 60_000
+  });
+  const serverB = createServer({
+    decisionStore: stateB.telemetry,
+    coordinationStore: stateB.coordination,
+    rateLimitMaxRequests: 1,
+    rateLimitWindowMs: 60_000
+  });
+
+  await Promise.all([
+    new Promise(resolve => serverA.listen(0, "127.0.0.1", resolve)),
+    new Promise(resolve => serverB.listen(0, "127.0.0.1", resolve))
+  ]);
+
+  const urlA = "http://127.0.0.1:" + serverA.address().port;
+  const urlB = "http://127.0.0.1:" + serverB.address().port;
+
+  try {
+    const firstMetric = await fetch(urlA + "/v1/metrics");
+    assert.equal(firstMetric.status, 200);
+
+    const rateLimited = await fetch(urlB + "/v1/metrics");
+    assert.equal(rateLimited.status, 429);
+
+    // Clear coordination budget through a fresh DB bucket by using a new client identity.
+    const headers = { "x-forwarded-for": "203.0.113.50" };
+    const decisionBody = JSON.stringify({
+      workload: { type: "sqlite-shared", sensitivity: "low" },
+      targets: [{
+        id: "sqlite-api-target",
+        mode: "local",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 20,
+        estimatedCostUsd: 0
+      }]
+    });
+
+    // The first request consumes the new client's shared budget.
+    const firstDecision = await fetch(urlA + "/v1/decide", {
+      method: "POST",
+      headers: {
+        ...headers,
+        "content-type": "application/json",
+        "idempotency-key": "sqlite-shared-key"
+      },
+      body: decisionBody
+    });
+    assert.equal(firstDecision.status, 200);
+    const firstBody = await firstDecision.json();
+
+    // Use another client identity for the replay; idempotency storage is key-scoped
+    // and still shared regardless of which API instance receives it.
+    const replay = await fetch(urlB + "/v1/decide", {
+      method: "POST",
+      headers: {
+        "x-forwarded-for": "203.0.113.51",
+        "content-type": "application/json",
+        "idempotency-key": "sqlite-shared-key"
+      },
+      body: decisionBody
+    });
+    assert.equal(replay.status, 200);
+    assert.equal(replay.headers.get("idempotency-replayed"), "true");
+    assert.equal((await replay.json()).decisionId, firstBody.decisionId);
+
+    const history = await fetch(urlB + "/v1/decisions?limit=10", {
+      headers: { "x-forwarded-for": "203.0.113.51" }
+    });
+    assert.equal(history.status, 200);
+    assert.equal((await history.json()).decisions.length, 1);
+  } finally {
+    await Promise.all([
+      new Promise(resolve => serverA.close(resolve)),
+      new Promise(resolve => serverB.close(resolve))
+    ]);
+    stateA.close();
+    stateB.close();
+    await rm(dir, { recursive: true, force: true });
   }
 });
