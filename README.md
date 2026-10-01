@@ -34,6 +34,7 @@ Possible destinations:
 - Explicitly gated public execution endpoint for configured provider adapters.
 - Structured observability utilities with secret redaction.
 - Server-side provider configuration with environment-backed secrets.
+- Scoped API authorization with least-privilege execution controls.
 - Browser dashboard shell.
 - Live provider probes and server-side provider configuration.
 - Optional automatic probe scheduling with bounded concurrency.
