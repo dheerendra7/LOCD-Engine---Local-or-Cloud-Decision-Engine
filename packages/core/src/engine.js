@@ -1,4 +1,5 @@
 import { resolvePolicy } from "../../../packages/policy/src/index.js";
+import { estimateWorkloadCost } from "../../../packages/costing/src/index.js";
 
 const MODES = ["local", "private", "cloud", "hybrid"];
 const SENSITIVITIES = ["low", "medium", "high"];
@@ -18,6 +19,14 @@ function finiteOrNull(value) {
 
 function unique(values) {
   return [...new Set(Array.isArray(values) ? values : [])];
+}
+
+function nonNegativeInteger(value, field) {
+  const number = Number(value ?? 0);
+  if (!Number.isInteger(number) || number < 0) {
+    throw new Error(field + " must be a non-negative integer");
+  }
+  return number;
 }
 
 function normalizePolicy(policy = {}, workload = {}) {
@@ -90,7 +99,10 @@ function normalizeRequest(input) {
       sensitivity,
       requiredCapabilities: unique(input.workload.requiredCapabilities),
       requiredMemoryGb,
-      requiredContextTokens
+      requiredContextTokens,
+      inputTokens: nonNegativeInteger(input.workload.inputTokens, "workload.inputTokens"),
+      outputTokens: nonNegativeInteger(input.workload.outputTokens, "workload.outputTokens"),
+      requests: nonNegativeInteger(input.workload.requests ?? 1, "workload.requests")
     },
     constraints,
     targets: input.targets,
@@ -159,7 +171,11 @@ function evaluateCandidate(request, target) {
   if (!privacy.eligible) rejected.push(privacy.reason);
 
   const estimatedLatencyMs = finiteOrNull(target.estimatedLatencyMs);
-  const estimatedCostUsd = finiteOrNull(target.estimatedCostUsd);
+  const costEstimate = estimateWorkloadCost({
+    workload,
+    target
+  });
+  const estimatedCostUsd = costEstimate.costUsd;
   const health = clamp(target.health ?? 0);
   const capacity = clamp(target.capacity ?? 1);
   const availableMemoryGb = finiteOrNull(target.availableMemoryGb);
@@ -248,6 +264,11 @@ function evaluateCandidate(request, target) {
       capacity: headroom,
       reliability: health
     },
+    costEstimate: {
+      usd: estimatedCostUsd,
+      source: costEstimate.source,
+      reason: costEstimate.reason
+    },
     capacity: {
       availableMemoryGb,
       maxContextTokens
@@ -319,7 +340,10 @@ export function decide(input) {
     score: Number(winner.score.toFixed(6)),
     estimated: {
       latencyMs: finiteOrNull(winner.target.estimatedLatencyMs),
-      costUsd: finiteOrNull(winner.target.estimatedCostUsd)
+      costUsd: finiteOrNull(winner.target.estimatedCostUsd) ?? estimateWorkloadCost({
+        workload: request.workload,
+        target: winner.target
+      }).costUsd
     },
     reasons,
     policyRulesApplied: request.policy.matchedRules,
@@ -338,6 +362,7 @@ export function decide(input) {
       score: item.eligible ? Number(item.score.toFixed(6)) : null,
       factors: item.eligible ? item.factors : null,
       capacity: item.eligible ? item.capacity : null,
+      costEstimate: item.eligible ? item.costEstimate : null,
       reasons: item.eligible ? [] : item.rejected
     }))
   };
