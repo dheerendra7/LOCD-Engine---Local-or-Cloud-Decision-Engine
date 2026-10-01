@@ -31,6 +31,7 @@ Possible destinations:
 - Pure JavaScript core with no runtime dependency.
 - HTTP API for application integration.
 - Provider-neutral execution boundary with safe dry-run support.
+- Explicitly gated public execution endpoint for configured provider adapters.
 - Structured observability utilities with secret redaction.
 - Server-side provider configuration with environment-backed secrets.
 - Browser dashboard shell.
