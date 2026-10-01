@@ -123,3 +123,17 @@ test("applyCostEstimates fills only missing explicit costs", () => {
   assert.equal(targets[0].estimatedCostUsd, 0.004);
   assert.equal(targets[1].estimatedCostUsd, 0.1);
 });
+
+test("explicit zero requests produce zero per-request cost", () => {
+  const result = estimateWorkloadCost({
+    workload: { requests: 0 },
+    target: {
+      pricing: {
+        unit: "per-request",
+        requestUsd: 0.02
+      }
+    }
+  });
+
+  assert.equal(result.costUsd, 0);
+});
