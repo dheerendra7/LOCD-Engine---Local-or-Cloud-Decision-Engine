@@ -81,7 +81,7 @@ export function estimateWorkloadCost({ workload = {}, target = {} } = {}) {
 
   if (pricing.unit === "per-request") {
     return {
-      costUsd: Number((pricing.requestUsd * Math.max(requests, 1)).toFixed(6)),
+      costUsd: Number((pricing.requestUsd * requests).toFixed(6)),
       source: "pricing",
       reason: "per_request_pricing"
     };
