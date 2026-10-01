@@ -77,6 +77,8 @@ paths:
           description: Authentication required
         "403":
           description: Live execution disabled or not safely configured
+        "409":
+          description: Idempotency key conflict or request already in progress
         "413":
           description: Request body too large
         "429":
@@ -104,6 +106,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DecisionResponse"
+        "409":
+          description: Idempotency key conflict or request already in progress
         "413":
           description: Request body too large
         "429":
@@ -172,6 +176,8 @@ paths:
       responses:
         "201":
           description: Target registered
+        "409":
+          description: Idempotency key conflict or request already in progress
         "413":
           description: Request body too large
         "429":
@@ -214,6 +220,8 @@ paths:
       responses:
         "200":
           description: Hybrid plan result
+        "409":
+          description: Idempotency key conflict or request already in progress
         "413":
           description: Request body too large
         "429":
@@ -286,6 +294,8 @@ paths:
       responses:
         "200":
           description: Heartbeat accepted
+        "409":
+          description: Idempotency key conflict or request already in progress
         "413":
           description: Request body too large
         "429":
@@ -317,6 +327,8 @@ paths:
       responses:
         "200":
           description: Outcome recorded
+        "409":
+          description: Idempotency key conflict or request already in progress
         "413":
           description: Request body too large
         "429":
