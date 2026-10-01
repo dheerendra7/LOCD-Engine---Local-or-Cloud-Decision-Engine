@@ -416,11 +416,6 @@ export function createServer({
 
       if (req.method === "POST" && pathname === "/v1/execute") {
         const body = await readBody(req, maxBodyBytes);
-        const replay = await claimOrReplay(body);
-        if (replay) {
-          sendReplay(replay);
-          return;
-        }
 
         if (!body.plan) {
           sendJson(res, 400, { error: "plan is required" });
@@ -444,6 +439,12 @@ export function createServer({
           }
         }
 
+        const replay = await claimOrReplay(body);
+        if (replay) {
+          sendReplay(replay);
+          return;
+        }
+
         const registry = executionRegistry ||
           await createConfiguredExecutionRegistry({ targetRegistry });
 
@@ -462,11 +463,6 @@ export function createServer({
 
       if (req.method === "POST" && pathname === "/v1/hybrid-plan") {
         const body = await readBody(req, maxBodyBytes);
-        const replay = await claimOrReplay(body);
-        if (replay) {
-          sendReplay(replay);
-          return;
-        }
         const hasRequestTargets = Array.isArray(body.targets) && body.targets.length > 0;
         const request = hasRequestTargets
           ? body
@@ -474,6 +470,12 @@ export function createServer({
 
         if (!request.targets.length) {
           sendJson(res, 503, { error: "no_registered_targets" });
+          return;
+        }
+
+        const replay = await claimOrReplay(body);
+        if (replay) {
+          sendReplay(replay);
           return;
         }
 
@@ -502,6 +504,12 @@ export function createServer({
 
         if (!request.targets.length) {
           sendJson(res, 503, { error: "no_registered_targets" });
+          return;
+        }
+
+        const replay = await claimOrReplay(body);
+        if (replay) {
+          sendReplay(replay);
           return;
         }
 
@@ -545,13 +553,14 @@ export function createServer({
 
       if (req.method === "POST" && pathname === "/v1/outcomes") {
         const body = await readBody(req, maxBodyBytes);
+        if (!body.decisionId) {
+          sendJson(res, 400, { error: "decisionId is required" });
+          return;
+        }
+
         const replay = await claimOrReplay(body);
         if (replay) {
           sendReplay(replay);
-          return;
-        }
-        if (!body.decisionId) {
-          sendJson(res, 400, { error: "decisionId is required" });
           return;
         }
 
