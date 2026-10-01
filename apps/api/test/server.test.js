@@ -1764,13 +1764,15 @@ test("SQLite state can back multiple API instances for telemetry and coordinatio
     decisionStore: stateA.telemetry,
     coordinationStore: stateA.coordination,
     rateLimitMaxRequests: 1,
-    rateLimitWindowMs: 60_000
+    rateLimitWindowMs: 60_000,
+    trustProxy: true
   });
   const serverB = createServer({
     decisionStore: stateB.telemetry,
     coordinationStore: stateB.coordination,
     rateLimitMaxRequests: 1,
-    rateLimitWindowMs: 60_000
+    rateLimitWindowMs: 60_000,
+    trustProxy: true
   });
 
   await Promise.all([
@@ -1832,7 +1834,7 @@ test("SQLite state can back multiple API instances for telemetry and coordinatio
     assert.equal((await replay.json()).decisionId, firstBody.decisionId);
 
     const history = await fetch(urlB + "/v1/decisions?limit=10", {
-      headers: { "x-forwarded-for": "203.0.113.51" }
+      headers: { "x-forwarded-for": "203.0.113.52" }
     });
     assert.equal(history.status, 200);
     assert.equal((await history.json()).decisions.length, 1);
