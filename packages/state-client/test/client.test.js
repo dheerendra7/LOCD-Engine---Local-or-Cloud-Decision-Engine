@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   createHTTPCoordinationStore,
-  createHTTPDecisionStore
+  createHTTPDecisionStore,
+  createHTTPStateStores
 } from "../src/index.js";
 
 function fakeFetch(responseBody, status = 200) {
