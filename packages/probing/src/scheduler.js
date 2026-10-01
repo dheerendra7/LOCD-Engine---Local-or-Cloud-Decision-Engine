@@ -6,7 +6,11 @@ export function createProbeScheduler({
   setIntervalImpl = setInterval,
   clearIntervalImpl = clearInterval
 } = {}) {
-  if (!registry || typeof registry.list !== "function" || typeof registry.probe !== "function") {
+  if (
+    !registry ||
+    (typeof registry.list !== "function" && typeof registry.listProbeable !== "function") ||
+    typeof registry.probe !== "function"
+  ) {
     throw new Error("probe registry is required");
   }
   if (!Number.isFinite(intervalMs) || intervalMs < 100) {
@@ -33,21 +37,28 @@ export function createProbeScheduler({
 
     inFlight.add(id);
     try {
-      const snapshot = await registry.probe(id);
-      const result = {
-        targetId: id,
-        status: "success",
-        snapshot
-      };
-      await onResult(result);
-      return result;
-    } catch (error) {
-      const result = {
-        targetId: id,
-        status: "failed",
-        errorClass: error instanceof Error ? error.message : "probe_failed"
-      };
-      await onResult(result);
+      let result;
+      try {
+        const snapshot = await registry.probe(id);
+        result = {
+          targetId: id,
+          status: "success",
+          snapshot
+        };
+      } catch (error) {
+        result = {
+          targetId: id,
+          status: "failed",
+          errorClass: error instanceof Error ? error.message : "probe_failed"
+        };
+      }
+
+      try {
+        await onResult(result);
+      } catch {
+        // Observability must not change probe outcome semantics.
+      }
+
       return result;
     } finally {
       inFlight.delete(id);
@@ -55,7 +66,9 @@ export function createProbeScheduler({
   }
 
   async function runOnce() {
-    const targets = await registry.list();
+    const targets = typeof registry.listProbeable === "function"
+      ? await registry.listProbeable()
+      : await registry.list();
     const results = [];
     let cursor = 0;
 
@@ -86,6 +99,7 @@ export function createProbeScheduler({
           errorClass: error instanceof Error ? error.message : "scheduler_failed"
         }));
       }, intervalMs);
+      timer?.unref?.();
       return true;
     },
 

@@ -147,3 +147,62 @@ test("duplicate probe calls for the same target do not overlap", async () => {
     scheduler.inFlightCount() === 0
   );
 });
+
+test("scheduler prefers registry listProbeable when available", async () => {
+  const calls = [];
+  const registry = {
+    async list() {
+      throw new Error("list should not be called");
+    },
+    async listProbeable() {
+      return [{ id: "probeable-only" }];
+    },
+    async probe(id) {
+      calls.push(id);
+      return { id, available: true };
+    }
+  };
+
+  const scheduler = createProbeScheduler({ registry, intervalMs: 1000 });
+  const results = await scheduler.runOnce();
+
+  assert.deepEqual(calls, ["probeable-only"]);
+  assert.equal(results[0].status, "success");
+});
+
+test("observer failures do not change successful probe results", async () => {
+  const registry = {
+    async list() { return [{ id: "observable" }]; },
+    async probe() { return { id: "observable", available: true }; }
+  };
+
+  const scheduler = createProbeScheduler({
+    registry,
+    intervalMs: 1000,
+    onResult() {
+      throw new Error("logger_down");
+    }
+  });
+
+  const results = await scheduler.runOnce();
+  assert.equal(results[0].status, "success");
+});
+
+test("observer failures do not change failed probe classification", async () => {
+  const registry = {
+    async list() { return [{ id: "failed" }]; },
+    async probe() { throw new Error("provider_down"); }
+  };
+
+  const scheduler = createProbeScheduler({
+    registry,
+    intervalMs: 1000,
+    onResult() {
+      throw new Error("logger_down");
+    }
+  });
+
+  const results = await scheduler.runOnce();
+  assert.equal(results[0].status, "failed");
+  assert.equal(results[0].errorClass, "provider_down");
+});

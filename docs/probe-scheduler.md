@@ -29,3 +29,11 @@ Recommended deployment pattern:
       decision engine
 
 Keep interval and concurrency settings conservative for external providers. The scheduler is process-local; multi-instance deployments should coordinate ownership or use an external scheduler to avoid duplicate probing.
+
+## API integration
+
+Set LOCD_PROBE_INTERVAL_MS to a positive interval to enable automatic probing from the API process. The API performs an immediate probe cycle at startup and then repeats on the configured interval.
+
+LOCD_PROBE_MAX_CONCURRENT bounds simultaneous adapter probes.
+
+Automatic probing is disabled by default. This avoids unexpected provider traffic and cost until an operator explicitly enables it.
