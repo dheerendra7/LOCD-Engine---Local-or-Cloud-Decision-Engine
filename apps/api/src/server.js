@@ -8,6 +8,7 @@ import { listPolicyProfiles } from "../../../packages/policy/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
 import { planHybridExecution } from "../../../packages/planner/src/index.js";
 import { createLogger, createRequestId } from "../../../packages/observability/src/index.js";
+import { createCalibrator } from "../../../packages/calibration/src/index.js";
 import { createIdempotencyStore } from "../../../packages/runtime/src/index.js";
 import { createRateLimiter, getClientKey } from "./rate-limit.js";
 import { createProbeScheduler } from "../../../packages/probing/src/index.js";
@@ -212,11 +213,26 @@ export function createServer({
   executionEnabled = process.env.LOCD_EXECUTION_ENABLED === "true",
   authorizer = null,
   probeScheduler = null,
-  serviceVersion = "0.1.0"
+  serviceVersion = "0.1.0",
+  calibrator = createCalibrator(),
+  calibrationEnabled = process.env.LOCD_CALIBRATION_ENABLED === "true"
 } = {}) {
   if (!Number.isFinite(maxBodyBytes) || maxBodyBytes < 1) {
 
     throw new Error("maxBodyBytes must be >= 1");
+  }
+  if (!calibrator || typeof calibrator.apply !== "function" ||
+      typeof calibrator.observe !== "function" ||
+      typeof calibrator.hydrate !== "function") {
+    throw new Error("calibrator must implement apply, observe and hydrate");
+  }
+  try {
+    calibrator.hydrate(decisionStore.list({ limit: 5000 }));
+  } catch (error) {
+    logger.warn({
+      event: "calibration_hydrate_failed",
+      errorClass: error instanceof Error ? error.message : "calibration_hydrate_failed"
+    });
   }
   const auth = authorizer || loadScopedAuthFromEnv({
     legacyApiKey: apiKey
@@ -402,9 +418,13 @@ export function createServer({
           return;
         }
         const hasRequestTargets = Array.isArray(body.targets) && body.targets.length > 0;
-        const request = hasRequestTargets
-          ? body
-          : { ...body, targets: await targetRegistry.list() };
+        const rawTargets = hasRequestTargets
+          ? body.targets
+          : await targetRegistry.list();
+        const calibratedTargets = calibrationEnabled
+          ? calibrator.apply(rawTargets, body.workload?.type || "unknown")
+          : rawTargets;
+        const request = { ...body, targets: calibratedTargets };
 
         if (!request.targets.length) {
           sendJson(res, 503, { error: "no_registered_targets" });
@@ -424,7 +444,26 @@ export function createServer({
           outcome: "pending"
         });
 
-        const responseBody = { ...decision, decisionId: event.id };
+        const adjustedTargetIds = calibrationEnabled
+          ? request.targets
+            .filter((target, index) => {
+              const original = rawTargets[index];
+              return target.estimatedLatencyMs !== original.estimatedLatencyMs ||
+                target.estimatedCostUsd !== original.estimatedCostUsd;
+            })
+            .map(target => target.id)
+          : [];
+
+        const responseBody = {
+          ...decision,
+          decisionId: event.id,
+          calibration: {
+            enabled: calibrationEnabled,
+            workloadType: body.workload?.type || "unknown",
+            minSamples: calibrator.config.minSamples,
+            adjustedTargetIds
+          }
+        };
         rememberResponse(body, 200, responseBody);
         sendJson(res, 200, responseBody);
         return;
@@ -444,6 +483,15 @@ export function createServer({
 
         try {
           const event = decisionStore.recordOutcome(body.decisionId, body);
+          calibrator.observe({
+            targetId: event.targetId,
+            workloadType: event.workloadType,
+            estimatedLatencyMs: event.estimatedLatencyMs,
+            actualLatencyMs: event.actualLatencyMs,
+            estimatedCostUsd: event.estimatedCostUsd,
+            actualCostUsd: event.actualCostUsd,
+            outcome: event.outcome
+          });
           rememberResponse(body, 200, event);
           sendJson(res, 200, event);
         } catch (error) {
@@ -576,6 +624,15 @@ export function createServer({
 
       if (req.method === "GET" && pathname === "/v1/metrics") {
         sendJson(res, 200, decisionStore.summary());
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/v1/calibration") {
+        sendJson(res, 200, {
+          enabled: calibrationEnabled,
+          config: calibrator.config,
+          entries: calibrator.snapshot()
+        });
         return;
       }
 
