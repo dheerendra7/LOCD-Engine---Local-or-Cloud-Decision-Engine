@@ -570,6 +570,7 @@ export function createServer({
           sendJson(res, 200, event);
         } catch (error) {
           if (error instanceof Error && error.message === "decision_not_found") {
+            await releaseIdempotencyClaim();
             sendJson(res, 404, { error: "decision_not_found" });
             return;
           }
@@ -627,10 +628,12 @@ export function createServer({
           sendJson(res, 200, snapshot);
         } catch (error) {
           if (error instanceof Error && error.message === "target_not_found") {
+            await releaseIdempotencyClaim();
             sendJson(res, 404, { error: "target_not_found" });
             return;
           }
           if (error instanceof Error && error.message === "target_does_not_support_probe") {
+            await releaseIdempotencyClaim();
             sendJson(res, 501, { error: "target_does_not_support_probe" });
             return;
           }
@@ -662,10 +665,12 @@ export function createServer({
           sendJson(res, 200, updated);
         } catch (error) {
           if (error instanceof Error && error.message === "target_not_found") {
+            await releaseIdempotencyClaim();
             sendJson(res, 404, { error: "target_not_found" });
             return;
           }
           if (error instanceof Error && error.message === "target_does_not_support_heartbeat") {
+            await releaseIdempotencyClaim();
             sendJson(res, 501, { error: "target_does_not_support_heartbeat" });
             return;
           }
