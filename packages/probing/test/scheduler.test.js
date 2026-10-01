@@ -147,3 +147,25 @@ test("duplicate probe calls for the same target do not overlap", async () => {
     scheduler.inFlightCount() === 0
   );
 });
+
+test("scheduler prefers registry listProbeable when available", async () => {
+  const calls = [];
+  const registry = {
+    async list() {
+      throw new Error("list should not be called");
+    },
+    async listProbeable() {
+      return [{ id: "probeable-only" }];
+    },
+    async probe(id) {
+      calls.push(id);
+      return { id, available: true };
+    }
+  };
+
+  const scheduler = createProbeScheduler({ registry, intervalMs: 1000 });
+  const results = await scheduler.runOnce();
+
+  assert.deepEqual(calls, ["probeable-only"]);
+  assert.equal(results[0].status, "success");
+});
