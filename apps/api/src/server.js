@@ -203,10 +203,9 @@ export function createServer({
   idempotencyStore = null,
   coordinationStore = null,
   maxBodyBytes = Number(process.env.LOCD_MAX_BODY_BYTES || 1_000_000),
-  rateLimiter = createRateLimiter({
-    maxRequests: Number(process.env.LOCD_RATE_LIMIT_RPM || 0),
-    windowMs: 60_000
-  }),
+  rateLimiter = null,
+  rateLimitMaxRequests = Number(process.env.LOCD_RATE_LIMIT_RPM || 0),
+  rateLimitWindowMs = 60_000,
   trustProxy = process.env.LOCD_TRUST_PROXY === "true",
   logger = createLogger({
     level: process.env.LOCD_LOG_LEVEL || "info"
@@ -251,12 +250,12 @@ export function createServer({
     (coordinationStore
       ? createCoordinatedFixedWindowRateLimiter({
           store: coordinationStore,
-          maxRequests: Number(process.env.LOCD_RATE_LIMIT_RPM || 0),
-          windowMs: 60_000
+          maxRequests: rateLimitMaxRequests,
+          windowMs: rateLimitWindowMs
         })
       : createRateLimiter({
-          maxRequests: Number(process.env.LOCD_RATE_LIMIT_RPM || 0),
-          windowMs: 60_000
+          maxRequests: rateLimitMaxRequests,
+          windowMs: rateLimitWindowMs
         }));
 
   return http.createServer(async (req, res) => {
