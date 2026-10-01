@@ -488,11 +488,6 @@ export function createServer({
       if (req.method === "POST" && pathname === "/v1/decide") {
         await calibrationReady;
         const body = await readBody(req, maxBodyBytes);
-        const replay = await claimOrReplay(body);
-        if (replay) {
-          sendReplay(replay);
-          return;
-        }
         const hasRequestTargets = Array.isArray(body.targets) && body.targets.length > 0;
         const rawTargets = hasRequestTargets
           ? body.targets
