@@ -35,3 +35,19 @@ Use the generic target registry and probe endpoint to publish fresh provider sta
                      |
                      v
                 decision engine
+
+
+## Native Ollama adapter
+
+The native adapter targets Ollama's `/api/tags` probe and `/api/chat` execution endpoints. It supports both the local Ollama server and direct cloud API configuration. Local requests do not require an API key; direct cloud API requests use a Bearer key. citeturn513313search1turn513313search2
+
+Example:
+
+    {
+      "type": "ollama",
+      "id": "local-ollama",
+      "targetId": "local-ollama",
+      "mode": "local",
+      "baseUrl": "http://localhost:11434/api",
+      "model": "llama3.2"
+    }
