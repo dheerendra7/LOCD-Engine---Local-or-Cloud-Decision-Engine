@@ -4,7 +4,7 @@ import { createConfiguredTargetRegistry, createServer } from "../src/server.js";
 import { createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { createLogger } from "../../../packages/observability/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
