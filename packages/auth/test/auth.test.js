@@ -133,7 +133,7 @@ test("scope mapping is explicit and denies unknown v1 routes by default", () => 
   assert.equal(requiredScopeForRequest("POST", "/v1/targets/x/probe"), "targets:write");
   assert.equal(requiredScopeForRequest("POST", "/v1/targets/x/heartbeat"), "targets:write");
   assert.equal(requiredScopeForRequest("POST", "/v1/outcomes"), "telemetry:write");
-  assert.equal(requiredScopeForRequest("POST", "/v1/execute"), "execute");
+  assert.equal(requiredScopeForRequest("POST", "/v1/execute"), "read");
   assert.equal(requiredScopeForRequest("PATCH", "/v1/unknown"), "admin");
 });
 
@@ -149,4 +149,33 @@ test("blank scoped key environment values fail closed", () => {
     }),
     /auth key environment variable is empty/
   );
+});
+
+test("execute authorization remains a distinct live-mode scope", () => {
+  const auth = createAuthorizer({
+    keyEntries: [{
+      id: "reader",
+      keyEnv: "READER_KEY",
+      scopes: ["read"]
+    }, {
+      id: "executor",
+      keyEnv: "EXECUTOR_KEY",
+      scopes: ["read", "execute"]
+    }],
+    env: {
+      READER_KEY: "reader-secret",
+      EXECUTOR_KEY: "executor-secret"
+    }
+  });
+
+  const reader = auth.authenticate({
+    headers: { "x-locd-api-key": "reader-secret" }
+  }).principal;
+  const executor = auth.authenticate({
+    headers: { "x-locd-api-key": "executor-secret" }
+  }).principal;
+
+  assert.equal(auth.authorize(reader, "read"), true);
+  assert.equal(auth.authorize(reader, "execute"), false);
+  assert.equal(auth.authorize(executor, "execute"), true);
 });
