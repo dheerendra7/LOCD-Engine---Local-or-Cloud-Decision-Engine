@@ -56,6 +56,8 @@ Decision endpoint:
 
     POST /v1/decide
 
+Cost estimation can use target pricing metadata with workload inputTokens/outputTokens, while explicit estimatedCostUsd remains authoritative.
+
 Example request:
 
     {

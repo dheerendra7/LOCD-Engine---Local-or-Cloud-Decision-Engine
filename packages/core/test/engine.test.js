@@ -571,3 +571,106 @@ test("policy rules can match required capabilities", () => {
   assert.equal(result.targetId, "private");
   assert.deepEqual(result.policyRulesApplied, ["vision-private"]);
 });
+
+
+test("decision engine derives cost from target pricing when explicit cost is absent", () => {
+  const result = decide({
+    workload: {
+      type: "llm-inference",
+      sensitivity: "low",
+      inputTokens: 1000,
+      outputTokens: 500
+    },
+    constraints: {
+      strictCost: true,
+      maxCostUsd: 0.02
+    },
+    targets: [{
+      id: "priced-cloud",
+      mode: "cloud",
+      health: 1,
+      capacity: 0.2,
+      privacy: 0.5,
+      estimatedLatencyMs: 100,
+      pricing: {
+        unit: "per-1k-tokens",
+        inputUsdPer1kTokens: 0.002,
+        outputUsdPer1kTokens: 0.004
+      }
+    }]
+  });
+
+  assert.equal(result.targetId, "priced-cloud");
+  assert.equal(result.estimated.costUsd, 0.004);
+  assert.equal(result.evaluated[0].costEstimate.source, "pricing");
+});
+
+test("explicit estimated cost overrides target pricing", () => {
+  const result = decide({
+    workload: {
+      type: "llm-inference",
+      sensitivity: "low",
+      inputTokens: 1000,
+      outputTokens: 1000
+    },
+    targets: [{
+      id: "explicit",
+      mode: "cloud",
+      health: 1,
+      capacity: 0.2,
+      privacy: 0.5,
+      estimatedLatencyMs: 100,
+      estimatedCostUsd: 0.03,
+      pricing: {
+        unit: "flat",
+        flatUsd: 0
+      }
+    }]
+  });
+
+  assert.equal(result.estimated.costUsd, 0.03);
+  assert.equal(result.evaluated[0].costEstimate.source, "explicit");
+});
+
+test("negative token usage is rejected before candidate evaluation", () => {
+  assert.throws(
+    () => decide({
+      workload: {
+        type: "llm-inference",
+        inputTokens: -1
+      },
+      targets: [{ id: "x", mode: "local" }]
+    }),
+    /workload.inputTokens must be a non-negative integer/
+  );
+});
+
+test("pricing can make a target ineligible under a strict budget", () => {
+  const result = decide({
+    workload: {
+      type: "llm-inference",
+      inputTokens: 1000,
+      outputTokens: 1000
+    },
+    constraints: {
+      strictCost: true,
+      maxCostUsd: 0.001
+    },
+    targets: [{
+      id: "expensive",
+      mode: "cloud",
+      health: 1,
+      capacity: 0.1,
+      privacy: 0.5,
+      estimatedLatencyMs: 100,
+      pricing: {
+        unit: "per-1k-tokens",
+        inputUsdPer1kTokens: 0.002,
+        outputUsdPer1kTokens: 0.002
+      }
+    }]
+  });
+
+  assert.equal(result.route, "none");
+  assert.equal(result.rejected[0].reasons.includes("cost_budget_exceeded"), true);
+});

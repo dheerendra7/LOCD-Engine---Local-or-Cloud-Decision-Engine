@@ -27,6 +27,9 @@ function normalizeSnapshot(snapshot) {
     privacy: Math.min(1, Math.max(0, finiteNumber(snapshot.privacy, 0))),
     estimatedLatencyMs: finiteNumber(snapshot.estimatedLatencyMs),
     estimatedCostUsd: finiteNumber(snapshot.estimatedCostUsd),
+    pricing: snapshot.pricing && typeof snapshot.pricing === "object"
+      ? structuredClone(snapshot.pricing)
+      : null,
     availableMemoryGb: finiteNumber(snapshot.availableMemoryGb),
     maxContextTokens: finiteNumber(snapshot.maxContextTokens),
     lastHeartbeatAt: snapshot.lastHeartbeatAt ? new Date(snapshot.lastHeartbeatAt).toISOString() : null,

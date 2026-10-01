@@ -393,6 +393,19 @@ components:
         privacy: {type: number, minimum: 0, maximum: 1}
         estimatedLatencyMs: {type: number, minimum: 0}
         estimatedCostUsd: {type: number, minimum: 0}
+        pricing:
+          type: object
+          properties:
+            unit:
+              type: string
+              enum: [flat, per-request, per-1k-tokens]
+            currency:
+              type: string
+              enum: [USD]
+            flatUsd: {type: number, minimum: 0}
+            requestUsd: {type: number, minimum: 0}
+            inputUsdPer1kTokens: {type: number, minimum: 0}
+            outputUsdPer1kTokens: {type: number, minimum: 0}
         availableMemoryGb: {type: number, minimum: 0}
         maxContextTokens: {type: number, minimum: 0}
         lastHeartbeatAt:
@@ -414,6 +427,9 @@ components:
           enum: [low, medium, high]
         requiredMemoryGb: {type: number, minimum: 0}
         requiredContextTokens: {type: number, minimum: 0}
+        inputTokens: {type: integer, minimum: 0}
+        outputTokens: {type: integer, minimum: 0}
+        requests: {type: integer, minimum: 0}
         requiredCapabilities:
           type: array
           items: {type: string}

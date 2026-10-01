@@ -323,3 +323,20 @@ Calibration waits for a configurable minimum sample count before changing estima
 GET /v1/calibration returns the current calibration configuration and in-memory model state.
 
 When durable telemetry is enabled, the API rebuilds calibration state from retained completed decision events at startup.
+
+## Cost estimation
+
+A target can provide optional pricing metadata:
+
+    {
+      "pricing": {
+        "unit": "per-1k-tokens",
+        "currency": "USD",
+        "inputUsdPer1kTokens": 0.003,
+        "outputUsdPer1kTokens": 0.012
+      }
+    }
+
+Workloads can provide inputTokens, outputTokens and requests. When target.estimatedCostUsd is absent, the decision engine derives estimatedCostUsd from pricing. Explicit target estimates always take precedence.
+
+Supported pricing units are flat, per-request and per-1k-tokens. Unsupported currencies are rejected instead of silently converting or inventing exchange rates.
