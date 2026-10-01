@@ -18,6 +18,9 @@ paths:
                 $ref: "#/components/schemas/Health"
   /v1/execute:
     post:
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/RequestId"
       security:
         - bearerAuth: []
         - apiKeyHeader: []
