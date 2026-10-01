@@ -677,7 +677,11 @@ export function createServer({
             executionEnabled: Boolean(executionEnabled),
             persistentTargets: Boolean(targetFile),
             persistentTelemetry: Boolean(process.env.LOCD_TELEMETRY_FILE?.trim()),
-            automaticProbing: Boolean(probeScheduler?.isRunning?.())
+            automaticProbing: Boolean(probeScheduler?.isRunning?.()),
+            calibrationEnabled: Boolean(calibrationEnabled),
+            sharedCoordination: Boolean(coordinationStore),
+            rateLimitMode: coordinationStore ? "shared" : "process-local",
+            idempotencyMode: coordinationStore ? "shared" : "process-local"
           },
           counts: {
             targets: targets.length,
