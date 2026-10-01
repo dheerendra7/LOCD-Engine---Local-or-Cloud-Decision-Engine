@@ -6,7 +6,11 @@ export function createProbeScheduler({
   setIntervalImpl = setInterval,
   clearIntervalImpl = clearInterval
 } = {}) {
-  if (!registry || typeof registry.list !== "function" || typeof registry.probe !== "function") {
+  if (
+    !registry ||
+    (typeof registry.list !== "function" && typeof registry.listProbeable !== "function") ||
+    typeof registry.probe !== "function"
+  ) {
     throw new Error("probe registry is required");
   }
   if (!Number.isFinite(intervalMs) || intervalMs < 100) {
