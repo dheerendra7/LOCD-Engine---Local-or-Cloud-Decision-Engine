@@ -115,6 +115,35 @@ export async function createConfiguredExecutionRegistry({
   return executionRegistry;
 }
 
+export function createGracefulShutdown({
+  server,
+  probeScheduler = null,
+  logger = createLogger({ level: "info" })
+} = {}) {
+  if (!server || typeof server.close !== "function") {
+    throw new Error("server is required");
+  }
+
+  let shuttingDown = false;
+
+  return signal => new Promise(resolve => {
+    if (shuttingDown) {
+      resolve(false);
+      return;
+    }
+
+    shuttingDown = true;
+    logger.info({ event: "shutdown_started", signal });
+
+    if (probeScheduler) probeScheduler.stop();
+
+    server.close(() => {
+      logger.info({ event: "shutdown_complete", signal });
+      resolve(true);
+    });
+  });
+}
+
 export function createConfiguredProbeScheduler({
   registry,
   intervalMs = Number(process.env.LOCD_PROBE_INTERVAL_MS || 0),
@@ -550,6 +579,9 @@ export function createServer({
 
       if (req.method === "GET" && pathname === "/v1/status") {
         const targets = await targetRegistry.list();
+        const probeableTargets = typeof targetRegistry.listProbeable === "function"
+          ? await targetRegistry.listProbeable()
+          : [];
         const executionAdapters = executionRegistry && typeof executionRegistry.list === "function"
           ? executionRegistry.list()
           : [];
@@ -566,7 +598,7 @@ export function createServer({
           },
           counts: {
             targets: targets.length,
-            probeableTargets: targets.filter(target => target && target.lastHeartbeatAt !== undefined).length,
+            probeableTargets: probeableTargets.length,
             executionAdapters: executionAdapters.length,
             decisions: decisionStore.summary().totalDecisions
           }
@@ -636,21 +668,14 @@ if (isMain) {
     executionEnabled: process.env.LOCD_EXECUTION_ENABLED === "true"
   });
 
-  let shuttingDown = false;
-  const shutdown = signal => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    logger.info({ event: "shutdown_started", signal });
+  const shutdown = createGracefulShutdown({
+    server,
+    probeScheduler,
+    logger
+  });
 
-    if (probeScheduler) probeScheduler.stop();
-
-    server.close(() => {
-      logger.info({ event: "shutdown_complete", signal });
-    });
-  };
-
-  process.once("SIGTERM", () => shutdown("SIGTERM"));
-  process.once("SIGINT", () => shutdown("SIGINT"));
+  process.once("SIGTERM", () => { void shutdown("SIGTERM"); });
+  process.once("SIGINT", () => { void shutdown("SIGINT"); });
 
   server.listen(port, "0.0.0.0", () => {
     if (probeScheduler) {
