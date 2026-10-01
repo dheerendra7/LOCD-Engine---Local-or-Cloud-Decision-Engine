@@ -161,3 +161,20 @@ test("probe error metadata survives snapshot normalization", async () => {
   assert.equal(snapshot.errorClass, "probe_http_503");
   assert.equal((await adapter.getSnapshot()).errorClass, "probe_http_503");
 });
+
+test("OpenAI-compatible provider preserves configured pricing", async () => {
+  const adapter = createOpenAICompatibleAdapter({
+    id: "priced-provider",
+    targetId: "priced-provider",
+    baseUrl: "https://inference.example.com",
+    pricing: {
+      unit: "per-1k-tokens",
+      inputUsdPer1kTokens: 0.003,
+      outputUsdPer1kTokens: 0.012
+    }
+  });
+
+  const snapshot = await adapter.getSnapshot();
+  assert.equal(snapshot.pricing.inputUsdPer1kTokens, 0.003);
+  assert.equal(snapshot.pricing.outputUsdPer1kTokens, 0.012);
+});
