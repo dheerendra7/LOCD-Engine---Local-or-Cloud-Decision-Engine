@@ -82,6 +82,13 @@ export function createTargetRegistry(initialTargets = []) {
     async list() {
       return collectTargetSnapshots([...adapters.values()]);
     },
+
+    async listProbeable() {
+      const probeable = [...adapters.values()].filter(
+        adapter => typeof adapter.probe === "function"
+      );
+      return collectTargetSnapshots(probeable);
+    },
     count() {
       return adapters.size;
     },
