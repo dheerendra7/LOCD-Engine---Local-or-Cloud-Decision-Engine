@@ -932,3 +932,243 @@ test("configured probe scheduler emits normalized probe logs", async () => {
   assert.equal(logs[0].health, 0.97);
   assert.equal(logs[0].latencyMs, 31);
 });
+
+
+test("dry-run execution works through the public API", async () => {
+  const executionServer = createServer({
+    targetRegistry: createTargetRegistry([{
+      id: "dry-run-target",
+      mode: "local",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1
+    }])
+  });
+
+  await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + executionServer.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: "dry-run",
+        plan: {
+          valid: true,
+          steps: [
+            { id: "step-1", targetId: "dry-run-target", purpose: "inference" }
+          ]
+        }
+      })
+    });
+
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.status, "completed");
+    assert.equal(body.mode, "dry-run");
+    assert.equal(body.receipts[0].status, "completed");
+    assert.deepEqual(body.results, []);
+  } finally {
+    await new Promise(resolve => executionServer.close(resolve));
+  }
+});
+
+test("live execution is disabled unless explicitly enabled", async () => {
+  const executionServer = createServer({
+    targetRegistry: createTargetRegistry([{
+      id: "live-target",
+      mode: "private",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1
+    }]),
+    executionRegistry: createExecutionRegistry([{
+      id: "live-adapter",
+      targetId: "live-target",
+      async execute() {
+        throw new Error("must-not-run");
+      }
+    }]),
+    executionEnabled: false,
+    apiKey: "server-secret"
+  });
+
+  await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + executionServer.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer server-secret"
+      },
+      body: JSON.stringify({
+        mode: "live",
+        plan: {
+          valid: true,
+          steps: [{ id: "step-1", targetId: "live-target" }]
+        }
+      })
+    });
+
+    assert.equal(response.status, 403);
+    assert.deepEqual(await response.json(), { error: "live_execution_disabled" });
+  } finally {
+    await new Promise(resolve => executionServer.close(resolve));
+  }
+});
+
+test("live execution returns provider results only when requested", async () => {
+  const adapter = {
+    id: "provider-adapter",
+    targetId: "provider-target",
+    async execute({ payload }) {
+      return {
+        choices: [{
+          message: {
+            role: "assistant",
+            content: payload.prompt
+          }
+        }]
+      };
+    }
+  };
+
+  const executionServer = createServer({
+    targetRegistry: createTargetRegistry([{
+      id: "provider-target",
+      mode: "private",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1
+    }]),
+    executionRegistry: createExecutionRegistry([adapter]),
+    executionEnabled: true,
+    apiKey: "server-secret"
+  });
+
+  await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + executionServer.address().port;
+
+  try {
+    const headers = {
+      "content-type": "application/json",
+      authorization: "Bearer server-secret"
+    };
+
+    const plan = {
+      valid: true,
+      steps: [{
+        id: "provider-step",
+        targetId: "provider-target",
+        purpose: "inference",
+        payload: { prompt: "hello" }
+      }]
+    };
+
+    const hiddenResponse = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mode: "live", plan })
+    });
+    assert.equal(hiddenResponse.status, 200);
+    const hidden = await hiddenResponse.json();
+    assert.deepEqual(hidden.results, []);
+
+    const visibleResponse = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers: { ...headers, "idempotency-key": "execute-visible-1" },
+      body: JSON.stringify({ mode: "live", plan, includeOutputs: true })
+    });
+    assert.equal(visibleResponse.status, 200);
+    const visible = await visibleResponse.json();
+    assert.equal(
+      visible.results[0].result.choices[0].message.content,
+      "hello"
+    );
+    assert.equal("payload" in visible.receipts[0], false);
+  } finally {
+    await new Promise(resolve => executionServer.close(resolve));
+  }
+});
+
+test("execution retries replay the original result", async () => {
+  let executions = 0;
+  const executionServer = createServer({
+    targetRegistry: createTargetRegistry([{
+      id: "retry-target",
+      mode: "local",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1
+    }]),
+    executionRegistry: createExecutionRegistry([{
+      id: "retry-adapter",
+      targetId: "retry-target",
+      async execute() {
+        executions++;
+        return { ok: true, executions };
+      }
+    }]),
+    executionEnabled: true,
+    apiKey: "server-secret"
+  });
+
+  await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + executionServer.address().port;
+
+  try {
+    const request = {
+      mode: "live",
+      includeOutputs: true,
+      plan: {
+        valid: true,
+        steps: [{ id: "retry-step", targetId: "retry-target" }]
+      }
+    };
+    const headers = {
+      "content-type": "application/json",
+      authorization: "Bearer server-secret",
+      "idempotency-key": "execution-retry-1"
+    };
+
+    const first = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(request)
+    });
+    const second = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(request)
+    });
+
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.equal(second.headers.get("idempotency-replayed"), "true");
+    assert.equal(executions, 1);
+  } finally {
+    await new Promise(resolve => executionServer.close(resolve));
+  }
+});
+
+test("configured execution registry adds dry-run fallbacks for static targets", async () => {
+  const targetRegistry = createTargetRegistry([{
+    id: "static-target",
+    mode: "local",
+    available: true,
+    health: 1,
+    capacity: 0.1,
+    privacy: 1
+  }]);
+
+  const registry = await createConfiguredExecutionRegistry({ targetRegistry });
+  assert.equal(registry.has("static-target"), true);
+  assert.equal(registry.has("dry-run:static-target"), false);
+});
