@@ -31,9 +31,15 @@ Possible destinations:
 - Pure JavaScript core with no runtime dependency.
 - HTTP API for application integration.
 - Provider-neutral execution boundary with safe dry-run support.
+- Explicitly gated public execution endpoint for configured provider adapters.
 - Structured observability utilities with secret redaction.
 - Server-side provider configuration with environment-backed secrets.
 - Browser dashboard shell.
+- Live provider probes and server-side provider configuration.
+- Optional automatic probe scheduling with bounded concurrency.
+- Gated execution API with dry-run fallbacks and explicit live-execution controls.
+- Structured request observability with secret redaction.
+- Durable metadata-only telemetry option for single-process restart persistence.
 - Node built-in tests and GitHub Actions CI.
 
 ## Quick start
@@ -68,6 +74,12 @@ Example request:
       "policy": { "sensitiveDataMode": "prefer-local" }
     }
 
+## Automatic provider setup
+
+Set LOCD_PROVIDERS_FILE to a JSON configuration like examples/providers.json. Provider credentials are referenced through environment variable names, never stored in the JSON file.
+
+When LOCD_PROBE_INTERVAL_MS is greater than zero, configured probe-capable providers are checked on startup and periodically refreshed.
+
 ## Architecture
 
     Client / SDK / CLI / Dashboard
@@ -86,6 +98,11 @@ Example request:
                 v
       local / private / cloud
                 |
+                +--> provider probes
+                |
+                v
+          execution adapters
+                |
                 v
           telemetry/audit
 
@@ -95,15 +112,15 @@ The core is independent of HTTP, storage and UI so it can later power SDKs, a CL
 
 ### Shipped foundation
 
-Decision core, hard/soft policy semantics, explainability, hybrid planning, target registry, resource-fit checks, metadata-only telemetry with outcome feedback, browser dashboard, HTTP API, SDK, CLI, authentication baseline, Docker/Render deployment config, tests and CI.
+Decision core, hard/soft policy semantics, explainability, hybrid planning, target registry, resource-fit checks, metadata-only telemetry with outcome feedback, durable single-process telemetry, browser dashboard, HTTP API, SDK, CLI, authentication baseline, request IDs/idempotency, rate limiting, provider probes, OpenAI-compatible provider adapters, automatic probe scheduling, gated execution API, Docker/Render deployment config, tests and CI.
 
 ### Next
 
-Live health/utilization probes and provider adapters, durable production telemetry, persistent database-backed control-plane state, execution adapters, richer policy language, rate limiting and scoped authorization.
+Shared database/event telemetry, distributed rate-limit and idempotency coordination, scoped authorization, richer policy language, provider-specific adapters beyond the OpenAI-compatible contract, utilization-aware calibration and production operations tooling.
 
 ### Later
 
-Multi-tenant control plane, advanced optimization, provider-specific execution integrations and calibrated placement models.
+Multi-tenant control plane and advanced optimization across fleets/providers.
 
 ## Status
 

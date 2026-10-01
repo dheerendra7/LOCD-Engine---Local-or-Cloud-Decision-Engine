@@ -136,3 +136,34 @@ test("client exposes target registration and heartbeat helpers", async () => {
   ]);
 });
 
+
+test("client exposes execute helper with retry headers", async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify({ status: "completed" }), { status: 200 });
+  };
+
+  const client = createLocdClient({
+    baseUrl: "http://localhost:8787",
+    fetchImpl
+  });
+
+  await client.execute(
+    {
+      mode: "dry-run",
+      plan: {
+        valid: true,
+        steps: [{ id: "step-1", targetId: "target-1" }]
+      }
+    },
+    {
+      idempotencyKey: "execute-1",
+      requestId: "request-1"
+    }
+  );
+
+  assert.equal(calls[0].url, "http://localhost:8787/v1/execute");
+  assert.equal(calls[0].options.headers["idempotency-key"], "execute-1");
+  assert.equal(calls[0].options.headers["x-request-id"], "request-1");
+});

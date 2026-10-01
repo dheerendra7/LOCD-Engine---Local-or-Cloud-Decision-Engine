@@ -102,6 +102,7 @@ export async function executePlan(
     mode = "dry-run",
     timeoutMs = 30000,
     failFast = true,
+    includeOutputs = false,
     clock
   } = {}
 ) {
@@ -118,6 +119,7 @@ export async function executePlan(
   }
 
   const receipts = [];
+  const results = [];
   let status = "completed";
   let failedStepId = null;
 
@@ -157,13 +159,22 @@ export async function executePlan(
     }
 
     try {
-      await withTimeout(
+      const output = await withTimeout(
         () => adapter.execute({
           step: { ...step },
+          payload: step.payload,
           mode
         }),
         timeoutMs
       );
+
+      if (includeOutputs) {
+        results.push({
+          stepId: step.id,
+          targetId: step.targetId,
+          result: output
+        });
+      }
 
       receipts.push(normalizeReceipt({
         step,
@@ -194,6 +205,7 @@ export async function executePlan(
     status,
     failedStepId,
     receipts,
+    results,
     completedSteps: receipts.filter(item => item.status === "completed").length,
     totalSteps: plan.steps.length
   };
