@@ -178,7 +178,7 @@ test("policy simulation is read-only and respects tenant custom policies", async
       body: JSON.stringify({
         workload: { type: "sim", sensitivity: "low" },
         targets,
-        currentPolicy: { profile: "balanced" },
+        currentPolicy: { allowedModes: ["cloud"] },
         candidatePolicy: { profile: "acme-local-only" }
       })
     });
