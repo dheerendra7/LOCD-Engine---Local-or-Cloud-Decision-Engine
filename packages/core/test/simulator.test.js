@@ -10,7 +10,7 @@ const targets = [
     health: 1,
     capacity: 0.1,
     privacy: 1,
-    estimatedLatencyMs: 100,
+    estimatedLatencyMs: 500,
     estimatedCostUsd: 0
   },
   {
