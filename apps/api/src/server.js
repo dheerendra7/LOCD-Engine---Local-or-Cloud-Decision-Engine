@@ -249,7 +249,11 @@ export async function createConfiguredTargetRegistry({
   if (providerFile) {
     const providers = await loadProvidersFromFile(providerFile, env, fetchImpl);
     for (const provider of providers) {
-      targetRegistry.forTenant(provider.tenantId).register(provider);
+      const registry = targetRegistry.forTenant(provider.tenantId);
+      if (registry.has(provider.targetId)) {
+        registry.remove(provider.targetId);
+      }
+      registry.register(provider);
     }
   }
 
