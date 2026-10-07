@@ -168,7 +168,7 @@ For placement policies that require fresh infrastructure telemetry, set policy.m
 
 ## Authentication
 
-LOCD can enable API-key authentication by setting LOCD_API_KEY.
+LOCD can enable API-key authentication by setting LOCD_API_KEY. Scoped credentials can additionally carry a trusted tenant binding.
 
 When enabled:
 
@@ -177,6 +177,22 @@ When enabled:
 - Invalid or missing credentials return HTTP 401.
 
 For production deployments, use a high-entropy secret from the platform secret manager. Do not commit the key to Git.
+
+## Tenant isolation
+
+When a scoped API credential has tenantId, the authenticated request is evaluated inside that tenant's control-plane namespace.
+
+Tenant isolation covers:
+
+- target registry and target IDs
+- decision telemetry and outcome lookup
+- calibration state
+- idempotency keys
+- rate-limit identity
+
+The request body must not be used to select a tenant. Request-scoped targets are evaluated directly for the authenticated tenant but are not persisted into another tenant.
+
+The existing single-tenant mode maps to the default tenant and remains backward-compatible.
 
 ## Resource fit
 
