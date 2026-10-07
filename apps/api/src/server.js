@@ -770,6 +770,9 @@ export function createServer({
           return;
         }
 
+        const policyId = String(body.id || "").trim().toLowerCase();
+        const existed = policyStore.get(tenantId, policyId) != null;
+
         const saved = await policyStore.upsert(tenantId, body, {
           updatedBy: authContext.keyId || "admin"
         });
@@ -782,8 +785,9 @@ export function createServer({
           updatedBy: saved.updatedBy
         };
 
-        await rememberResponse(body, 200, responseBody);
-        sendJson(res, 200, responseBody);
+        const status = existed ? 200 : 201;
+        await rememberResponse(body, status, responseBody);
+        sendJson(res, status, responseBody);
         return;
       }
 
