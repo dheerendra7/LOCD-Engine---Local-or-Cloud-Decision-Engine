@@ -27,9 +27,16 @@ test("Anthropic probe uses the Models API and required headers", async () => {
     targetId: "anthropic-cloud",
     baseUrl: "https://api.anthropic.com",
     apiKey: "secret-not-logged",
+    workspaceId: "wrkspc_demo",
+    model: "claude-opus-5",
     fetchImpl: async (url, options) => {
       calls.push({ url: String(url), options });
-      return jsonResponse({ data: [] });
+      return jsonResponse({
+        data: [{
+          id: "claude-opus-5",
+          max_input_tokens: 200000
+        }]
+      });
     }
   });
 
@@ -41,7 +48,9 @@ test("Anthropic probe uses the Models API and required headers", async () => {
   assert.match(snapshot.lastHeartbeatAt, /^202/);
   assert.equal(calls[0].url, "https://api.anthropic.com/v1/models");
   assert.equal(calls[0].options.headers["x-api-key"], "secret-not-logged");
+  assert.equal(calls[0].options.headers["anthropic-workspace-id"], "wrkspc_demo");
   assert.equal(calls[0].options.headers["anthropic-version"], "2023-06-01");
+  assert.equal(snapshot.maxContextTokens, 200000);
 });
 
 test("Anthropic probe classifies HTTP failures", async () => {
@@ -201,4 +210,41 @@ test("Anthropic adapter hides API keys and preserves pricing metadata", async ()
   assert.equal("apiKey" in snapshot, false);
   assert.equal(JSON.stringify(snapshot).includes("super-secret"), false);
   assert.equal(snapshot.pricing.outputUsdPer1kTokens, 0.015);
+});
+
+
+test("Anthropic adapter validates workspace configuration", () => {
+  assert.throws(
+    () => createAnthropicAdapter({
+      id: "anthropic",
+      targetId: "anthropic",
+      workspaceId: "   "
+    }),
+    /workspaceId must be a non-empty string/
+  );
+});
+
+test("Anthropic execution sends workspace header when configured", async () => {
+  const calls = [];
+  const adapter = createAnthropicAdapter({
+    id: "anthropic-provider",
+    targetId: "anthropic-provider",
+    baseUrl: "https://api.anthropic.com",
+    apiKey: "secret",
+    workspaceId: "wrkspc_demo",
+    model: "configured-model",
+    fetchImpl: async (url, options) => {
+      calls.push({ url: String(url), options });
+      return jsonResponse({ content: [] });
+    }
+  });
+
+  await adapter.execute({
+    payload: {
+      messages: [{ role: "user", content: "hello" }]
+    },
+    mode: "live"
+  });
+
+  assert.equal(calls[0].options.headers["anthropic-workspace-id"], "wrkspc_demo");
 });
