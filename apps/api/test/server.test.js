@@ -197,6 +197,120 @@ test("empty target registry is readable", async () => {
   assert.deepEqual((await response.json()).targets, []);
 });
 
+test("scoped API tenants cannot see or update each other's control-plane state", async () => {
+  const scopedServer = createServer({
+    authorizer: createScopedAuthorizer({
+      keys: [
+        { id: "acme", secret: "acme-secret", tenantId: "acme", scopes: ["read", "decide", "targets", "telemetry"] },
+        { id: "beta", secret: "beta-secret", tenantId: "beta", scopes: ["read", "decide", "targets", "telemetry"] }
+      ]
+    })
+  });
+
+  await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + scopedServer.address().port;
+
+  const headersFor = secret => ({
+    authorization: "Bearer " + secret,
+    "content-type": "application/json"
+  });
+
+  const targetBody = {
+    id: "shared-target-id",
+    mode: "local",
+    health: 1,
+    capacity: 0.1,
+    privacy: 1,
+    estimatedLatencyMs: 30,
+    estimatedCostUsd: 0
+  };
+
+  try {
+    const acmeRegister = await fetch(url + "/v1/targets", {
+      method: "POST",
+      headers: headersFor("acme-secret"),
+      body: JSON.stringify(targetBody)
+    });
+    const betaRegister = await fetch(url + "/v1/targets", {
+      method: "POST",
+      headers: headersFor("beta-secret"),
+      body: JSON.stringify({ ...targetBody, estimatedLatencyMs: 80 })
+    });
+
+    assert.equal(acmeRegister.status, 201);
+    assert.equal(betaRegister.status, 201);
+
+    const acmeTargets = await (await fetch(url + "/v1/targets", {
+      headers: { authorization: "Bearer acme-secret" }
+    })).json();
+    const betaTargets = await (await fetch(url + "/v1/targets", {
+      headers: { authorization: "Bearer beta-secret" }
+    })).json();
+
+    assert.equal(acmeTargets.targets.length, 1);
+    assert.equal(betaTargets.targets.length, 1);
+    assert.equal(acmeTargets.targets[0].estimatedLatencyMs, 30);
+    assert.equal(betaTargets.targets[0].estimatedLatencyMs, 80);
+
+    const acmeDecision = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers: headersFor("acme-secret"),
+      body: JSON.stringify({
+        workload: { type: "tenant-llm", sensitivity: "low" },
+        policy: { sensitiveDataMode: "prefer-local" }
+      })
+    });
+    const betaDecision = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers: headersFor("beta-secret"),
+      body: JSON.stringify({
+        workload: { type: "tenant-llm", sensitivity: "low" },
+        policy: { sensitiveDataMode: "prefer-local" }
+      })
+    });
+
+    assert.equal(acmeDecision.status, 200);
+    assert.equal(betaDecision.status, 200);
+    assert.equal((await acmeDecision.json()).targetId, "shared-target-id");
+    assert.equal((await betaDecision.json()).targetId, "shared-target-id");
+
+    const acmeHistory = await (await fetch(url + "/v1/decisions", {
+      headers: { authorization: "Bearer acme-secret" }
+    })).json();
+    const betaHistory = await (await fetch(url + "/v1/decisions", {
+      headers: { authorization: "Bearer beta-secret" }
+    })).json();
+
+    assert.equal(acmeHistory.decisions.length, 1);
+    assert.equal(betaHistory.decisions.length, 1);
+    assert.equal(acmeHistory.decisions[0].tenantId, "acme");
+    assert.equal(betaHistory.decisions[0].tenantId, "beta");
+
+    const crossTenantOutcome = await fetch(url + "/v1/outcomes", {
+      method: "POST",
+      headers: headersFor("beta-secret"),
+      body: JSON.stringify({
+        decisionId: acmeHistory.decisions[0].id,
+        outcome: "success",
+        actualLatencyMs: 25
+      })
+    });
+    assert.equal(crossTenantOutcome.status, 404);
+
+    const acmeMetric = await (await fetch(url + "/v1/metrics", {
+      headers: { authorization: "Bearer acme-secret" }
+    })).json();
+    const betaMetric = await (await fetch(url + "/v1/metrics", {
+      headers: { authorization: "Bearer beta-secret" }
+    })).json();
+
+    assert.equal(acmeMetric.totalDecisions, 1);
+    assert.equal(betaMetric.totalDecisions, 1);
+  } finally {
+    await new Promise(resolve => scopedServer.close(resolve));
+  }
+});
+
 test("configured API key protects v1 endpoints while health remains public", async () => {
   const protectedServer = createServer({ apiKey: "test-api-key-1234567890" });
   await new Promise(resolve => protectedServer.listen(0, "127.0.0.1", resolve));
