@@ -110,3 +110,31 @@ test("telemetry and coordination clear endpoints stay domain-specific", async ()
   assert.equal(calls[0].url, "http://state.internal/v1/state/telemetry/clear");
   assert.equal(calls[1].url, "http://state.internal/v1/state/coordination/clear");
 });
+
+test("HTTP telemetry propagates tenant context to the state service", async () => {
+  const { fetchImpl, calls } = fakeFetch({ decisions: [] });
+
+  const store = createHTTPDecisionStore({
+    baseUrl: "http://state.internal:8787",
+    apiKey: "secret",
+    fetchImpl
+  });
+
+  await store.record({
+    id: "tenant-event",
+    tenantId: "acme",
+    route: "local"
+  });
+  await store.recordOutcome(
+    "tenant-event",
+    { outcome: "success" },
+    { tenantId: "acme" }
+  );
+  await store.list({ tenantId: "acme", limit: 10 });
+  await store.summary({ tenantId: "acme" });
+
+  assert.equal(calls[0].options.headers["x-locd-tenant-id"], "acme");
+  assert.equal(calls[1].options.headers["x-locd-tenant-id"], "acme");
+  assert.equal(calls[2].options.headers["x-locd-tenant-id"], "acme");
+  assert.equal(calls[3].options.headers["x-locd-tenant-id"], "acme");
+});
