@@ -38,6 +38,7 @@ function requiredScope(method, pathname) {
   if (method === "POST" && pathname === "/v1/decide") return "decide";
   if (method === "POST" && pathname === "/v1/hybrid-plan") return "decide";
   if (method === "POST" && pathname === "/v1/outcomes") return "telemetry";
+  if (method === "POST" && pathname === "/v1/policies/simulate") return "decide";
   if (method === "POST" && pathname === "/v1/execute") return "execute";
   if (method === "POST" && pathname === "/v1/targets") return "targets";
   if (method === "POST" && pathname.startsWith("/v1/targets/")) return "targets";
