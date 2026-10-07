@@ -238,8 +238,8 @@ test("state service isolates telemetry by trusted tenant header", async () => {
       }
     );
 
-    assert.equal((await save("acme", "shared", "local")).status, 201);
-    assert.equal((await save("beta", "shared", "cloud")).status, 201);
+    assert.equal((await save("acme", "acme-shared", "local")).status, 201);
+    assert.equal((await save("beta", "beta-shared", "cloud")).status, 201);
 
     const acme = await fetch(instance.url + "/v1/state/decisions", {
       headers: { authorization: "Bearer state-secret", "x-locd-tenant-id": "acme" }
@@ -252,7 +252,7 @@ test("state service isolates telemetry by trusted tenant header", async () => {
     assert.equal((await beta.json()).decisions[0].tenantId, "beta");
 
     const crossTenantOutcome = await fetch(
-      instance.url + "/v1/state/outcomes/shared",
+      instance.url + "/v1/state/outcomes/acme-shared",
       {
         method: "POST",
         headers: { ...baseHeaders, "x-locd-tenant-id": "gamma" },
