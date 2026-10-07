@@ -37,6 +37,13 @@ export function createFileDecisionStore({ filePath, maxEntries = 500 } = {}) {
   };
 
   return {
+    capabilities: Object.freeze({
+      durable: true,
+      shared: false,
+      tenantScoped: true,
+      transactional: false
+    }),
+
     record(event) {
       const result = store.record(event);
       persist();

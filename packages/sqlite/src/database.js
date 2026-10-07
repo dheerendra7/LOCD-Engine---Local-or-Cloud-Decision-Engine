@@ -106,6 +106,13 @@ export function createSQLiteDecisionStore({ filePath, maxEntries = 5000, databas
   }
 
   return {
+    capabilities: Object.freeze({
+      durable: true,
+      shared: true,
+      tenantScoped: true,
+      transactional: true
+    }),
+
     record(event) {
       const normalized = normalizeDecisionEvent(event);
       db.prepare(`
@@ -216,6 +223,13 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
   }
 
   return {
+    capabilities: Object.freeze({
+      durable: true,
+      shared: true,
+      tenantScoped: true,
+      transactional: true
+    }),
+
     async get(key) {
       return getValue(key);
     },

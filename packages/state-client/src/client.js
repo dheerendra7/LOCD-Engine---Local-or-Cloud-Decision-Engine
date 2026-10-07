@@ -40,6 +40,13 @@ export function createHTTPDecisionStore({
   if (typeof fetchImpl !== "function") throw new Error("fetch implementation is required");
 
   const store = {
+    capabilities: Object.freeze({
+      durable: true,
+      shared: true,
+      tenantScoped: true,
+      transactional: false
+    }),
+
     async record(event) {
       return request(fetchImpl, baseUrl, apiKey, "/v1/state/decisions", {
         method: "POST",
@@ -92,6 +99,13 @@ export function createHTTPCoordinationStore({
   if (typeof fetchImpl !== "function") throw new Error("fetch implementation is required");
 
   return {
+    capabilities: Object.freeze({
+      durable: true,
+      shared: true,
+      tenantScoped: true,
+      transactional: false
+    }),
+
     async get(key) {
       const response = await request(
         fetchImpl,

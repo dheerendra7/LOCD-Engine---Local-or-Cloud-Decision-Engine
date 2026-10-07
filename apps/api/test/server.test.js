@@ -1658,6 +1658,39 @@ test("readiness endpoint reports public service readiness", async () => {
   });
 });
 
+test("status endpoint exposes explicit backend capability metadata", async () => {
+  const server = createServer({ serviceVersion: "contract-test" });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + server.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/status");
+    assert.equal(response.status, 200);
+    const body = await response.json();
+
+    assert.equal(body.stateBackend.kind, "process-local");
+    assert.equal(body.stateBackend.telemetry.durable, false);
+    assert.equal(body.stateBackend.telemetry.tenantScoped, true);
+    assert.equal(body.stateBackend.coordination, null);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test("server rejects invalid telemetry backends at construction time", () => {
+  assert.throws(
+    () => createServer({
+      decisionStore: {
+        record() {},
+        recordOutcome() {},
+        list() {},
+        summary() {}
+      }
+    }),
+    /decisionStore is missing methods: clear/
+  );
+});
+
 test("status endpoint exposes safe operational counts", async () => {
   const probeable = {
     id: "ops-probeable",
@@ -2316,7 +2349,8 @@ test("concurrent identical idempotency keys reject the in-progress duplicate", a
     },
     async summary() {
       return { totalDecisions: 0 };
-    }
+    },
+    async clear() {}
   };
 
   const scopedServer = createServer({
