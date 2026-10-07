@@ -197,6 +197,56 @@ test("empty target registry is readable", async () => {
   assert.deepEqual((await response.json()).targets, []);
 });
 
+test("tenant namespaces keep identical idempotency keys independent", async () => {
+  const scopedServer = createServer({
+    authorizer: createScopedAuthorizer({
+      keys: [
+        { id: "acme", secret: "acme-idem", tenantId: "acme", scopes: ["decide"] },
+        { id: "beta", secret: "beta-idem", tenantId: "beta", scopes: ["decide"] }
+      ]
+    })
+  });
+
+  await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + scopedServer.address().port;
+
+  const makeRequest = (secret, targetId) => fetch(url + "/v1/decide", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer " + secret,
+      "content-type": "application/json",
+      "idempotency-key": "same-key"
+    },
+    body: JSON.stringify({
+      workload: { type: "tenant-idempotency", sensitivity: "low" },
+      targets: [{
+        id: targetId,
+        mode: "local",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 20,
+        estimatedCostUsd: 0
+      }]
+    })
+  });
+
+  try {
+    const acme = await makeRequest("acme-idem", "acme-target");
+    const beta = await makeRequest("beta-idem", "beta-target");
+
+    assert.equal(acme.status, 200);
+    assert.equal(beta.status, 200);
+    assert.equal(acme.headers.get("idempotency-replayed"), null);
+    assert.equal(beta.headers.get("idempotency-replayed"), null);
+
+    assert.equal((await acme.json()).targetId, "acme-target");
+    assert.equal((await beta.json()).targetId, "beta-target");
+  } finally {
+    await new Promise(resolve => scopedServer.close(resolve));
+  }
+});
+
 test("scoped API tenants cannot see or update each other's control-plane state", async () => {
   const scopedServer = createServer({
     authorizer: createScopedAuthorizer({
