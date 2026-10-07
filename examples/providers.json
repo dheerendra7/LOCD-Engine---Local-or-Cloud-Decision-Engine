@@ -8,8 +8,12 @@
       "baseUrl": "http://localhost:11434/api",
       "model": "llama3.2",
       "privacy": 1,
-      "regions": ["local"],
-      "capabilities": ["text-generation"],
+      "regions": [
+        "local"
+      ],
+      "capabilities": [
+        "text-generation"
+      ],
       "initial": {
         "available": false,
         "health": 0
@@ -24,8 +28,32 @@
       "apiKeyEnv": "PRIVATE_VLLM_API_KEY",
       "model": "my-model",
       "privacy": 0.95,
-      "regions": ["ap-south-1"],
-      "capabilities": ["text-generation"],
+      "regions": [
+        "ap-south-1"
+      ],
+      "capabilities": [
+        "text-generation"
+      ],
+      "initial": {
+        "available": false,
+        "health": 0
+      }
+    },
+    {
+      "id": "anthropic-cloud",
+      "targetId": "anthropic-cloud",
+      "type": "anthropic",
+      "mode": "cloud",
+      "baseUrl": "https://api.anthropic.com",
+      "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "model": "your-anthropic-model-id",
+      "privacy": 0.2,
+      "regions": [
+        "us-east-1"
+      ],
+      "capabilities": [
+        "text-generation"
+      ],
       "initial": {
         "available": false,
         "health": 0
