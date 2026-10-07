@@ -105,7 +105,7 @@ export function createTenantTargetRegistry({
       return forTenant(defaultTenant).count();
     },
     clear() {
-      for (const registry of registries.values()) registry.clear();
+      return forTenant(defaultTenant).clear();
     },
 
     listTenantIds() {
