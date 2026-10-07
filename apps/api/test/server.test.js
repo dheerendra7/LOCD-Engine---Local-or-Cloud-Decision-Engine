@@ -1029,37 +1029,34 @@ test("server bootstrap loads provider adapters from config file without exposing
   }
 });
 
-test("server bootstrap fails on duplicate provider and target IDs", async () => {
+test("server bootstrap rejects provider configs sharing a target ID", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "locd-provider-bootstrap-dup-"));
-  const targetFile = path.join(dir, "targets.json");
   const providerFile = path.join(dir, "providers.json");
 
   try {
-    const target = {
-      id: "same-id",
-      mode: "local",
-      available: true,
-      health: 1,
-      capacity: 0.1,
-      privacy: 1
-    };
-    await writeFile(targetFile, JSON.stringify([target]), "utf8");
     await writeFile(providerFile, JSON.stringify({
-      providers: [{
-        id: "same-id",
-        targetId: "same-id",
-        mode: "private",
-        baseUrl: "https://inference.example.com"
-      }]
+      providers: [
+        {
+          id: "provider-one",
+          targetId: "same-target",
+          mode: "private",
+          baseUrl: "https://one.example.com"
+        },
+        {
+          id: "provider-two",
+          targetId: "same-target",
+          mode: "private",
+          baseUrl: "https://two.example.com"
+        }
+      ]
     }), "utf8");
 
     await assert.rejects(
       () => createConfiguredTargetRegistry({
-        targetFile,
         providerFile,
         fetchImpl: async () => new Response(JSON.stringify({ data: [] }), { status: 200 })
       }),
-      /target already registered/
+      /duplicate provider target id/
     );
   } finally {
     await rm(dir, { recursive: true, force: true });
