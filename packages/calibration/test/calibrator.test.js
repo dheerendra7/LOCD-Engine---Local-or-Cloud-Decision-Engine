@@ -247,3 +247,46 @@ test("null utilization maps to the unknown calibration band", () => {
 
   assert.equal(calibrator.get("gpu", "llm", null).utilizationBand, "unknown");
 });
+
+test("calibration factors are isolated by tenant", () => {
+  const calibrator = createCalibrator({ minSamples: 1, alpha: 1 });
+
+  calibrator.observe({
+    tenantId: "acme",
+    targetId: "shared-gpu",
+    workloadType: "llm",
+    estimatedLatencyMs: 100,
+    actualLatencyMs: 200,
+    outcome: "success"
+  });
+
+  calibrator.observe({
+    tenantId: "beta",
+    targetId: "shared-gpu",
+    workloadType: "llm",
+    estimatedLatencyMs: 100,
+    actualLatencyMs: 120,
+    outcome: "success"
+  });
+
+  assert.equal(
+    calibrator.apply(
+      [{ id: "shared-gpu", estimatedLatencyMs: 100 }],
+      "llm",
+      "acme"
+    )[0].estimatedLatencyMs,
+    200
+  );
+
+  assert.equal(
+    calibrator.apply(
+      [{ id: "shared-gpu", estimatedLatencyMs: 100 }],
+      "llm",
+      "beta"
+    )[0].estimatedLatencyMs,
+    120
+  );
+
+  assert.equal(calibrator.snapshot("acme")[0].tenantId, "acme");
+  assert.equal(calibrator.snapshot("beta")[0].tenantId, "beta");
+});
