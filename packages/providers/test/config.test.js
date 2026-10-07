@@ -189,3 +189,24 @@ test("provider config file can load a native Ollama provider", async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("provider config preserves trusted tenant metadata outside target snapshots", () => {
+  const adapter = createProviderFromConfig({
+    ...base,
+    id: "tenant-provider",
+    targetId: "tenant-provider",
+    tenantId: "Acme-Prod"
+  }, env);
+
+  assert.equal(adapter.tenantId, "acme-prod");
+});
+
+test("provider config rejects unsafe tenant identifiers", () => {
+  assert.throws(
+    () => createProviderFromConfig({
+      ...base,
+      tenantId: "../escape"
+    }, env),
+    /tenantId must match/
+  );
+});
