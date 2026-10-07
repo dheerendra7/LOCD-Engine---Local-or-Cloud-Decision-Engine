@@ -223,6 +223,13 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
   }
 
   return {
+    capabilities: Object.freeze({
+      durable: true,
+      shared: true,
+      tenantScoped: true,
+      transactional: true
+    }),
+
     async get(key) {
       return getValue(key);
     },
