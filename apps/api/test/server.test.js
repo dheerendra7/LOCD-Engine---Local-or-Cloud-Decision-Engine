@@ -1576,6 +1576,46 @@ test("provider config replaces a persisted target snapshot on bootstrap", async 
   }
 });
 
+test("server provider config loads native Anthropic adapter into the tenant target registry", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-anthropic-bootstrap-"));
+  const file = path.join(dir, "providers.json");
+
+  try {
+    await writeFile(file, JSON.stringify({
+      providers: [{
+        id: "bootstrap-anthropic",
+        targetId: "bootstrap-anthropic",
+        type: "anthropic",
+        mode: "cloud",
+        baseUrl: "https://api.anthropic.com",
+        apiKeyEnv: "ANTHROPIC_API_KEY",
+        tenantId: "acme",
+        model: "claude-opus-5"
+      }]
+    }), "utf8");
+
+    const registry = await createConfiguredTargetRegistry({
+      providerFile: file,
+      env: { ANTHROPIC_API_KEY: "secret" },
+      fetchImpl: async () => new Response(JSON.stringify({
+        data: [{ id: "claude-opus-5", max_input_tokens: 200000 }]
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    });
+
+    assert.equal(registry.forTenant("acme").has("bootstrap-anthropic"), true);
+    assert.equal(registry.forTenant("default").has("bootstrap-anthropic"), false);
+
+    const snapshot = await registry.forTenant("acme").probe("bootstrap-anthropic");
+    assert.equal(snapshot.available, true);
+    assert.equal(snapshot.maxContextTokens, 200000);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("server provider config loads native Ollama adapter into the target registry", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "locd-ollama-bootstrap-"));
   const file = path.join(dir, "providers.json");
