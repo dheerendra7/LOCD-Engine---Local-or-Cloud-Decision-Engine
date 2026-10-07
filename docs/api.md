@@ -135,6 +135,25 @@ Returns the built-in policy profiles for dashboard and client discovery.
 A request can select a profile with policy.profile and override individual fields without changing the underlying preset definition.
 
 
+## POST /v1/policies/simulate
+
+Runs a deterministic what-if comparison between currentPolicy and candidatePolicy using the canonical decision engine.
+
+The operation is read-only: it does not execute providers, create decision telemetry, update calibration, or mutate policy state.
+
+The authenticated tenant controls which custom policy profile IDs can be resolved. A custom policy owned by another tenant is treated as unavailable.
+
+The response includes:
+
+- current and candidate route/target/score/confidence/estimate summaries
+- route and target change flags
+- score, confidence, latency and cost deltas
+- added/removed decision reasons
+- added/removed policy-rule and rejection reasons
+- recommendation: review_change when routing changes, otherwise no_routing_change
+
+The endpoint requires decide scope.
+
 ## Target registry
 
 ### GET /v1/targets
