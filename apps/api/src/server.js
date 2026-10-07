@@ -193,25 +193,43 @@ export function createConfiguredProbeScheduler({
       }
     }
 
+    let timer = null;
+    let running = false;
+
+    const runAll = async () => {
+      syncSchedulers();
+      return (await Promise.all(
+        [...schedulers.values()].map(scheduler => scheduler.runOnce())
+      )).flat();
+    };
+
     return {
-      async runOnce() {
-        syncSchedulers();
-        return (await Promise.all(
-          [...schedulers.values()].map(scheduler => scheduler.runOnce())
-        )).flat();
-      },
+      runOnce: runAll,
       start() {
+        if (running) return false;
+        running = true;
         syncSchedulers();
-        return [...schedulers.values()].map(scheduler => scheduler.start()).some(Boolean);
+        timer = setInterval(() => {
+          runAll().catch(() => {});
+        }, intervalMs);
+        timer?.unref?.();
+        return true;
       },
       stop() {
-        return [...schedulers.values()].map(scheduler => scheduler.stop()).some(Boolean);
+        if (!running) return false;
+        running = false;
+        clearInterval(timer);
+        timer = null;
+        return true;
       },
       isRunning() {
-        return [...schedulers.values()].some(scheduler => scheduler.isRunning());
+        return running;
       },
       inFlightCount() {
-        return [...schedulers.values()].reduce((total, scheduler) => total + scheduler.inFlightCount(), 0);
+        return [...schedulers.values()].reduce(
+          (total, scheduler) => total + scheduler.inFlightCount(),
+          0
+        );
       }
     };
   }
