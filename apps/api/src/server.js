@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { decide } from "../../../packages/core/src/index.js";
 import { createDecisionStore, createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { listPolicyProfiles } from "../../../packages/policy/src/index.js";
-import { createTargetRegistry } from "../../../packages/registry/src/index.js";
+import { createTenantTargetRegistry, tenantFromAuthContext, scopeKey } from "../../../packages/tenancy/src/index.js";
 import { planHybridExecution } from "../../../packages/planner/src/index.js";
 import { createLogger, createRequestId } from "../../../packages/observability/src/index.js";
 import { createCalibrator } from "../../../packages/calibration/src/index.js";
@@ -167,6 +167,55 @@ export function createConfiguredProbeScheduler({
   if (!registry) throw new Error("registry is required");
   if (intervalMs <= 0) return null;
 
+  if (typeof registry.forTenant === "function" && typeof registry.listTenantIds === "function") {
+    const schedulers = new Map();
+
+    function syncSchedulers() {
+      for (const tenantId of registry.listTenantIds()) {
+        if (schedulers.has(tenantId)) continue;
+        schedulers.set(tenantId, createProbeScheduler({
+          registry: registry.forTenant(tenantId),
+          intervalMs,
+          maxConcurrent,
+          onResult: result => {
+            logger.info({
+              event: "target_probe",
+              tenantId,
+              targetId: result.targetId,
+              status: result.status,
+              errorClass: result.errorClass || null,
+              available: result.snapshot?.available,
+              health: result.snapshot?.health,
+              latencyMs: result.snapshot?.estimatedLatencyMs
+            });
+          }
+        }));
+      }
+    }
+
+    return {
+      async runOnce() {
+        syncSchedulers();
+        return (await Promise.all(
+          [...schedulers.values()].map(scheduler => scheduler.runOnce())
+        )).flat();
+      },
+      start() {
+        syncSchedulers();
+        return [...schedulers.values()].map(scheduler => scheduler.start()).some(Boolean);
+      },
+      stop() {
+        return [...schedulers.values()].map(scheduler => scheduler.stop()).some(Boolean);
+      },
+      isRunning() {
+        return [...schedulers.values()].some(scheduler => scheduler.isRunning());
+      },
+      inFlightCount() {
+        return [...schedulers.values()].reduce((total, scheduler) => total + scheduler.inFlightCount(), 0);
+      }
+    };
+  }
+
   return createProbeScheduler({
     registry,
     intervalMs,
@@ -191,7 +240,7 @@ export async function createConfiguredTargetRegistry({
   env = process.env,
   fetchImpl = globalThis.fetch
 } = {}) {
-  const targetRegistry = createTargetRegistry();
+  const targetRegistry = createTenantTargetRegistry();
 
   if (targetFile) {
     await targetRegistry.loadFromFile(targetFile);
@@ -200,7 +249,7 @@ export async function createConfiguredTargetRegistry({
   if (providerFile) {
     const providers = await loadProvidersFromFile(providerFile, env, fetchImpl);
     for (const provider of providers) {
-      targetRegistry.register(provider);
+      targetRegistry.forTenant(provider.tenantId).register(provider);
     }
   }
 
@@ -210,7 +259,7 @@ export async function createConfiguredTargetRegistry({
 export function createServer({
   apiKey = process.env.LOCD_API_KEY?.trim() || null,
   decisionStore = createDecisionStore({ maxEntries: 1000 }),
-  targetRegistry = createTargetRegistry(),
+  targetRegistry = createTenantTargetRegistry(),
   targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null,
   idempotencyStore = null,
   coordinationStore = null,
@@ -351,7 +400,9 @@ export function createServer({
       });
 
       if (pathname.startsWith("/v1/")) {
-        const rate = await effectiveRateLimiter.consume(getClientKey(req, { trustProxy }));
+        const rate = await effectiveRateLimiter.consume(
+          scopeKey(tenantId, getClientKey(req, { trustProxy }))
+        );
         if (effectiveRateLimiter.enabled) {
           res.setHeader("x-ratelimit-limit", String(rate.limit));
           res.setHeader("x-ratelimit-remaining", String(rate.remaining));
@@ -362,30 +413,6 @@ export function createServer({
           sendJson(res, 429, { error: "rate_limit_exceeded" }, {
             "retry-after": String(Math.max(1, Math.ceil((rate.resetAt - Date.now()) / 1000)))
           });
-          return;
-        }
-      }
-
-      let authContext = {
-        ok: true,
-        keyId: null,
-        scopes: ["admin"]
-      };
-
-      if (pathname.startsWith("/v1/")) {
-        authContext = auth.authorize(req, requiredScope(req.method, pathname));
-
-        if (!authContext.ok) {
-          const status = authContext.reason === "forbidden_scope" ? 403 : 401;
-          const body = {
-            error: authContext.reason === "forbidden_scope"
-              ? "insufficient_scope"
-              : "unauthorized"
-          };
-          const headers = status === 401
-            ? { "www-authenticate": "Bearer" }
-            : {};
-          sendJson(res, status, body, headers);
           return;
         }
       }
@@ -438,8 +465,9 @@ export function createServer({
           }
         }
 
-        const registry = executionRegistry ||
-          await createConfiguredExecutionRegistry({ targetRegistry });
+        const registry = typeof targetRegistry.forTenant === "function"
+          ? await createConfiguredExecutionRegistry({ targetRegistry: requestRegistry })
+          : (executionRegistry || await createConfiguredExecutionRegistry({ targetRegistry: requestRegistry }));
 
         const responseBody = await executePlan(body.plan, {
           registry,
@@ -464,7 +492,7 @@ export function createServer({
         const hasRequestTargets = Array.isArray(body.targets) && body.targets.length > 0;
         const request = hasRequestTargets
           ? body
-          : { ...body, targets: await targetRegistry.list() };
+          : { ...body, targets: await requestRegistry.list() };
 
         if (!request.targets.length) {
           sendJson(res, 503, { error: "no_registered_targets" });
@@ -488,9 +516,9 @@ export function createServer({
         const hasRequestTargets = Array.isArray(body.targets) && body.targets.length > 0;
         const rawTargets = hasRequestTargets
           ? body.targets
-          : await targetRegistry.list();
+          : await requestRegistry.list();
         const calibratedTargets = calibrationEnabled
-          ? calibrator.apply(rawTargets, body.workload?.type || "unknown")
+          ? calibrator.apply(rawTargets, body.workload?.type || "unknown", tenantId)
           : rawTargets;
         const request = { ...body, targets: calibratedTargets };
 
@@ -514,6 +542,7 @@ export function createServer({
           estimatedLatencyMs: decision.estimated?.latencyMs,
           estimatedCostUsd: decision.estimated?.costUsd,
           targetUtilization: selectedTarget?.capacity,
+          tenantId,
           outcome: "pending"
         });
 
@@ -555,8 +584,9 @@ export function createServer({
         }
 
         try {
-          const event = await decisionStore.recordOutcome(body.decisionId, body);
+          const event = await decisionStore.recordOutcome(body.decisionId, body, { tenantId });
           calibrator.observe({
+            tenantId,
             targetId: event.targetId,
             workloadType: event.workloadType,
             estimatedLatencyMs: event.estimatedLatencyMs,
@@ -584,7 +614,7 @@ export function createServer({
       }
 
       if (req.method === "GET" && pathname === "/v1/targets") {
-        sendJson(res, 200, { targets: await targetRegistry.list() });
+        sendJson(res, 200, { tenantId, targets: await requestRegistry.list() });
         return;
       }
 
@@ -596,7 +626,7 @@ export function createServer({
           return;
         }
 
-        const target = await targetRegistry.register(body);
+        const target = await requestRegistry.register(body);
         if (targetFile) await targetRegistry.saveToFile(targetFile);
         const responseBody = await target.getSnapshot();
         await rememberResponse(body, 201, responseBody);
@@ -621,7 +651,7 @@ export function createServer({
         }
 
         try {
-          const snapshot = await targetRegistry.probe(id);
+          const snapshot = await requestRegistry.probe(id);
           if (targetFile) await targetRegistry.saveToFile(targetFile);
           await rememberResponse(body, 200, snapshot);
           sendJson(res, 200, snapshot);
@@ -656,7 +686,7 @@ export function createServer({
         }
 
         try {
-          const updated = await targetRegistry.heartbeat(id, body);
+          const updated = await requestRegistry.heartbeat(id, body);
           if (targetFile) await targetRegistry.saveToFile(targetFile);
           await rememberResponse(body, 200, updated);
           sendJson(res, 200, updated);
@@ -680,7 +710,7 @@ export function createServer({
           sendJson(res, 400, { error: "target id is required" });
           return;
         }
-        const removed = targetRegistry.remove(id);
+        const removed = requestRegistry.remove(id);
         if (!removed) {
           sendJson(res, 404, { error: "target_not_found" });
           return;
@@ -692,37 +722,45 @@ export function createServer({
 
       if (req.method === "GET" && pathname === "/v1/decisions") {
         const limit = new URL(req.url || "/", "http://localhost").searchParams.get("limit") || "50";
-        sendJson(res, 200, { decisions: await decisionStore.list({ limit }) });
+        sendJson(res, 200, {
+          tenantId,
+          decisions: await decisionStore.list({ limit, tenantId })
+        });
         return;
       }
 
       if (req.method === "GET" && pathname === "/v1/metrics") {
-        sendJson(res, 200, await decisionStore.summary());
+        sendJson(res, 200, await decisionStore.summary({ tenantId }));
         return;
       }
 
       if (req.method === "GET" && pathname === "/v1/calibration") {
         sendJson(res, 200, {
+          tenantId,
           enabled: calibrationEnabled,
           config: calibrator.config,
-          entries: calibrator.snapshot()
+          entries: calibrator.snapshot(tenantId)
         });
         return;
       }
 
       if (req.method === "GET" && pathname === "/v1/status") {
-        const targets = await targetRegistry.list();
-        const probeableTargets = typeof targetRegistry.listProbeable === "function"
-          ? await targetRegistry.listProbeable()
+        const targets = await requestRegistry.list();
+        const probeableTargets = typeof requestRegistry.listProbeable === "function"
+          ? await requestRegistry.listProbeable()
           : [];
-        const executionAdapters = executionRegistry && typeof executionRegistry.list === "function"
-          ? executionRegistry.list()
+        const scopedExecutionRegistry = typeof targetRegistry.forTenant === "function"
+          ? await createConfiguredExecutionRegistry({ targetRegistry: requestRegistry })
+          : executionRegistry;
+        const executionAdapters = scopedExecutionRegistry && typeof scopedExecutionRegistry.list === "function"
+          ? scopedExecutionRegistry.list()
           : [];
 
         sendJson(res, 200, {
           service: "locd-api",
           version: serviceVersion,
           status: "ok",
+          tenantId,
           capabilities: {
             executionEnabled: Boolean(executionEnabled),
             persistentTargets: Boolean(targetFile),
@@ -742,7 +780,7 @@ export function createServer({
             targets: targets.length,
             probeableTargets: probeableTargets.length,
             executionAdapters: executionAdapters.length,
-            decisions: (await decisionStore.summary()).totalDecisions
+            decisions: (await decisionStore.summary({ tenantId })).totalDecisions
           }
         });
         return;
