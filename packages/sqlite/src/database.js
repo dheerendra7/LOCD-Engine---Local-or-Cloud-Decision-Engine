@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { mkdirSync } from "node:fs";
 import { createDecisionStore, normalizeDecisionEvent } from "../../../packages/telemetry/src/store.js";
+import { normalizeTenantId } from "../../../packages/tenancy/src/index.js";
 
 function resolveDatabasePath(filePath) {
   if (filePath === ":memory:") return filePath;
@@ -35,6 +36,7 @@ export function createSQLiteDecisionStore({ filePath, maxEntries = 5000, databas
   db.exec(`
     CREATE TABLE IF NOT EXISTS decision_events (
       id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL DEFAULT 'default',
       timestamp TEXT NOT NULL,
       decision_version TEXT NOT NULL,
       workload_type TEXT NOT NULL,
@@ -47,13 +49,26 @@ export function createSQLiteDecisionStore({ filePath, maxEntries = 5000, databas
       actual_latency_ms REAL,
       actual_cost_usd REAL,
       error_class TEXT,
-      outcome_timestamp TEXT
+      outcome_timestamp TEXT,
+      target_utilization REAL
     ) STRICT;
     CREATE INDEX IF NOT EXISTS idx_decision_events_timestamp
       ON decision_events(timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_decision_events_target
       ON decision_events(target_id, workload_type);
+    CREATE INDEX IF NOT EXISTS idx_decision_events_tenant_time
+      ON decision_events(tenant_id, timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_decision_events_tenant_target
+      ON decision_events(tenant_id, target_id, workload_type);
   `);
+
+  const columns = db.prepare("PRAGMA table_info(decision_events)").all();
+  if (!columns.some(column => column.name === "tenant_id")) {
+    db.exec("ALTER TABLE decision_events ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'");
+  }
+  if (!columns.some(column => column.name === "target_utilization")) {
+    db.exec("ALTER TABLE decision_events ADD COLUMN target_utilization REAL");
+  }
 
   function trim() {
     db.prepare(`
@@ -69,6 +84,7 @@ export function createSQLiteDecisionStore({ filePath, maxEntries = 5000, databas
   function rowToEvent(row) {
     return normalizeDecisionEvent({
       id: row.id,
+      tenantId: row.tenant_id,
       timestamp: row.timestamp,
       decisionVersion: row.decision_version,
       workloadType: row.workload_type,
@@ -80,7 +96,8 @@ export function createSQLiteDecisionStore({ filePath, maxEntries = 5000, databas
       outcome: row.outcome,
       actualLatencyMs: row.actual_latency_ms,
       actualCostUsd: row.actual_cost_usd,
-      errorClass: row.error_class
+      errorClass: row.error_class,
+      targetUtilization: row.target_utilization
     });
   }
 
@@ -89,28 +106,32 @@ export function createSQLiteDecisionStore({ filePath, maxEntries = 5000, databas
       const normalized = normalizeDecisionEvent(event);
       db.prepare(`
         INSERT INTO decision_events (
-          id, timestamp, decision_version, workload_type, route, target_id,
+          id, tenant_id, timestamp, decision_version, workload_type, route, target_id,
           confidence, estimated_latency_ms, estimated_cost_usd, outcome,
-          actual_latency_ms, actual_cost_usd, error_class, outcome_timestamp
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          actual_latency_ms, actual_cost_usd, error_class, outcome_timestamp, target_utilization
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        normalized.id, normalized.timestamp, normalized.decisionVersion,
+        normalized.id, normalized.tenantId, normalized.timestamp, normalized.decisionVersion,
         normalized.workloadType, normalized.route, normalized.targetId,
         normalized.confidence, normalized.estimatedLatencyMs, normalized.estimatedCostUsd,
         normalized.outcome, normalized.actualLatencyMs, normalized.actualCostUsd,
-        normalized.errorClass, null
+        normalized.errorClass, null, normalized.targetUtilization ?? null
       );
       trim();
       return { ...normalized };
     },
 
-    recordOutcome(id, patch) {
-      const row = db.prepare("SELECT * FROM decision_events WHERE id = ?").get(String(id));
+    recordOutcome(id, patch, { tenantId = null } = {}) {
+      const row = tenantId == null
+        ? db.prepare("SELECT * FROM decision_events WHERE id = ?").get(String(id))
+        : db.prepare("SELECT * FROM decision_events WHERE id = ? AND tenant_id = ?").get(
+            String(id), normalizeTenantId(tenantId)
+          );
       if (!row) throw new Error("decision_not_found");
 
       const current = rowToEvent(row);
       const updated = createDecisionStore({ maxEntries: 1, initialEvents: [current] })
-        .recordOutcome(current.id, patch);
+        .recordOutcome(current.id, patch, { tenantId: current.tenantId });
 
       db.prepare(`
         UPDATE decision_events
@@ -124,22 +145,37 @@ export function createSQLiteDecisionStore({ filePath, maxEntries = 5000, databas
       return { ...updated };
     },
 
-    list({ limit = 50 } = {}) {
+    list({ limit = 50, tenantId = null } = {}) {
       const safeLimit = Math.min(maxEntries, Math.max(1, Number(limit) || 50));
+      if (tenantId == null) {
+        return db.prepare(
+          "SELECT * FROM decision_events ORDER BY timestamp DESC, rowid DESC LIMIT ?"
+        ).all(safeLimit).map(rowToEvent);
+      }
       return db.prepare(
-        "SELECT * FROM decision_events ORDER BY timestamp DESC, rowid DESC LIMIT ?"
-      ).all(safeLimit).map(rowToEvent);
+        "SELECT * FROM decision_events WHERE tenant_id = ? ORDER BY timestamp DESC, rowid DESC LIMIT ?"
+      ).all(normalizeTenantId(tenantId), safeLimit).map(rowToEvent);
     },
 
-    summary() {
-      const events = db.prepare(
-        "SELECT * FROM decision_events ORDER BY timestamp ASC, rowid ASC LIMIT ?"
-      ).all(maxEntries).map(rowToEvent);
-      return createDecisionStore({ maxEntries, initialEvents: events }).summary();
+    summary({ tenantId = null } = {}) {
+      const events = tenantId == null
+        ? db.prepare(
+            "SELECT * FROM decision_events ORDER BY timestamp ASC, rowid ASC LIMIT ?"
+          ).all(maxEntries).map(rowToEvent)
+        : db.prepare(
+            "SELECT * FROM decision_events WHERE tenant_id = ? ORDER BY timestamp ASC, rowid ASC LIMIT ?"
+          ).all(normalizeTenantId(tenantId), maxEntries).map(rowToEvent);
+      return createDecisionStore({ maxEntries, initialEvents: events }).summary(
+        tenantId == null ? {} : { tenantId }
+      );
     },
 
-    clear() {
-      db.exec("DELETE FROM decision_events");
+    clear({ tenantId = null } = {}) {
+      if (tenantId == null) {
+        db.exec("DELETE FROM decision_events");
+      } else {
+        db.prepare("DELETE FROM decision_events WHERE tenant_id = ?").run(normalizeTenantId(tenantId));
+      }
     },
 
     close() {
