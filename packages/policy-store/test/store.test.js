@@ -1,0 +1,96 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { createFilePolicyStore, createPolicyStore } from "../src/index.js";
+
+const policy = {
+  id: "acme-fast",
+  name: "Acme Fast",
+  description: "Latency-first policy for Acme.",
+  baseProfile: "balanced",
+  weights: {
+    privacy: 0.2,
+    latency: 0.5,
+    cost: 0.1,
+    capacity: 0.1,
+    reliability: 0.1
+  },
+  rules: [
+    {
+      id: "prefer-local-llm",
+      priority: 10,
+      when: { workloadType: "llm-inference" },
+      set: { sensitiveDataMode: "prefer-local" }
+    }
+  ]
+};
+
+test("policy versions increment and history is bounded", () => {
+  const store = createPolicyStore({ maxVersionsPerPolicy: 2, now: () => "2026-10-08T00:00:00.000Z" });
+  const first = store.upsert("acme", policy, { updatedBy: "admin" });
+  const second = store.upsert("acme", { ...policy, description: "v2" }, { updatedBy: "operator" });
+  const third = store.upsert("acme", { ...policy, description: "v3" }, { updatedBy: "operator" });
+
+  assert.equal(first.version, 1);
+  assert.equal(second.version, 2);
+  assert.equal(third.version, 3);
+  assert.equal(store.get("acme", "acme-fast").version, 3);
+  assert.equal(store.history("acme", "acme-fast").versions.length, 2);
+});
+
+test("tenant policies are isolated", () => {
+  const store = createPolicyStore();
+  store.upsert("acme", policy);
+  store.upsert("beta", { ...policy, description: "beta policy" });
+
+  assert.equal(store.get("acme", "acme-fast").tenantId, "acme");
+  assert.equal(store.get("beta", "acme-fast").tenantId, "beta");
+  assert.equal(store.list("acme").length, 1);
+  assert.equal(store.list("beta").length, 1);
+});
+
+test("built-in policy IDs are read-only", () => {
+  const store = createPolicyStore();
+  assert.throws(
+    () => store.upsert("acme", { ...policy, id: "balanced" }),
+    /built-in policy IDs are read-only/
+  );
+});
+
+test("invalid policies are rejected before persistence", () => {
+  const store = createPolicyStore();
+  assert.throws(
+    () => store.upsert("acme", { ...policy, baseProfile: "missing" }),
+    /unknown policy profile/
+  );
+  assert.throws(
+    () => store.upsert("acme", {
+      ...policy,
+      rules: [{ id: "bad", priority: 1, set: { unsupported: true } }]
+    }),
+    /policy rule field is not supported/
+  );
+});
+
+test("file policy store persists atomically and restores versions", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-policy-store-"));
+  const file = path.join(dir, "policies.json");
+
+  try {
+    const store = await createFilePolicyStore({ filePath: file });
+    await store.upsert("acme", policy, { updatedBy: "admin" });
+    await store.upsert("acme", { ...policy, description: "v2" }, { updatedBy: "admin" });
+
+    const raw = JSON.parse(await readFile(file, "utf8"));
+    assert.equal(raw.version, 1);
+    assert.equal(raw.tenants.acme.policies["acme-fast"].version, 2);
+
+    const restored = await createFilePolicyStore({ filePath: file });
+    assert.equal(restored.get("acme", "acme-fast").version, 2);
+    assert.equal(restored.history("acme", "acme-fast").versions.length, 2);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
