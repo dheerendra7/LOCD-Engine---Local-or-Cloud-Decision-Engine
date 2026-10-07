@@ -707,6 +707,29 @@ export function createServer({
         return;
       }
 
+      if (req.method === "GET" && pathname.startsWith("/v1/policies/") && pathname.endsWith("/history")) {
+        const policyId = decodeURIComponent(
+          pathname.slice("/v1/policies/".length, -"/history".length)
+        );
+        if (!policyId) {
+          sendJson(res, 400, { error: "policy id is required" });
+          return;
+        }
+
+        const history = policyStore.history(tenantId, policyId);
+        if (!history) {
+          sendJson(res, 404, { error: "policy_not_found" });
+          return;
+        }
+
+        sendJson(res, 200, {
+          tenantId,
+          policyId,
+          versions: history.versions
+        });
+        return;
+      }
+
       if (req.method === "GET" && pathname.startsWith("/v1/policies/")) {
         const policyId = decodeURIComponent(pathname.slice("/v1/policies/".length));
         if (!policyId) {
@@ -998,6 +1021,7 @@ if (isMain) {
   const coordinationUrl = process.env.LOCD_COORDINATION_URL?.trim() || null;
   const coordinationApiKey = process.env.LOCD_COORDINATION_API_KEY?.trim() || null;
   const providerFile = process.env.LOCD_PROVIDERS_FILE?.trim() || null;
+  const policyFile = process.env.LOCD_POLICIES_FILE?.trim() || null;
   const targetRegistry = await createConfiguredTargetRegistry({
     targetFile,
     providerFile
@@ -1039,9 +1063,14 @@ if (isMain) {
     maxConcurrent: Number(process.env.LOCD_PROBE_MAX_CONCURRENT || 4),
     logger
   });
+  const policyStore = policyFile
+    ? await createFilePolicyStore({ filePath: policyFile, maxVersionsPerPolicy: 20 })
+    : createPolicyStore();
+
   const server = createServer({
     targetFile,
     targetRegistry,
+    policyStore,
     decisionStore,
     logger,
     probeScheduler,
