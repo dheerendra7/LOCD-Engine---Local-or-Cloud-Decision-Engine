@@ -1527,6 +1527,59 @@ test("live execution requires execute scope even when execution is enabled", asy
   }
 });
 
+test("provider config replaces a persisted target snapshot on bootstrap", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-provider-rehydrate-"));
+  const targetFile = path.join(dir, "targets.json");
+  const providerFile = path.join(dir, "providers.json");
+
+  try {
+    await writeFile(targetFile, JSON.stringify({
+      version: 1,
+      tenants: {
+        default: [{
+          id: "provider-target",
+          mode: "cloud",
+          available: false,
+          health: 0,
+          capacity: 1,
+          privacy: 0.2,
+          estimatedLatencyMs: 900,
+          estimatedCostUsd: 0.1
+        }]
+      }
+    }), "utf8");
+
+    await writeFile(providerFile, JSON.stringify({
+      providers: [{
+        id: "provider-adapter",
+        targetId: "provider-target",
+        type: "openai-compatible",
+        mode: "cloud",
+        baseUrl: "https://inference.example.com",
+        apiKeyEnv: "PROVIDER_KEY",
+        model: "demo-model"
+      }]
+    }), "utf8");
+
+    const registry = await createConfiguredTargetRegistry({
+      targetFile,
+      providerFile,
+      env: { PROVIDER_KEY: "secret" },
+      fetchImpl: async () => new Response(
+        JSON.stringify({ data: [] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    });
+
+    assert.equal(registry.forTenant("default").has("provider-target"), true);
+    const snapshot = await registry.forTenant("default").probe("provider-target");
+    assert.equal(snapshot.available, true);
+    assert.equal(snapshot.health, 1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("server provider config loads native Ollama adapter into the target registry", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "locd-ollama-bootstrap-"));
   const file = path.join(dir, "providers.json");
