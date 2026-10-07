@@ -219,8 +219,10 @@ export function createCalibrator(options = {}) {
     });
   }
 
-  function snapshot() {
+  function snapshot(tenantId = null) {
+    const normalizedTenantId = tenantId == null ? null : normalizeTenantId(tenantId);
     return [...observations.values()]
+      .filter(item => normalizedTenantId == null || item.tenantId === normalizedTenantId)
       .map(item => ({ ...item }))
       .sort((a, b) =>
         String(a.tenantId).localeCompare(String(b.tenantId)) ||
