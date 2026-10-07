@@ -12,6 +12,13 @@ export function createInMemoryCoordinationStore() {
   }
 
   return {
+    capabilities: Object.freeze({
+      durable: false,
+      shared: false,
+      tenantScoped: true,
+      transactional: false
+    }),
+
     async get(key) {
       purge();
       const value = values.get(String(key));
