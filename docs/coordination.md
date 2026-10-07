@@ -16,11 +16,11 @@ The contract is asynchronous so the backing system can be Redis, a database-back
 
 ## Coordinated rate limiting
 
-The fixed-window limiter uses an atomic increment per client/bucket. The backend must make increment operations atomic across instances.
+The fixed-window limiter uses an atomic increment per client/bucket. The API prefixes the client identity with the authenticated tenant so identical client addresses in different tenants do not consume the same quota bucket. The backend must make increment operations atomic across instances.
 
 ## Coordinated idempotency
 
-Completed POST responses can be stored in shared state and replayed by another instance.
+Completed POST responses can be stored in shared state and replayed by another instance. The API prefixes idempotency scopes with the authenticated tenant so an idempotency key is never replayed across tenants.
 
 The coordination package also exposes claim() using setIfAbsent(). A future execution gateway can use this primitive to prevent concurrent duplicate work before a response exists.
 
