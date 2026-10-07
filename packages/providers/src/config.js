@@ -80,10 +80,15 @@ export function createProvidersFromConfig(config, env = process.env, fetchImpl =
   }
 
   const ids = new Set();
+  const targetIds = new Set();
   return config.providers.map(provider => {
     const adapter = createProviderFromConfig(provider, env, fetchImpl);
     if (ids.has(adapter.id)) throw new Error("duplicate provider id: " + adapter.id);
+    if (targetIds.has(adapter.targetId)) {
+      throw new Error("duplicate provider target id: " + adapter.targetId);
+    }
     ids.add(adapter.id);
+    targetIds.add(adapter.targetId);
     return adapter;
   });
 }
