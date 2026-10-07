@@ -86,6 +86,13 @@ export function createDecisionStore({ maxEntries = 500, initialEvents = [] } = {
   const events = initialEvents.map(normalizeDecisionEvent).slice(-maxEntries);
 
   return {
+    capabilities: Object.freeze({
+      durable: false,
+      shared: false,
+      tenantScoped: true,
+      transactional: false
+    }),
+
     record(event) {
       const normalized = normalizeDecisionEvent(event);
       events.push(normalized);
