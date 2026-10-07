@@ -39,6 +39,8 @@ Use the generic target registry and probe endpoint to publish fresh provider sta
 
 ## Native Ollama adapter
 
+Provider configs may optionally include tenantId. The server binds the provider to that tenant's registry without placing tenant identity in public target snapshots.
+
 The native adapter targets Ollama's `/api/tags` probe and `/api/chat` execution endpoints. It supports both the local Ollama server and direct cloud API configuration. Local requests do not require an API key; direct cloud API requests use a Bearer key. citeturn513313search1turn513313search2
 
 Example:
