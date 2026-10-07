@@ -186,7 +186,8 @@ export function createDecisionStore({ maxEntries = 500, initialEvents = [] } = {
       }
       const normalized = normalizeTenantId(tenantId);
       for (let index = events.length - 1; index >= 0; index--) {
-        if (events[index].tenantId === normalized) events.splice(index, 1);
+        const eventTenant = events[index].tenantId ?? "default";
+        if (eventTenant === normalized) events.splice(index, 1);
       }
     }
   };
