@@ -178,7 +178,7 @@ export function createTenantTargetRegistry({
       }
       return output;
     },
-    clear() {
+    clearAll() {
       registries.clear();
     }
   };
