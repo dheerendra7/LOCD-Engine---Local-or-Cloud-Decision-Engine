@@ -1547,7 +1547,7 @@ test("provider config replaces a persisted target snapshot on bootstrap", async 
 
     await writeFile(providerFile, JSON.stringify({
       providers: [{
-        id: "provider-adapter",
+        id: "provider-target",
         targetId: "provider-target",
         type: "openai-compatible",
         mode: "cloud",
