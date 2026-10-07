@@ -30,7 +30,7 @@ test("policy simulation compares canonical decisions without side effects", () =
     workload: { type: "simulation", sensitivity: "low" },
     constraints: { latencyBudgetMs: 1000 },
     targets,
-    currentPolicy: { sensitiveDataMode: "balanced" },
+    currentPolicy: { allowedModes: ["cloud"] },
     candidatePolicy: {
       allowedModes: ["local"],
       sensitiveDataMode: "balanced"
