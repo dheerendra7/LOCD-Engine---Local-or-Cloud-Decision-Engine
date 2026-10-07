@@ -56,10 +56,7 @@ export function createSQLiteDecisionStore({ filePath, maxEntries = 5000, databas
       ON decision_events(timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_decision_events_target
       ON decision_events(target_id, workload_type);
-    CREATE INDEX IF NOT EXISTS idx_decision_events_tenant_time
-      ON decision_events(tenant_id, timestamp DESC);
-    CREATE INDEX IF NOT EXISTS idx_decision_events_tenant_target
-      ON decision_events(tenant_id, target_id, workload_type);
+
   `);
 
   const columns = db.prepare("PRAGMA table_info(decision_events)").all();
@@ -69,6 +66,13 @@ export function createSQLiteDecisionStore({ filePath, maxEntries = 5000, databas
   if (!columns.some(column => column.name === "target_utilization")) {
     db.exec("ALTER TABLE decision_events ADD COLUMN target_utilization REAL");
   }
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_decision_events_tenant_time
+      ON decision_events(tenant_id, timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_decision_events_tenant_target
+      ON decision_events(tenant_id, target_id, workload_type);
+  `);
 
   function trim() {
     db.prepare(`
