@@ -1,6 +1,6 @@
 import { readFile, rename, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
-import { createStaticTargetAdapter, collectTargetSnapshots } from "../../../packages/adapters/src/index.js";
+import { createStaticTargetAdapter } from "../../../packages/adapters/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
 import { normalizeTenantId } from "./context.js";
 
@@ -71,6 +71,43 @@ export function createTenantTargetRegistry({
 
   return {
     forTenant,
+
+    // Backward-compatible single-tenant surface. These methods address the
+    // configured default tenant while new callers should use forTenant().
+    register(value) {
+      return forTenant(defaultTenant).register(value);
+    },
+    has(id) {
+      return forTenant(defaultTenant).has(id);
+    },
+    remove(id) {
+      return forTenant(defaultTenant).remove(id);
+    },
+    get(id) {
+      return forTenant(defaultTenant).get(id);
+    },
+    probe(id) {
+      return forTenant(defaultTenant).probe(id);
+    },
+    heartbeat(id, patch) {
+      return forTenant(defaultTenant).heartbeat(id, patch);
+    },
+    list() {
+      return forTenant(defaultTenant).list();
+    },
+    listProbeable() {
+      return forTenant(defaultTenant).listProbeable();
+    },
+    listExecutionAdapters() {
+      return forTenant(defaultTenant).listExecutionAdapters();
+    },
+    count() {
+      return forTenant(defaultTenant).count();
+    },
+    clear() {
+      for (const registry of registries.values()) registry.clear();
+    },
+
     listTenantIds() {
       return [...registries.keys()].sort();
     },
