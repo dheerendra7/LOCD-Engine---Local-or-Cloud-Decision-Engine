@@ -189,3 +189,49 @@ test("provider config file can load a native Ollama provider", async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("provider config can create a native Anthropic provider", () => {
+  const adapter = createProviderFromConfig({
+    id: "anthropic-cloud",
+    targetId: "anthropic-cloud",
+    type: "anthropic",
+    mode: "cloud",
+    baseUrl: "https://api.anthropic.com",
+    apiKeyEnv: "ANTHROPIC_API_KEY",
+    model: "configured-model",
+    maxTokens: 2048
+  }, { ANTHROPIC_API_KEY: "secret" });
+
+  assert.equal(adapter.id, "anthropic-cloud");
+  assert.equal(adapter.targetId, "anthropic-cloud");
+});
+
+test("provider config file can load a native Anthropic provider", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-provider-anthropic-"));
+  const file = path.join(dir, "providers.json");
+
+  try {
+    await writeFile(file, JSON.stringify({
+      providers: [{
+        id: "anthropic-cloud",
+        targetId: "anthropic-cloud",
+        type: "anthropic",
+        mode: "cloud",
+        baseUrl: "https://api.anthropic.com",
+        apiKeyEnv: "ANTHROPIC_API_KEY",
+        model: "configured-model"
+      }]
+    }), "utf8");
+
+    const adapters = await loadProvidersFromFile(
+      file,
+      { ANTHROPIC_API_KEY: "secret" },
+      async () => new Response(JSON.stringify({ data: [] }), { status: 200 })
+    );
+
+    assert.equal(adapters.length, 1);
+    assert.equal(adapters[0].id, "anthropic-cloud");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
