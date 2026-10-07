@@ -115,7 +115,7 @@ export function createSQLiteDecisionStore({ filePath, maxEntries = 5000, databas
           actual_latency_ms, actual_cost_usd, error_class, outcome_timestamp, target_utilization
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        normalized.id, normalized.tenantId, normalized.timestamp, normalized.decisionVersion,
+        normalized.id, normalized.tenantId ?? "default", normalized.timestamp, normalized.decisionVersion,
         normalized.workloadType, normalized.route, normalized.targetId,
         normalized.confidence, normalized.estimatedLatencyMs, normalized.estimatedCostUsd,
         normalized.outcome, normalized.actualLatencyMs, normalized.actualCostUsd,
