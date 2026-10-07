@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { createConfiguredExecutionRegistry, createConfiguredProbeScheduler, createConfiguredTargetRegistry, createGracefulShutdown, createServer } from "../src/server.js";
 import { createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { createCalibrator } from "../../../packages/calibration/src/index.js";
+import { createPolicyStore } from "../../../packages/policy-store/src/index.js";
 import { createScopedAuthorizer } from "../../../packages/auth/src/index.js";
 import { createLogger } from "../../../packages/observability/src/index.js";
 import { createSQLiteStateStores } from "../../../packages/sqlite/src/index.js";
@@ -120,6 +121,155 @@ test("decision history and metrics expose metadata without request payloads", as
   const metricsBody = await metrics.json();
   assert.equal(metricsBody.totalDecisions >= 1, true);
   assert.equal(metricsBody.routes.local >= 1, true);
+});
+
+test("tenant custom policies are isolated, versioned and enforced", async () => {
+  const authorizer = createScopedAuthorizer({
+    keys: [
+      { id: "acme-admin", secret: "acme-admin-secret", tenantId: "acme", scopes: ["admin"] },
+      { id: "beta-admin", secret: "beta-admin-secret", tenantId: "beta", scopes: ["admin"] },
+      { id: "acme-reader", secret: "acme-reader-secret", tenantId: "acme", scopes: ["read"] }
+    ]
+  });
+
+  const policyStore = createPolicyStore({
+    now: () => "2026-10-08T00:00:00.000Z",
+    maxVersionsPerPolicy: 5
+  });
+
+  const policyServer = createServer({
+    authorizer,
+    policyStore
+  });
+
+  await new Promise(resolve => policyServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + policyServer.address().port;
+
+  try {
+    const policy = {
+      id: "acme-local-only",
+      name: "Acme Local Only",
+      description: "Keep Acme workloads local.",
+      baseProfile: "balanced",
+      allowedModes: ["local"],
+      rules: [
+        {
+          id: "localize-sensitive",
+          priority: 10,
+          when: { sensitivity: "high" },
+          set: { sensitiveDataMode: "local-only" }
+        }
+      ]
+    };
+
+    const created = await fetch(url + "/v1/policies", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer acme-admin-secret",
+        "content-type": "application/json",
+        "idempotency-key": "policy-create-1"
+      },
+      body: JSON.stringify(policy)
+    });
+
+    assert.equal(created.status, 201);
+    const createdBody = await created.json();
+    assert.equal(createdBody.version, 1);
+    assert.equal(createdBody.source, "custom");
+
+    const forbiddenMutation = await fetch(url + "/v1/policies", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer acme-reader-secret",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(policy)
+    });
+    assert.equal(forbiddenMutation.status, 403);
+
+    const acmeList = await (await fetch(url + "/v1/policies", {
+      headers: { authorization: "Bearer acme-admin-secret" }
+    })).json();
+    assert.equal(acmeList.policies.some(item => item.id === "acme-local-only"), true);
+
+    const betaLookup = await fetch(url + "/v1/policies/acme-local-only", {
+      headers: { authorization: "Bearer beta-admin-secret" }
+    });
+    assert.equal(betaLookup.status, 404);
+
+    const second = await fetch(url + "/v1/policies", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer acme-admin-secret",
+        "content-type": "application/json",
+        "idempotency-key": "policy-update-1"
+      },
+      body: JSON.stringify({
+        ...policy,
+        description: "Updated policy"
+      })
+    });
+    assert.equal(second.status, 200);
+    assert.equal((await second.json()).version, 2);
+
+    const history = await fetch(url + "/v1/policies/acme-local-only/history", {
+      headers: { authorization: "Bearer acme-admin-secret" }
+    });
+    assert.equal(history.status, 200);
+    const historyBody = await history.json();
+    assert.equal(historyBody.policyId, "acme-local-only");
+    assert.equal(historyBody.versions.length, 2);
+
+    const decision = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer acme-admin-secret",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        workload: {
+          type: "policy-test",
+          sensitivity: "high"
+        },
+        policy: {
+          profile: "acme-local-only"
+        },
+        targets: [
+          {
+            id: "acme-local-target",
+            mode: "local",
+            health: 1,
+            capacity: 0.1,
+            privacy: 1,
+            estimatedLatencyMs: 30,
+            estimatedCostUsd: 0
+          },
+          {
+            id: "acme-cloud-target",
+            mode: "cloud",
+            health: 1,
+            capacity: 0.1,
+            privacy: 0.1,
+            estimatedLatencyMs: 10,
+            estimatedCostUsd: 0.001
+          }
+        ]
+      })
+    });
+
+    assert.equal(decision.status, 200);
+    const decisionBody = await decision.json();
+    assert.equal(decisionBody.targetId, "acme-local-target");
+    assert.equal(decisionBody.policyRulesApplied.includes("localize-sensitive"), true);
+
+    const deleted = await fetch(url + "/v1/policies/acme-local-only", {
+      method: "DELETE",
+      headers: { authorization: "Bearer acme-admin-secret" }
+    });
+    assert.equal(deleted.status, 200);
+  } finally {
+    await new Promise(resolve => policyServer.close(resolve));
+  }
 });
 
 test("policy catalog endpoint returns reusable profiles", async () => {
