@@ -32,9 +32,10 @@ function assertSafeBaseUrl(value, { allowInsecureHttp = false } = {}) {
   return url;
 }
 
-function authHeaders(apiKey, anthropicVersion) {
+function authHeaders(apiKey, anthropicVersion, workspaceId = null) {
   return {
     ...(apiKey ? { "x-api-key": apiKey } : {}),
+    ...(workspaceId ? { "anthropic-workspace-id": workspaceId } : {}),
     "anthropic-version": anthropicVersion
   };
 }
@@ -94,6 +95,7 @@ export function createAnthropicAdapter({
   model = null,
   maxTokens = 1024,
   anthropicVersion = "2023-06-01",
+  workspaceId = null,
   privacy = 0.2,
   estimatedCostUsd = null,
   regions = [],
@@ -109,6 +111,9 @@ export function createAnthropicAdapter({
   if (!MODES.has(mode)) throw new Error("mode must be local, private, cloud or hybrid");
   if (!anthropicVersion || typeof anthropicVersion !== "string") {
     throw new Error("anthropicVersion must be a string");
+  }
+  if (workspaceId != null && (typeof workspaceId !== "string" || !workspaceId.trim())) {
+    throw new Error("workspaceId must be a non-empty string when provided");
   }
   if (!Number.isInteger(Number(maxTokens)) || Number(maxTokens) < 1) {
     throw new Error("maxTokens must be a positive integer");
@@ -144,14 +149,28 @@ export function createAnthropicAdapter({
         method: "GET",
         headers: {
           accept: "application/json",
-          ...authHeaders(apiKey, anthropicVersion)
+          ...authHeaders(apiKey, anthropicVersion, workspaceId)
         },
         signal: timeout.signal
       });
 
       const latency = Math.max(0, performance.now() - started);
+      let discovered = {};
+      if (response.ok) {
+        const body = await response.json().catch(() => null);
+        const models = Array.isArray(body?.data) ? body.data : [];
+        const configured = model
+          ? models.find(item => String(item?.id) === String(model))
+          : null;
+
+        if (configured?.max_input_tokens != null) {
+          discovered.maxContextTokens = number(configured.max_input_tokens, null);
+        }
+      }
+
       snapshot = {
         ...snapshot,
+        ...discovered,
         available: response.ok,
         health: response.ok ? 1 : 0,
         estimatedLatencyMs: Number(latency.toFixed(2)),
@@ -203,7 +222,7 @@ export function createAnthropicAdapter({
         headers: {
           accept: "application/json",
           "content-type": "application/json",
-          ...authHeaders(apiKey, anthropicVersion)
+          ...authHeaders(apiKey, anthropicVersion, workspaceId)
         },
         body: JSON.stringify(request),
         signal: timeout.signal
@@ -226,6 +245,7 @@ export function createAnthropicAdapter({
     id: String(id),
     targetId: String(targetId),
     capabilities: [...capabilities],
+    workspaceId: workspaceId ? String(workspaceId) : null,
     getSnapshot: async () => structuredClone(snapshot),
     setSnapshot: async patch => {
       if (patch?.id && String(patch.id) !== String(targetId)) {
