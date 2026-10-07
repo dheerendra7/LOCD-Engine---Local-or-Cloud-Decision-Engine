@@ -212,13 +212,45 @@ test("tenant custom policies are isolated, versioned and enforced", async () => 
     assert.equal(second.status, 200);
     assert.equal((await second.json()).version, 2);
 
+    const putUpdate = await fetch(url + "/v1/policies/acme-local-only", {
+      method: "PUT",
+      headers: {
+        authorization: "Bearer acme-admin-secret",
+        "content-type": "application/json",
+        "idempotency-key": "policy-put-1"
+      },
+      body: JSON.stringify({
+        name: "Acme Local Only v3",
+        baseProfile: "balanced",
+        allowedModes: ["local"],
+        description: "PUT update"
+      })
+    });
+    assert.equal(putUpdate.status, 200);
+    assert.equal((await putUpdate.json()).version, 3);
+
     const history = await fetch(url + "/v1/policies/acme-local-only/history", {
       headers: { authorization: "Bearer acme-admin-secret" }
     });
     assert.equal(history.status, 200);
     const historyBody = await history.json();
     assert.equal(historyBody.policyId, "acme-local-only");
-    assert.equal(historyBody.versions.length, 2);
+    assert.equal(historyBody.versions.length, 2);    const rollback = await fetch(url + "/v1/policies/acme-local-only/rollback", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer acme-admin-secret",
+        "content-type": "application/json",
+        "idempotency-key": "policy-rollback-1"
+      },
+      body: JSON.stringify({ version: 1 })
+    });
+    assert.equal(rollback.status, 200);
+    const rollbackBody = await rollback.json();
+    assert.equal(rollbackBody.version, 4);
+    assert.equal(rollbackBody.rolledBackFromVersion, 1);
+    assert.equal(rollbackBody.name, "Acme Local Only");
+
+
 
     const decision = await fetch(url + "/v1/decide", {
       method: "POST",
