@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { normalizeTenantId } from "../../../packages/tenancy/src/index.js";
 
 const ROUTES = new Set(["local", "private", "cloud", "hybrid", "none"]);
 const OUTCOMES = new Set(["pending", "success", "failure"]);
@@ -42,6 +43,7 @@ export function normalizeDecisionEvent(event) {
 
   const normalized = {
     id: String(event.id || randomUUID()),
+    tenantId: normalizeTenantId(event.tenantId),
     timestamp: iso(event.timestamp),
     decisionVersion: String(event.decisionVersion || "1.0"),
     workloadType: event.workloadType ? String(event.workloadType) : "unknown",
@@ -66,6 +68,10 @@ export function normalizeDecisionEvent(event) {
   return normalized;
 }
 
+function matchesTenant(event, tenantId) {
+  return tenantId == null || event.tenantId === normalizeTenantId(tenantId);
+}
+
 export function createDecisionStore({ maxEntries = 500, initialEvents = [] } = {}) {
   if (!Number.isInteger(maxEntries) || maxEntries < 1) {
     throw new Error("maxEntries must be a positive integer");
@@ -84,19 +90,25 @@ export function createDecisionStore({ maxEntries = 500, initialEvents = [] } = {
       return { ...normalized };
     },
 
-    recordOutcome(id, patch) {
-      const index = events.findIndex(event => event.id === String(id));
+    recordOutcome(id, patch, { tenantId = null } = {}) {
+      const index = events.findIndex(event =>
+        event.id === String(id) && matchesTenant(event, tenantId)
+      );
       if (index === -1) throw new Error("decision_not_found");
       events[index] = applyOutcome(events[index], patch);
       return { ...events[index] };
     },
 
-    list({ limit = 50 } = {}) {
+    list({ limit = 50, tenantId = null } = {}) {
       const safeLimit = Math.min(maxEntries, Math.max(1, Number(limit) || 50));
-      return events.slice(-safeLimit).reverse().map(event => ({ ...event }));
+      return events
+        .filter(event => matchesTenant(event, tenantId))
+        .slice(-safeLimit)
+        .reverse()
+        .map(event => ({ ...event }));
     },
 
-    summary() {
+    summary({ tenantId = null } = {}) {
       const routes = {};
       const outcomes = { pending: 0, success: 0, failure: 0 };
       let estimatedCostUsd = 0;
@@ -111,6 +123,8 @@ export function createDecisionStore({ maxEntries = 500, initialEvents = [] } = {
       let costErrorTotal = 0;
 
       for (const event of events) {
+        if (!matchesTenant(event, tenantId)) continue;
+
         routes[event.route] = (routes[event.route] || 0) + 1;
         outcomes[event.outcome] = (outcomes[event.outcome] || 0) + 1;
 
@@ -137,13 +151,19 @@ export function createDecisionStore({ maxEntries = 500, initialEvents = [] } = {
         }
       }
 
+      const tenant = tenantId == null ? null : normalizeTenantId(tenantId);
       return {
-        totalDecisions: events.length,
+        tenantId: tenant,
+        totalDecisions: latencyCount === 0 && confidenceTotal === 0 && Object.keys(routes).length === 0
+          ? 0
+          : Object.values(routes).reduce((total, count) => total + count, 0),
         routes,
         outcomes,
         estimatedCostUsd: Number(estimatedCostUsd.toFixed(6)),
         averageEstimatedLatencyMs: latencyCount ? Number((latencyTotal / latencyCount).toFixed(2)) : null,
-        averageConfidence: events.length ? Number((confidenceTotal / events.length).toFixed(6)) : 0,
+        averageConfidence: Object.values(routes).reduce((total, count) => total + count, 0)
+          ? Number((confidenceTotal / Object.values(routes).reduce((total, count) => total + count, 0)).toFixed(6))
+          : 0,
         successRate: completedCount ? Number((successCount / completedCount).toFixed(6)) : null,
         meanAbsoluteLatencyErrorMs: latencyErrorCount
           ? Number((latencyErrorTotal / latencyErrorCount).toFixed(2))
@@ -154,8 +174,15 @@ export function createDecisionStore({ maxEntries = 500, initialEvents = [] } = {
       };
     },
 
-    clear() {
-      events.length = 0;
+    clear({ tenantId = null } = {}) {
+      if (tenantId == null) {
+        events.length = 0;
+        return;
+      }
+      const normalized = normalizeTenantId(tenantId);
+      for (let index = events.length - 1; index >= 0; index--) {
+        if (events[index].tenantId === normalized) events.splice(index, 1);
+      }
     }
   };
 }
