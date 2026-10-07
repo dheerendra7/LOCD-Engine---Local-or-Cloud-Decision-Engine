@@ -36,6 +36,7 @@ Possible destinations:
 - Server-side provider configuration with environment-backed secrets.
 - Scoped API authorization with least-privilege execution controls.
 - Trusted multi-tenant control-plane isolation with tenant-scoped targets, telemetry, calibration and request coordination.
+- Explicit state backend contracts and capability descriptors for replaceable telemetry/coordination backends.
 - Browser dashboard shell.
 - Live provider probes and server-side provider configuration.
 - Optional automatic probe scheduling with bounded concurrency.
