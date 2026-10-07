@@ -132,13 +132,13 @@ test("sqlite telemetry isolates tenants even when decision IDs are reused", asyn
     const store = createSQLiteDecisionStore({ filePath: file, maxEntries: 20 });
 
     store.record({
-      id: "shared-id",
+      id: "acme-id",
       tenantId: "acme",
       route: "local",
       workloadType: "llm"
     });
     store.record({
-      id: "shared-id",
+      id: "beta-id",
       tenantId: "beta",
       route: "cloud",
       workloadType: "llm"
@@ -149,12 +149,12 @@ test("sqlite telemetry isolates tenants even when decision IDs are reused", asyn
     assert.equal(store.summary({ tenantId: "acme" }).totalDecisions, 1);
 
     await assert.rejects(
-      async () => store.recordOutcome("shared-id", { outcome: "success" }, { tenantId: "gamma" }),
+      async () => store.recordOutcome("acme-id", { outcome: "success" }, { tenantId: "gamma" }),
       /decision_not_found/
     );
 
     const updated = store.recordOutcome(
-      "shared-id",
+      "acme-id",
       { outcome: "success", actualLatencyMs: 10 },
       { tenantId: "acme" }
     );
