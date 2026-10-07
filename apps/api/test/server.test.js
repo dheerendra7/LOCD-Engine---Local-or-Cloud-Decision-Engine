@@ -572,8 +572,9 @@ test("target writes persist when a target file is configured", async () => {
     assert.equal(response.status, 201);
 
     const persisted = JSON.parse(await readFile(targetFile, "utf8"));
-    assert.equal(persisted.length, 1);
-    assert.equal(persisted[0].id, "persist-api-target");
+    assert.equal(persisted.version, 1);
+    assert.equal(persisted.tenants.default.length, 1);
+    assert.equal(persisted.tenants.default[0].id, "persist-api-target");
 
     const removed = await fetch(url + "/v1/targets/persist-api-target", { method: "DELETE" });
     assert.equal(removed.status, 200);
