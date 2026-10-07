@@ -99,6 +99,13 @@ export function createHTTPCoordinationStore({
   if (typeof fetchImpl !== "function") throw new Error("fetch implementation is required");
 
   return {
+    capabilities: Object.freeze({
+      durable: true,
+      shared: true,
+      tenantScoped: true,
+      transactional: false
+    }),
+
     async get(key) {
       const response = await request(
         fetchImpl,
