@@ -499,9 +499,8 @@ export function createServer({
           }
         }
 
-        const registry = typeof targetRegistry.forTenant === "function"
-          ? await createConfiguredExecutionRegistry({ targetRegistry: requestRegistry })
-          : (executionRegistry || await createConfiguredExecutionRegistry({ targetRegistry: requestRegistry }));
+        const registry = executionRegistry ||
+          await createConfiguredExecutionRegistry({ targetRegistry: requestRegistry });
 
         const responseBody = await executePlan(body.plan, {
           registry,
@@ -784,9 +783,10 @@ export function createServer({
         const probeableTargets = typeof requestRegistry.listProbeable === "function"
           ? await requestRegistry.listProbeable()
           : [];
-        const scopedExecutionRegistry = typeof targetRegistry.forTenant === "function"
-          ? await createConfiguredExecutionRegistry({ targetRegistry: requestRegistry })
-          : executionRegistry;
+        const scopedExecutionRegistry = executionRegistry ||
+          (typeof targetRegistry.forTenant === "function"
+            ? await createConfiguredExecutionRegistry({ targetRegistry: requestRegistry })
+            : null);
         const executionAdapters = scopedExecutionRegistry && typeof scopedExecutionRegistry.list === "function"
           ? scopedExecutionRegistry.list()
           : [];
