@@ -235,7 +235,7 @@ test("tenant custom policies are isolated, versioned and enforced", async () => 
     assert.equal(history.status, 200);
     const historyBody = await history.json();
     assert.equal(historyBody.policyId, "acme-local-only");
-    assert.equal(historyBody.versions.length, 2);    const rollback = await fetch(url + "/v1/policies/acme-local-only/rollback", {
+    assert.equal(historyBody.versions.length, 3);    const rollback = await fetch(url + "/v1/policies/acme-local-only/rollback", {
       method: "POST",
       headers: {
         authorization: "Bearer acme-admin-secret",
