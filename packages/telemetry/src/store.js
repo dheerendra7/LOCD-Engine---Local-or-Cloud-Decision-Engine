@@ -41,9 +41,9 @@ export function normalizeDecisionEvent(event) {
   const outcome = event.outcome ? String(event.outcome) : "pending";
   if (!OUTCOMES.has(outcome)) throw new Error("decision event outcome is invalid");
 
+  const tenantId = normalizeTenantId(event.tenantId);
   const normalized = {
     id: String(event.id || randomUUID()),
-    tenantId: normalizeTenantId(event.tenantId),
     timestamp: iso(event.timestamp),
     decisionVersion: String(event.decisionVersion || "1.0"),
     workloadType: event.workloadType ? String(event.workloadType) : "unknown",
@@ -58,6 +58,8 @@ export function normalizeDecisionEvent(event) {
     errorClass: event.errorClass ? String(event.errorClass) : null
   };
 
+  if (tenantId !== "default") normalized.tenantId = tenantId;
+
   if ("targetUtilization" in event) {
     const utilization = finite(event.targetUtilization);
     normalized.targetUtilization = utilization == null
@@ -69,7 +71,8 @@ export function normalizeDecisionEvent(event) {
 }
 
 function matchesTenant(event, tenantId) {
-  return tenantId == null || event.tenantId === normalizeTenantId(tenantId);
+  return tenantId == null ||
+    (event.tenantId ?? "default") === normalizeTenantId(tenantId);
 }
 
 export function createDecisionStore({ maxEntries = 500, initialEvents = [] } = {}) {
@@ -152,8 +155,8 @@ export function createDecisionStore({ maxEntries = 500, initialEvents = [] } = {
       }
 
       const tenant = tenantId == null ? null : normalizeTenantId(tenantId);
-      return {
-        tenantId: tenant,
+      const result = {
+
         totalDecisions: latencyCount === 0 && confidenceTotal === 0 && Object.keys(routes).length === 0
           ? 0
           : Object.values(routes).reduce((total, count) => total + count, 0),
@@ -172,6 +175,8 @@ export function createDecisionStore({ maxEntries = 500, initialEvents = [] } = {
           ? Number((costErrorTotal / costErrorCount).toFixed(6))
           : null
       };
+      if (tenant) result.tenantId = tenant;
+      return result;
     },
 
     clear({ tenantId = null } = {}) {
