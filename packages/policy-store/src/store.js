@@ -1,6 +1,10 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { getPolicyProfile, resolvePolicy } from "../../../packages/policy/src/index.js";
+import {
+  getPolicyProfile,
+  listPolicyProfiles,
+  resolvePolicy
+} from "../../../packages/policy/src/index.js";
 import { normalizeTenantId } from "../../../packages/tenancy/src/index.js";
 
 const FILE_VERSION = 1;
@@ -19,6 +23,7 @@ const ALLOWED_FIELDS = new Set([
   "rules"
 ]);
 const WEIGHT_KEYS = new Set(["privacy", "latency", "cost", "capacity", "reliability"]);
+const BUILTIN_POLICY_IDS = new Set(listPolicyProfiles().map(profile => profile.id));
 
 function validatePolicyDocument(input) {
   if (!input || typeof input !== "object") {
@@ -169,7 +174,7 @@ export function createPolicyStore({
     const normalizedTenantId = normalizeTenantId(tenantId);
     const policy = validatePolicyDocument(input);
 
-    if (["balanced", "localFirst", "privacyFirst", "latencyFirst", "costFirst", "strictLocalSensitive"].includes(policy.id)) {
+    if (BUILTIN_POLICY_IDS.has(policy.id)) {
       throw new Error("built-in policy IDs are read-only");
     }
 
