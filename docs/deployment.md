@@ -45,6 +45,12 @@ A legacy target array is still loaded into the default tenant.
 
 The tenant model is an application-level isolation boundary. For strong production isolation, the state service/database and operational credentials must remain inside the same trusted deployment boundary.
 
+## Policy control plane
+
+Set LOCD_POLICIES_FILE to persist tenant-scoped custom policies and their bounded version history. Built-in profiles remain read-only. Policy mutations require an admin credential and are resolved server-side during /v1/decide.
+
+The file is written atomically. On hosted platforms with ephemeral filesystems, use durable storage or a managed configuration backend before relying on restart persistence.
+
 ## Production checklist
 
 Before production use, add:

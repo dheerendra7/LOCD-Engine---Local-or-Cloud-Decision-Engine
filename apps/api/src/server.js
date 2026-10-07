@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { decide } from "../../../packages/core/src/index.js";
 import { createDecisionStore, createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { listPolicyProfiles } from "../../../packages/policy/src/index.js";
+import { createPolicyStore, createFilePolicyStore } from "../../../packages/policy-store/src/index.js";
 import { createTenantTargetRegistry, tenantFromAuthContext, scopeKey } from "../../../packages/tenancy/src/index.js";
 import { planHybridExecution } from "../../../packages/planner/src/index.js";
 import { createLogger, createRequestId } from "../../../packages/observability/src/index.js";
@@ -288,6 +289,7 @@ export function createServer({
   decisionStore = createDecisionStore({ maxEntries: 1000 }),
   targetRegistry = createTenantTargetRegistry(),
   targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null,
+  policyStore = createPolicyStore(),
   idempotencyStore = null,
   coordinationStore = null,
   maxBodyBytes = Number(process.env.LOCD_MAX_BODY_BYTES || 1_000_000),
@@ -318,6 +320,13 @@ export function createServer({
 
   assertDecisionStore(decisionStore);
   if (coordinationStore) assertCoordinationStore(coordinationStore);
+  if (!policyStore || typeof policyStore.list !== "function" ||
+      typeof policyStore.get !== "function" ||
+      typeof policyStore.history !== "function" ||
+      typeof policyStore.upsert !== "function" ||
+      typeof policyStore.remove !== "function") {
+    throw new Error("policyStore must implement list, get, history, upsert and remove");
+  }
   if (!calibrator || typeof calibrator.apply !== "function" ||
       typeof calibrator.observe !== "function" ||
       typeof calibrator.hydrate !== "function") {
@@ -579,7 +588,18 @@ export function createServer({
         const calibratedTargets = calibrationEnabled
           ? calibrator.apply(rawTargets, body.workload?.type || "unknown", tenantId)
           : rawTargets;
-        const request = { ...body, targets: calibratedTargets };
+        let policy = body.policy || {};
+        if (policyStore && policy.profile) {
+          const custom = policyStore.get(tenantId, policy.profile);
+          if (custom) {
+            policy = {
+              ...custom.policy,
+              ...policy,
+              profile: custom.baseProfile
+            };
+          }
+        }
+        const request = { ...body, policy, targets: calibratedTargets };
 
         if (!request.targets.length) {
           sendJson(res, 503, { error: "no_registered_targets" });
@@ -668,7 +688,199 @@ export function createServer({
       }
 
       if (req.method === "GET" && pathname === "/v1/policies") {
-        sendJson(res, 200, { policies: listPolicyProfiles() });
+        const customPolicies = policyStore
+          .list(tenantId)
+          .map(record => ({
+            ...record.policy,
+            source: "custom",
+            version: record.version,
+            updatedAt: record.updatedAt
+          }));
+
+        const builtIns = listPolicyProfiles().map(profile => ({
+          ...profile,
+          source: "built-in",
+          version: null
+        }));
+
+        sendJson(res, 200, { policies: [...builtIns, ...customPolicies] });
+        return;
+      }
+
+      if (req.method === "GET" && pathname.startsWith("/v1/policies/") && pathname.endsWith("/history")) {
+        const policyId = decodeURIComponent(
+          pathname.slice("/v1/policies/".length, -"/history".length)
+        );
+        if (!policyId) {
+          sendJson(res, 400, { error: "policy id is required" });
+          return;
+        }
+
+        const history = policyStore.history(tenantId, policyId);
+        if (!history) {
+          sendJson(res, 404, { error: "policy_not_found" });
+          return;
+        }
+
+        sendJson(res, 200, {
+          tenantId,
+          policyId,
+          versions: history.versions
+        });
+        return;
+      }
+
+      if (req.method === "GET" && pathname.startsWith("/v1/policies/")) {
+        const policyId = decodeURIComponent(pathname.slice("/v1/policies/".length));
+        if (!policyId) {
+          sendJson(res, 400, { error: "policy id is required" });
+          return;
+        }
+
+        const custom = policyStore.get(tenantId, policyId);
+        if (!custom) {
+          const builtIn = listPolicyProfiles().find(profile => profile.id === policyId);
+          if (!builtIn) {
+            sendJson(res, 404, { error: "policy_not_found" });
+            return;
+          }
+          sendJson(res, 200, {
+            ...builtIn,
+            source: "built-in",
+            version: null
+          });
+          return;
+        }
+
+        sendJson(res, 200, {
+          ...custom.policy,
+          source: "custom",
+          version: custom.version,
+          updatedAt: custom.updatedAt,
+          updatedBy: custom.updatedBy
+        });
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/v1/policies") {
+        const body = await readBody(req, maxBodyBytes);
+        const replay = await getReplay(body);
+        if (replay) {
+          sendReplay(replay);
+          return;
+        }
+
+        const policyId = String(body.id || "").trim().toLowerCase();
+        const existed = policyStore.get(tenantId, policyId) != null;
+
+        const saved = await policyStore.upsert(tenantId, body, {
+          updatedBy: authContext.keyId || "admin"
+        });
+
+        const responseBody = {
+          ...saved.policy,
+          source: "custom",
+          version: saved.version,
+          updatedAt: saved.updatedAt,
+          updatedBy: saved.updatedBy
+        };
+
+        const status = existed ? 200 : 201;
+        await rememberResponse(body, status, responseBody);
+        sendJson(res, status, responseBody);
+        return;
+      }
+
+      if (req.method === "POST" && pathname.startsWith("/v1/policies/") && pathname.endsWith("/rollback")) {
+        const policyId = decodeURIComponent(
+          pathname.slice("/v1/policies/".length, -"/rollback".length)
+        );
+        const body = await readBody(req, maxBodyBytes);
+        const replay = await getReplay(body);
+        if (replay) {
+          sendReplay(replay);
+          return;
+        }
+
+        const version = Number(body.version);
+        if (!Number.isInteger(version) || version < 1) {
+          sendJson(res, 400, { error: "policy version must be a positive integer" });
+          return;
+        }
+
+        const history = policyStore.history(tenantId, policyId);
+        const selected = history?.versions?.find(item => item.version === version);
+        if (!selected) {
+          sendJson(res, 404, { error: "policy_version_not_found" });
+          return;
+        }
+
+        const saved = await policyStore.upsert(tenantId, selected.policy, {
+          updatedBy: authContext.keyId || "admin"
+        });
+
+        const responseBody = {
+          ...saved.policy,
+          source: "custom",
+          version: saved.version,
+          updatedAt: saved.updatedAt,
+          updatedBy: saved.updatedBy,
+          rolledBackFromVersion: version
+        };
+
+        await rememberResponse(body, 200, responseBody);
+        sendJson(res, 200, responseBody);
+        return;
+      }
+
+      if (req.method === "PUT" && pathname.startsWith("/v1/policies/")) {
+        const policyId = decodeURIComponent(pathname.slice("/v1/policies/".length));
+        if (!policyId || policyId.endsWith("/history") || policyId.endsWith("/rollback")) {
+          sendJson(res, 400, { error: "policy id is required" });
+          return;
+        }
+
+        const body = await readBody(req, maxBodyBytes);
+        const replay = await getReplay(body);
+        if (replay) {
+          sendReplay(replay);
+          return;
+        }
+
+        const existing = policyStore.get(tenantId, policyId);
+        const payload = { ...body, id: policyId };
+        const saved = await policyStore.upsert(tenantId, payload, {
+          updatedBy: authContext.keyId || "admin"
+        });
+
+        const responseBody = {
+          ...saved.policy,
+          source: "custom",
+          version: saved.version,
+          updatedAt: saved.updatedAt,
+          updatedBy: saved.updatedBy
+        };
+
+        const status = existing ? 200 : 201;
+        await rememberResponse(body, status, responseBody);
+        sendJson(res, status, responseBody);
+        return;
+      }
+
+      if (req.method === "DELETE" && pathname.startsWith("/v1/policies/")) {
+        const policyId = decodeURIComponent(pathname.slice("/v1/policies/".length));
+        if (!policyId) {
+          sendJson(res, 400, { error: "policy id is required" });
+          return;
+        }
+
+        const removed = await policyStore.remove(tenantId, policyId);
+        if (!removed) {
+          sendJson(res, 404, { error: "policy_not_found" });
+          return;
+        }
+
+        sendJson(res, 200, { removed: policyId });
         return;
       }
 
@@ -843,6 +1055,7 @@ export function createServer({
           },
           counts: {
             targets: targets.length,
+            customPolicies: policyStore.list(tenantId).length,
             probeableTargets: probeableTargets.length,
             executionAdapters: executionAdapters.length,
             decisions: (await decisionStore.summary({ tenantId })).totalDecisions
@@ -888,6 +1101,7 @@ if (isMain) {
   const coordinationUrl = process.env.LOCD_COORDINATION_URL?.trim() || null;
   const coordinationApiKey = process.env.LOCD_COORDINATION_API_KEY?.trim() || null;
   const providerFile = process.env.LOCD_PROVIDERS_FILE?.trim() || null;
+  const policyFile = process.env.LOCD_POLICIES_FILE?.trim() || null;
   const targetRegistry = await createConfiguredTargetRegistry({
     targetFile,
     providerFile
@@ -929,9 +1143,14 @@ if (isMain) {
     maxConcurrent: Number(process.env.LOCD_PROBE_MAX_CONCURRENT || 4),
     logger
   });
+  const policyStore = policyFile
+    ? await createFilePolicyStore({ filePath: policyFile, maxVersionsPerPolicy: 20 })
+    : createPolicyStore();
+
   const server = createServer({
     targetFile,
     targetRegistry,
+    policyStore,
     decisionStore,
     logger,
     probeScheduler,

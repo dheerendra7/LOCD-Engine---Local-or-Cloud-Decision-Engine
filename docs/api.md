@@ -370,3 +370,10 @@ Default bands:
 Targets use their capacity value as the current utilization signal. Historical telemetry without utilization remains in an unknown bucket and can be used as a fallback until enough band-specific observations exist.
 
 The calibration endpoint exposes these bands through config.utilizationBands.
+
+
+## Custom policies
+
+GET /v1/policies returns built-in profiles plus the authenticated tenant custom policies. POST /v1/policies creates or versions a tenant custom policy and requires admin scope. GET /v1/policies/:id/history returns bounded policy versions. DELETE /v1/policies/:id removes a tenant custom policy; built-in profiles cannot be deleted or overwritten.
+
+A custom policy references a built-in baseProfile and may override supported policy fields and rules. When /v1/decide receives that custom policy ID, the server resolves the stored tenant policy before decision evaluation. The caller cannot select another tenant's custom policy.
