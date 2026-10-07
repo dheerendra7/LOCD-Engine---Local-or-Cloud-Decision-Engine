@@ -35,6 +35,7 @@ Possible destinations:
 - Structured observability utilities with secret redaction.
 - Server-side provider configuration with environment-backed secrets.
 - Scoped API authorization with least-privilege execution controls.
+- Trusted multi-tenant control-plane isolation with tenant-scoped targets, telemetry, calibration and request coordination.
 - Browser dashboard shell.
 - Live provider probes and server-side provider configuration.
 - Optional automatic probe scheduling with bounded concurrency.
@@ -116,11 +117,11 @@ The core is independent of HTTP, storage and UI so it can later power SDKs, a CL
 
 ### Shipped foundation
 
-Decision core, hard/soft policy semantics, workload-aware policy rules, explainability, hybrid planning, target registry, resource-fit checks, metadata-only telemetry with outcome feedback, durable single-process telemetry, optional telemetry calibration, browser dashboard, HTTP API, SDK, CLI, scoped authentication, request IDs/idempotency, rate limiting, provider probes, automatic probe scheduling, OpenAI-compatible and native Ollama provider adapters, gated execution API, readiness/status endpoints, graceful shutdown, shared coordination contract, SQLite-backed state option, network state service with shared telemetry, Docker/Render deployment config, tests and CI.
+Decision core, hard/soft policy semantics, workload-aware policy rules, explainability, hybrid planning, target registry, resource-fit checks, metadata-only telemetry with outcome feedback, durable single-process telemetry, optional telemetry calibration, browser dashboard, HTTP API, SDK, CLI, scoped authentication, trusted tenant isolation, request IDs/idempotency, rate limiting, provider probes, automatic probe scheduling, OpenAI-compatible and native Ollama provider adapters, gated execution API, readiness/status endpoints, graceful shutdown, shared coordination contract, SQLite-backed state option, network state service with shared telemetry, Docker/Render deployment config, tests and CI.
 
 ### Next
 
-Managed/shared database and event backends beyond the current SQLite/network state modes, multi-tenant control-plane isolation, richer provider-specific execution adapters, fleet-level policy management, and production deployment hardening for shared infrastructure.
+Managed/shared database and event backends beyond the current SQLite/network state modes, richer provider-specific execution adapters, fleet-level policy management, and production deployment hardening for shared infrastructure.
 
 ### Later
 

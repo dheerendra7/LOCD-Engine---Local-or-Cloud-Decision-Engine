@@ -255,3 +255,51 @@ test("telemetry clamps out-of-range target utilization", () => {
   assert.equal(low.targetUtilization, 0);
   assert.equal(high.targetUtilization, 1);
 });
+
+test("decision history and outcomes are isolated by tenant", () => {
+  const store = createDecisionStore({ maxEntries: 10 });
+
+  store.record({
+    id: "shared-decision-id",
+    tenantId: "acme",
+    route: "local",
+    workloadType: "llm",
+    estimatedLatencyMs: 100
+  });
+
+  store.record({
+    id: "shared-decision-id",
+    tenantId: "beta",
+    route: "cloud",
+    workloadType: "llm",
+    estimatedLatencyMs: 300
+  });
+
+  assert.deepEqual(store.list({ tenantId: "acme" }).map(item => item.targetId), [null]);
+  assert.equal(store.summary({ tenantId: "acme" }).totalDecisions, 1);
+  assert.equal(store.summary({ tenantId: "beta" }).totalDecisions, 1);
+
+  assert.throws(
+    () => store.recordOutcome("shared-decision-id", {
+      outcome: "success",
+      actualLatencyMs: 150
+    }, { tenantId: "gamma" }),
+    /decision_not_found/
+  );
+
+  const updated = store.recordOutcome("shared-decision-id", {
+    outcome: "success",
+    actualLatencyMs: 150
+  }, { tenantId: "acme" });
+
+  assert.equal(updated.tenantId, "acme");
+  assert.equal(store.list({ tenantId: "beta" })[0].outcome, "pending");
+});
+
+test("tenant identifiers are validated before telemetry is stored", () => {
+  const store = createDecisionStore();
+  assert.throws(
+    () => store.record({ tenantId: "../escape", route: "local" }),
+    /tenantId must match/
+  );
+});

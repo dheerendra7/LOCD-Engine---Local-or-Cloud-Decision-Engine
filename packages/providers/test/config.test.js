@@ -66,6 +66,18 @@ test("provider list rejects duplicate IDs", () => {
   );
 });
 
+test("provider list rejects duplicate target IDs", () => {
+  assert.throws(
+    () => createProvidersFromConfig({
+      providers: [
+        base,
+        { ...base, id: "second-provider", targetId: base.targetId }
+      ]
+    }, env),
+    /duplicate provider target id/
+  );
+});
+
 test("provider list creates multiple adapters", () => {
   const adapters = createProvidersFromConfig({
     providers: [
@@ -188,4 +200,25 @@ test("provider config file can load a native Ollama provider", async () => {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("provider config preserves trusted tenant metadata outside target snapshots", () => {
+  const adapter = createProviderFromConfig({
+    ...base,
+    id: "tenant-provider",
+    targetId: "tenant-provider",
+    tenantId: "Acme-Prod"
+  }, env);
+
+  assert.equal(adapter.tenantId, "acme-prod");
+});
+
+test("provider config rejects unsafe tenant identifiers", () => {
+  assert.throws(
+    () => createProviderFromConfig({
+      ...base,
+      tenantId: "../escape"
+    }, env),
+    /tenantId must match/
+  );
 });

@@ -20,6 +20,7 @@ Example:
       {
         "id": "dashboard-reader",
         "secretEnv": "LOCD_DASHBOARD_KEY",
+        "tenantId": "acme",
         "scopes": ["read"]
       },
       {
@@ -38,6 +39,10 @@ Example:
         "scopes": ["targets", "read"]
       }
     ]
+
+Each scoped credential may be bound to a tenant with tenantId. Tenant identifiers are normalized and validated server-side. The tenant is taken from the authenticated credential, never from the workload request body.
+
+Legacy LOCD_API_KEY access remains bound to LOCD_LEGACY_TENANT_ID (default: default).
 
 Supported scopes:
 

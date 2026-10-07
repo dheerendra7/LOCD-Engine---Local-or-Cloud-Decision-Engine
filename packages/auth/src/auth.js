@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { normalizeTenantId } from "../../../packages/tenancy/src/index.js";
 
 const ALL_SCOPES = new Set(["read", "decide", "telemetry", "targets", "execute", "admin"]);
 
@@ -30,6 +31,7 @@ function extractSuppliedKey(req) {
 
 export function createScopedAuthorizer({
   legacyApiKey = null,
+  legacyTenantId = "default",
   keys = []
 } = {}) {
   if (legacyApiKey != null && typeof legacyApiKey !== "string") {
@@ -42,7 +44,8 @@ export function createScopedAuthorizer({
     entries.push({
       id: "legacy",
       secret: legacyApiKey,
-      scopes: ["admin"]
+      scopes: ["admin"],
+      tenantId: normalizeTenantId(legacyTenantId)
     });
   }
 
@@ -63,7 +66,8 @@ export function createScopedAuthorizer({
     entries.push({
       id: entry.id,
       secret,
-      scopes: normalizeScopes(entry.scopes)
+      scopes: normalizeScopes(entry.scopes),
+      tenantId: normalizeTenantId(entry.tenantId)
     });
   }
 
@@ -72,7 +76,8 @@ export function createScopedAuthorizer({
       return {
         ok: true,
         keyId: null,
-        scopes: ["admin"]
+        scopes: ["admin"],
+        tenantId: normalizeTenantId(legacyTenantId)
       };
     }
 
@@ -93,7 +98,8 @@ export function createScopedAuthorizer({
       return {
         ok: true,
         keyId: matched.id,
-        scopes: [...matched.scopes]
+        scopes: [...matched.scopes],
+        tenantId: matched.tenantId
       };
     }
 
@@ -101,7 +107,8 @@ export function createScopedAuthorizer({
       ok: false,
       reason: "forbidden_scope",
       keyId: matched.id,
-      scopes: [...matched.scopes]
+      scopes: [...matched.scopes],
+      tenantId: matched.tenantId
     };
   }
 
@@ -116,11 +123,12 @@ export function createScopedAuthorizer({
 
 export function loadScopedAuthFromEnv({
   legacyApiKey = process.env.LOCD_API_KEY?.trim() || null,
+  legacyTenantId = process.env.LOCD_LEGACY_TENANT_ID?.trim() || "default",
   raw = process.env.LOCD_API_KEYS_JSON || "",
   env = process.env
 } = {}) {
   if (!raw.trim()) {
-    return createScopedAuthorizer({ legacyApiKey });
+    return createScopedAuthorizer({ legacyApiKey, legacyTenantId });
   }
 
   let parsed;
@@ -150,9 +158,10 @@ export function loadScopedAuthFromEnv({
     return {
       id: entry.id,
       secret,
+      tenantId: entry.tenantId,
       scopes: entry.scopes
     };
   });
 
-  return createScopedAuthorizer({ legacyApiKey, keys });
+  return createScopedAuthorizer({ legacyApiKey, legacyTenantId, keys });
 }

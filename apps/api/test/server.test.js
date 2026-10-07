@@ -197,6 +197,170 @@ test("empty target registry is readable", async () => {
   assert.deepEqual((await response.json()).targets, []);
 });
 
+test("tenant namespaces keep identical idempotency keys independent", async () => {
+  const scopedServer = createServer({
+    authorizer: createScopedAuthorizer({
+      keys: [
+        { id: "acme", secret: "acme-idem", tenantId: "acme", scopes: ["decide"] },
+        { id: "beta", secret: "beta-idem", tenantId: "beta", scopes: ["decide"] }
+      ]
+    })
+  });
+
+  await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + scopedServer.address().port;
+
+  const makeRequest = (secret, targetId) => fetch(url + "/v1/decide", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer " + secret,
+      "content-type": "application/json",
+      "idempotency-key": "same-key"
+    },
+    body: JSON.stringify({
+      workload: { type: "tenant-idempotency", sensitivity: "low" },
+      targets: [{
+        id: targetId,
+        mode: "local",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 20,
+        estimatedCostUsd: 0
+      }]
+    })
+  });
+
+  try {
+    const acme = await makeRequest("acme-idem", "acme-target");
+    const beta = await makeRequest("beta-idem", "beta-target");
+
+    assert.equal(acme.status, 200);
+    assert.equal(beta.status, 200);
+    assert.equal(acme.headers.get("idempotency-replayed"), null);
+    assert.equal(beta.headers.get("idempotency-replayed"), null);
+
+    assert.equal((await acme.json()).targetId, "acme-target");
+    assert.equal((await beta.json()).targetId, "beta-target");
+  } finally {
+    await new Promise(resolve => scopedServer.close(resolve));
+  }
+});
+
+test("scoped API tenants cannot see or update each other's control-plane state", async () => {
+  const scopedServer = createServer({
+    authorizer: createScopedAuthorizer({
+      keys: [
+        { id: "acme", secret: "acme-secret", tenantId: "acme", scopes: ["read", "decide", "targets", "telemetry"] },
+        { id: "beta", secret: "beta-secret", tenantId: "beta", scopes: ["read", "decide", "targets", "telemetry"] }
+      ]
+    })
+  });
+
+  await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + scopedServer.address().port;
+
+  const headersFor = secret => ({
+    authorization: "Bearer " + secret,
+    "content-type": "application/json"
+  });
+
+  const targetBody = {
+    id: "shared-target-id",
+    mode: "local",
+    health: 1,
+    capacity: 0.1,
+    privacy: 1,
+    estimatedLatencyMs: 30,
+    estimatedCostUsd: 0
+  };
+
+  try {
+    const acmeRegister = await fetch(url + "/v1/targets", {
+      method: "POST",
+      headers: headersFor("acme-secret"),
+      body: JSON.stringify(targetBody)
+    });
+    const betaRegister = await fetch(url + "/v1/targets", {
+      method: "POST",
+      headers: headersFor("beta-secret"),
+      body: JSON.stringify({ ...targetBody, estimatedLatencyMs: 80 })
+    });
+
+    assert.equal(acmeRegister.status, 201);
+    assert.equal(betaRegister.status, 201);
+
+    const acmeTargets = await (await fetch(url + "/v1/targets", {
+      headers: { authorization: "Bearer acme-secret" }
+    })).json();
+    const betaTargets = await (await fetch(url + "/v1/targets", {
+      headers: { authorization: "Bearer beta-secret" }
+    })).json();
+
+    assert.equal(acmeTargets.targets.length, 1);
+    assert.equal(betaTargets.targets.length, 1);
+    assert.equal(acmeTargets.targets[0].estimatedLatencyMs, 30);
+    assert.equal(betaTargets.targets[0].estimatedLatencyMs, 80);
+
+    const acmeDecision = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers: headersFor("acme-secret"),
+      body: JSON.stringify({
+        workload: { type: "tenant-llm", sensitivity: "low" },
+        policy: { sensitiveDataMode: "prefer-local" }
+      })
+    });
+    const betaDecision = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers: headersFor("beta-secret"),
+      body: JSON.stringify({
+        workload: { type: "tenant-llm", sensitivity: "low" },
+        policy: { sensitiveDataMode: "prefer-local" }
+      })
+    });
+
+    assert.equal(acmeDecision.status, 200);
+    assert.equal(betaDecision.status, 200);
+    assert.equal((await acmeDecision.json()).targetId, "shared-target-id");
+    assert.equal((await betaDecision.json()).targetId, "shared-target-id");
+
+    const acmeHistory = await (await fetch(url + "/v1/decisions", {
+      headers: { authorization: "Bearer acme-secret" }
+    })).json();
+    const betaHistory = await (await fetch(url + "/v1/decisions", {
+      headers: { authorization: "Bearer beta-secret" }
+    })).json();
+
+    assert.equal(acmeHistory.decisions.length, 1);
+    assert.equal(betaHistory.decisions.length, 1);
+    assert.equal(acmeHistory.decisions[0].tenantId, "acme");
+    assert.equal(betaHistory.decisions[0].tenantId, "beta");
+
+    const crossTenantOutcome = await fetch(url + "/v1/outcomes", {
+      method: "POST",
+      headers: headersFor("beta-secret"),
+      body: JSON.stringify({
+        decisionId: acmeHistory.decisions[0].id,
+        outcome: "success",
+        actualLatencyMs: 25
+      })
+    });
+    assert.equal(crossTenantOutcome.status, 404);
+
+    const acmeMetric = await (await fetch(url + "/v1/metrics", {
+      headers: { authorization: "Bearer acme-secret" }
+    })).json();
+    const betaMetric = await (await fetch(url + "/v1/metrics", {
+      headers: { authorization: "Bearer beta-secret" }
+    })).json();
+
+    assert.equal(acmeMetric.totalDecisions, 1);
+    assert.equal(betaMetric.totalDecisions, 1);
+  } finally {
+    await new Promise(resolve => scopedServer.close(resolve));
+  }
+});
+
 test("configured API key protects v1 endpoints while health remains public", async () => {
   const protectedServer = createServer({ apiKey: "test-api-key-1234567890" });
   await new Promise(resolve => protectedServer.listen(0, "127.0.0.1", resolve));
@@ -865,37 +1029,34 @@ test("server bootstrap loads provider adapters from config file without exposing
   }
 });
 
-test("server bootstrap fails on duplicate provider and target IDs", async () => {
+test("server bootstrap rejects provider configs sharing a target ID", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "locd-provider-bootstrap-dup-"));
-  const targetFile = path.join(dir, "targets.json");
   const providerFile = path.join(dir, "providers.json");
 
   try {
-    const target = {
-      id: "same-id",
-      mode: "local",
-      available: true,
-      health: 1,
-      capacity: 0.1,
-      privacy: 1
-    };
-    await writeFile(targetFile, JSON.stringify([target]), "utf8");
     await writeFile(providerFile, JSON.stringify({
-      providers: [{
-        id: "same-id",
-        targetId: "same-id",
-        mode: "private",
-        baseUrl: "https://inference.example.com"
-      }]
+      providers: [
+        {
+          id: "provider-one",
+          targetId: "same-target",
+          mode: "private",
+          baseUrl: "https://one.example.com"
+        },
+        {
+          id: "provider-two",
+          targetId: "same-target",
+          mode: "private",
+          baseUrl: "https://two.example.com"
+        }
+      ]
     }), "utf8");
 
     await assert.rejects(
       () => createConfiguredTargetRegistry({
-        targetFile,
         providerFile,
         fetchImpl: async () => new Response(JSON.stringify({ data: [] }), { status: 200 })
       }),
-      /target already registered/
+      /duplicate provider target id/
     );
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -1359,6 +1520,59 @@ test("live execution requires execute scope even when execution is enabled", asy
     assert.equal(body.receipts[0].adapterId, "live");
   } finally {
     await new Promise(resolve => scopedServer.close(resolve));
+  }
+});
+
+test("provider config replaces a persisted target snapshot on bootstrap", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-provider-rehydrate-"));
+  const targetFile = path.join(dir, "targets.json");
+  const providerFile = path.join(dir, "providers.json");
+
+  try {
+    await writeFile(targetFile, JSON.stringify({
+      version: 1,
+      tenants: {
+        default: [{
+          id: "provider-target",
+          mode: "cloud",
+          available: false,
+          health: 0,
+          capacity: 1,
+          privacy: 0.2,
+          estimatedLatencyMs: 900,
+          estimatedCostUsd: 0.1
+        }]
+      }
+    }), "utf8");
+
+    await writeFile(providerFile, JSON.stringify({
+      providers: [{
+        id: "provider-target",
+        targetId: "provider-target",
+        type: "openai-compatible",
+        mode: "cloud",
+        baseUrl: "https://inference.example.com",
+        apiKeyEnv: "PROVIDER_KEY",
+        model: "demo-model"
+      }]
+    }), "utf8");
+
+    const registry = await createConfiguredTargetRegistry({
+      targetFile,
+      providerFile,
+      env: { PROVIDER_KEY: "secret" },
+      fetchImpl: async () => new Response(
+        JSON.stringify({ data: [] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    });
+
+    assert.equal(registry.forTenant("default").has("provider-target"), true);
+    const snapshot = await registry.forTenant("default").probe("provider-target");
+    assert.equal(snapshot.available, true);
+    assert.equal(snapshot.health, 1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 });
 

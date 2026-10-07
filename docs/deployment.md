@@ -27,6 +27,24 @@ Then open:
 
     http://localhost:8787/
 
+## Multi-tenant deployment
+
+Bind each scoped API credential to a tenant using its tenantId in LOCD_API_KEYS_JSON. Keep tenant identifiers stable because they become part of target, telemetry, calibration, idempotency and rate-limit namespaces.
+
+LOCD_TARGETS_FILE now supports a versioned tenant-aware format:
+
+    {
+      "version": 1,
+      "tenants": {
+        "acme": [ ... ],
+        "beta": [ ... ]
+      }
+    }
+
+A legacy target array is still loaded into the default tenant.
+
+The tenant model is an application-level isolation boundary. For strong production isolation, the state service/database and operational credentials must remain inside the same trusted deployment boundary.
+
 ## Production checklist
 
 Before production use, add:

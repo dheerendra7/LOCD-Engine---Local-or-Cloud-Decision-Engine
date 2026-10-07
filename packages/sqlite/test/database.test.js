@@ -123,3 +123,105 @@ test("sqlite state factory shares telemetry and coordination on one database", a
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("sqlite telemetry isolates tenants even when decision IDs are reused", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-tenant-"));
+  const file = path.join(dir, "state.db");
+
+  try {
+    const store = createSQLiteDecisionStore({ filePath: file, maxEntries: 20 });
+
+    store.record({
+      id: "acme-id",
+      tenantId: "acme",
+      route: "local",
+      workloadType: "llm"
+    });
+    store.record({
+      id: "beta-id",
+      tenantId: "beta",
+      route: "cloud",
+      workloadType: "llm"
+    });
+
+    assert.equal(store.list({ tenantId: "acme", limit: 10 }).length, 1);
+    assert.equal(store.list({ tenantId: "beta", limit: 10 }).length, 1);
+    assert.equal(store.summary({ tenantId: "acme" }).totalDecisions, 1);
+
+    await assert.rejects(
+      async () => store.recordOutcome("acme-id", { outcome: "success" }, { tenantId: "gamma" }),
+      /decision_not_found/
+    );
+
+    const updated = store.recordOutcome(
+      "acme-id",
+      { outcome: "success", actualLatencyMs: 10 },
+      { tenantId: "acme" }
+    );
+    assert.equal(updated.tenantId, "acme");
+    assert.equal(store.list({ tenantId: "beta" })[0].outcome, "pending");
+
+    store.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("sqlite migrates legacy decision tables without tenant columns", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-migration-"));
+  const file = path.join(dir, "state.db");
+
+  try {
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(file);
+    db.exec(`
+      CREATE TABLE decision_events (
+        id TEXT PRIMARY KEY,
+        timestamp TEXT NOT NULL,
+        decision_version TEXT NOT NULL,
+        workload_type TEXT NOT NULL,
+        route TEXT NOT NULL,
+        target_id TEXT,
+        confidence REAL NOT NULL,
+        estimated_latency_ms REAL,
+        estimated_cost_usd REAL,
+        outcome TEXT NOT NULL,
+        actual_latency_ms REAL,
+        actual_cost_usd REAL,
+        error_class TEXT,
+        outcome_timestamp TEXT
+      ) STRICT;
+    `);
+    db.prepare(`
+      INSERT INTO decision_events (
+        id, timestamp, decision_version, workload_type, route, target_id,
+        confidence, estimated_latency_ms, estimated_cost_usd, outcome,
+        actual_latency_ms, actual_cost_usd, error_class, outcome_timestamp
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "legacy",
+      new Date().toISOString(),
+      "1.0",
+      "legacy",
+      "local",
+      "gpu",
+      0.5,
+      10,
+      0,
+      "pending",
+      null,
+      null,
+      null,
+      null
+    );
+    db.close();
+
+    const store = createSQLiteDecisionStore({ filePath: file, maxEntries: 10 });
+    const restored = store.list({ tenantId: "default" });
+    assert.equal(restored.length, 1);
+    assert.equal(restored[0].id, "legacy");
+    store.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

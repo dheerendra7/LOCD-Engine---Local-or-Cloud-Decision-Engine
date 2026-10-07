@@ -219,3 +219,48 @@ test("state service keeps telemetry and coordination cleanup isolated", async ()
     await instance.cleanup();
   }
 });
+
+test("state service isolates telemetry by trusted tenant header", async () => {
+  const instance = await startServer();
+
+  try {
+    const baseHeaders = {
+      authorization: "Bearer state-secret",
+      "content-type": "application/json"
+    };
+
+    const save = async (tenantId, id, route) => fetch(
+      instance.url + "/v1/state/decisions",
+      {
+        method: "POST",
+        headers: { ...baseHeaders, "x-locd-tenant-id": tenantId },
+        body: JSON.stringify({ id, route, workloadType: "tenant-test" })
+      }
+    );
+
+    assert.equal((await save("acme", "acme-shared", "local")).status, 201);
+    assert.equal((await save("beta", "beta-shared", "cloud")).status, 201);
+
+    const acme = await fetch(instance.url + "/v1/state/decisions", {
+      headers: { authorization: "Bearer state-secret", "x-locd-tenant-id": "acme" }
+    });
+    const beta = await fetch(instance.url + "/v1/state/decisions", {
+      headers: { authorization: "Bearer state-secret", "x-locd-tenant-id": "beta" }
+    });
+
+    assert.equal((await acme.json()).decisions[0].tenantId, "acme");
+    assert.equal((await beta.json()).decisions[0].tenantId, "beta");
+
+    const crossTenantOutcome = await fetch(
+      instance.url + "/v1/state/outcomes/acme-shared",
+      {
+        method: "POST",
+        headers: { ...baseHeaders, "x-locd-tenant-id": "gamma" },
+        body: JSON.stringify({ outcome: "success", actualLatencyMs: 10 })
+      }
+    );
+    assert.equal(crossTenantOutcome.status, 404);
+  } finally {
+    await instance.cleanup();
+  }
+});

@@ -1,6 +1,7 @@
 import http from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { createSQLiteStateStores } from "../../../packages/sqlite/src/index.js";
+import { normalizeTenantId } from "../../../packages/tenancy/src/index.js";
 
 function safeEqual(supplied, expected) {
   if (typeof supplied !== "string" || typeof expected !== "string") return false;
@@ -46,6 +47,10 @@ function decodeKey(pathname, prefix, suffix = "") {
   return decodeURIComponent(pathname.slice(prefix.length, suffix ? -suffix.length : undefined));
 }
 
+function requestTenantId(req) {
+  return normalizeTenantId(req.headers["x-locd-tenant-id"]);
+}
+
 export function createStateServiceServer({
   stores,
   apiKey = process.env.LOCD_STATE_SERVICE_API_KEY?.trim() || null,
@@ -85,30 +90,35 @@ export function createStateServiceServer({
       }
 
       if (req.method === "POST" && pathname === "/v1/state/decisions") {
+        const tenantId = requestTenantId(req);
         const event = await readBody(req, maxBodyBytes);
-        const saved = stores.telemetry.record(event);
+        const saved = stores.telemetry.record({ ...event, tenantId });
         sendJson(res, 201, saved);
         return;
       }
 
       if (req.method === "POST" && pathname.startsWith("/v1/state/outcomes/")) {
+        const tenantId = requestTenantId(req);
         const id = decodeKey(pathname, "/v1/state/outcomes/");
         const patch = await readBody(req, maxBodyBytes);
-        const saved = stores.telemetry.recordOutcome(id, patch);
+        const saved = stores.telemetry.recordOutcome(id, patch, { tenantId });
         sendJson(res, 200, saved);
         return;
       }
 
       if (req.method === "GET" && pathname === "/v1/state/decisions") {
+        const tenantId = requestTenantId(req);
         const limit = url.searchParams.get("limit") || "50";
         sendJson(res, 200, {
-          decisions: stores.telemetry.list({ limit })
+          tenantId,
+          decisions: stores.telemetry.list({ limit, tenantId })
         });
         return;
       }
 
       if (req.method === "GET" && pathname === "/v1/state/metrics") {
-        sendJson(res, 200, stores.telemetry.summary());
+        const tenantId = requestTenantId(req);
+        sendJson(res, 200, stores.telemetry.summary({ tenantId }));
         return;
       }
 
@@ -162,8 +172,9 @@ export function createStateServiceServer({
       }
 
       if (req.method === "POST" && pathname === "/v1/state/telemetry/clear") {
-        stores.telemetry.clear();
-        sendJson(res, 200, { cleared: "telemetry" });
+        const tenantId = requestTenantId(req);
+        stores.telemetry.clear({ tenantId });
+        sendJson(res, 200, { cleared: "telemetry", tenantId });
         return;
       }
 

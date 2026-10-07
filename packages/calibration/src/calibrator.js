@@ -2,6 +2,7 @@ const DEFAULT_ALPHA = 0.25;
 const DEFAULT_MIN_SAMPLES = 3;
 const DEFAULT_MIN_FACTOR = 0.25;
 const DEFAULT_MAX_FACTOR = 4;
+const DEFAULT_TENANT_ID = "default";
 const DEFAULT_UTILIZATION_BANDS = Object.freeze({
   low: 0.25,
   moderate: 0.60,
@@ -14,8 +15,17 @@ function finite(value) {
   return Number.isFinite(number) ? number : null;
 }
 
-function keyFor(targetId, workloadType, utilizationBand = "unknown") {
-  return String(targetId) + "::" + String(workloadType || "unknown") + "::" + utilizationBand;
+function normalizeTenantId(value) {
+  const tenantId = String(value ?? DEFAULT_TENANT_ID).trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9._-]{0,62}$/.test(tenantId)) {
+    throw new Error("tenantId must match /^[a-z0-9][a-z0-9._-]{0,62}$/");
+  }
+  return tenantId;
+}
+
+function keyFor(tenantId, targetId, workloadType, utilizationBand = "unknown") {
+  return normalizeTenantId(tenantId) + "::" + String(targetId) + "::" +
+    String(workloadType || "unknown") + "::" + utilizationBand;
 }
 
 function utilizationBandFor(value, bands = DEFAULT_UTILIZATION_BANDS) {
@@ -90,6 +100,7 @@ export function createCalibrator(options = {}) {
   const observations = new Map();
 
   function observe({
+    tenantId = DEFAULT_TENANT_ID,
     targetId,
     workloadType = "unknown",
     estimatedLatencyMs,
@@ -102,9 +113,11 @@ export function createCalibrator(options = {}) {
     if (!targetId) throw new Error("targetId is required");
     if (outcome === "pending") return null;
 
+    const normalizedTenantId = normalizeTenantId(tenantId);
     const utilizationBand = utilizationBandFor(utilization, config.utilizationBands);
-    const key = keyFor(targetId, workloadType, utilizationBand);
+    const key = keyFor(normalizedTenantId, targetId, workloadType, utilizationBand);
     const current = observations.get(key) || {
+      tenantId: normalizedTenantId,
       targetId: String(targetId),
       workloadType: String(workloadType),
       utilizationBand,
@@ -155,6 +168,7 @@ export function createCalibrator(options = {}) {
     for (const event of events) {
       if (event?.outcome === "success" || event?.outcome === "failure") {
         observe({
+          tenantId: event.tenantId,
           targetId: event.targetId,
           workloadType: event.workloadType,
           estimatedLatencyMs: event.estimatedLatencyMs,
@@ -170,21 +184,22 @@ export function createCalibrator(options = {}) {
     return snapshot();
   }
 
-  function get(targetId, workloadType = "unknown", utilization = null) {
+  function get(targetId, workloadType = "unknown", utilization = null, tenantId = DEFAULT_TENANT_ID) {
+    const normalizedTenantId = normalizeTenantId(tenantId);
     const band = utilizationBandFor(utilization, config.utilizationBands);
-    const exact = observations.get(keyFor(targetId, workloadType, band));
+    const exact = observations.get(keyFor(normalizedTenantId, targetId, workloadType, band));
     const fallback = band === "unknown"
       ? null
-      : observations.get(keyFor(targetId, workloadType, "unknown"));
+      : observations.get(keyFor(normalizedTenantId, targetId, workloadType, "unknown"));
     const item = exact || fallback;
     return item ? { ...item } : null;
   }
 
-  function apply(targets = [], workloadType = "unknown") {
+  function apply(targets = [], workloadType = "unknown", tenantId = DEFAULT_TENANT_ID) {
     if (!Array.isArray(targets)) throw new Error("targets must be an array");
 
     return targets.map(target => {
-      const item = get(target?.id, workloadType, target?.capacity);
+      const item = get(target?.id, workloadType, target?.capacity, tenantId);
       if (!item || item.samples < config.minSamples) {
         return structuredClone(target);
       }
@@ -204,10 +219,13 @@ export function createCalibrator(options = {}) {
     });
   }
 
-  function snapshot() {
+  function snapshot(tenantId = null) {
+    const normalizedTenantId = tenantId == null ? null : normalizeTenantId(tenantId);
     return [...observations.values()]
+      .filter(item => normalizedTenantId == null || item.tenantId === normalizedTenantId)
       .map(item => ({ ...item }))
       .sort((a, b) =>
+        String(a.tenantId).localeCompare(String(b.tenantId)) ||
         String(a.targetId).localeCompare(String(b.targetId)) ||
         String(a.workloadType).localeCompare(String(b.workloadType)) ||
         String(a.utilizationBand).localeCompare(String(b.utilizationBand))

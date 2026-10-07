@@ -109,3 +109,51 @@ test("duplicate API secret values are rejected even with different IDs", () => {
     /duplicate auth key secret/
   );
 });
+
+test("authorization returns trusted tenant context", () => {
+  const authorizer = createScopedAuthorizer({
+    keys: [
+      { id: "acme-reader", secret: "acme-secret", tenantId: "Acme-Prod", scopes: ["read"] },
+      { id: "beta-reader", secret: "beta-secret", tenantId: "beta", scopes: ["read"] }
+    ]
+  });
+
+  assert.equal(authorizer.authorize(req("acme-secret"), "read").tenantId, "acme-prod");
+  assert.equal(authorizer.authorize(req("beta-secret"), "read").tenantId, "beta");
+});
+
+test("legacy API key uses explicit default tenant configuration", () => {
+  const authorizer = createScopedAuthorizer({
+    legacyApiKey: "legacy",
+    legacyTenantId: "platform-demo"
+  });
+
+  const context = authorizer.authorize(req("legacy"), "read");
+  assert.equal(context.tenantId, "platform-demo");
+});
+
+test("environment loader preserves tenant metadata", () => {
+  const authorizer = loadScopedAuthFromEnv({
+    legacyApiKey: null,
+    raw: JSON.stringify([
+      {
+        id: "tenant-reader",
+        secretEnv: "TENANT_KEY",
+        tenantId: "Customer-One",
+        scopes: ["read"]
+      }
+    ]),
+    env: { TENANT_KEY: "secret" }
+  });
+
+  assert.equal(authorizer.authorize(req("secret"), "read").tenantId, "customer-one");
+});
+
+test("unsafe tenant IDs are rejected from auth configuration", () => {
+  assert.throws(
+    () => createScopedAuthorizer({
+      keys: [{ id: "bad", secret: "secret", tenantId: "../escape", scopes: ["read"] }]
+    }),
+    /tenantId must match/
+  );
+});

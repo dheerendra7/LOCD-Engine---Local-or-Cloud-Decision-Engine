@@ -43,8 +43,8 @@ export function createFileDecisionStore({ filePath, maxEntries = 500 } = {}) {
       return result;
     },
 
-    recordOutcome(id, patch) {
-      const result = store.recordOutcome(id, patch);
+    recordOutcome(id, patch, options) {
+      const result = store.recordOutcome(id, patch, options);
       persist();
       return result;
     },
@@ -53,12 +53,12 @@ export function createFileDecisionStore({ filePath, maxEntries = 500 } = {}) {
       return store.list(options);
     },
 
-    summary() {
-      return store.summary();
+    summary(options) {
+      return store.summary(options);
     },
 
-    clear() {
-      store.clear();
+    clear(options) {
+      store.clear(options);
       persist();
     }
   };

@@ -63,3 +63,10 @@ Authenticated state endpoints:
 
 The coordination endpoints expose only primitive shared-state operations. Product routing policy remains in the LOCD API/core engine.
 The two clear operations are intentionally separate so telemetry cleanup cannot reset coordination state and vice versa.
+
+
+## Tenant context
+
+The LOCD API sends the authenticated tenant context to the State Service through the internal X-LOCD-Tenant-ID header. The State Service authenticates the calling service separately and uses that trusted context to partition decision telemetry and outcome lookup.
+
+Do not expose the State Service directly to untrusted clients. The tenant header is an internal service-to-service trust boundary, not a replacement for public API authentication.
