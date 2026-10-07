@@ -114,6 +114,7 @@ export function createDecisionStore({ maxEntries = 500, initialEvents = [] } = {
     summary({ tenantId = null } = {}) {
       const routes = {};
       const outcomes = { pending: 0, success: 0, failure: 0 };
+      let totalDecisions = 0;
       let estimatedCostUsd = 0;
       let latencyCount = 0;
       let latencyTotal = 0;
@@ -128,6 +129,7 @@ export function createDecisionStore({ maxEntries = 500, initialEvents = [] } = {
       for (const event of events) {
         if (!matchesTenant(event, tenantId)) continue;
 
+        totalDecisions++;
         routes[event.route] = (routes[event.route] || 0) + 1;
         outcomes[event.outcome] = (outcomes[event.outcome] || 0) + 1;
 
@@ -157,15 +159,13 @@ export function createDecisionStore({ maxEntries = 500, initialEvents = [] } = {
       const tenant = tenantId == null ? null : normalizeTenantId(tenantId);
       const result = {
 
-        totalDecisions: latencyCount === 0 && confidenceTotal === 0 && Object.keys(routes).length === 0
-          ? 0
-          : Object.values(routes).reduce((total, count) => total + count, 0),
+        totalDecisions,
         routes,
         outcomes,
         estimatedCostUsd: Number(estimatedCostUsd.toFixed(6)),
         averageEstimatedLatencyMs: latencyCount ? Number((latencyTotal / latencyCount).toFixed(2)) : null,
-        averageConfidence: Object.values(routes).reduce((total, count) => total + count, 0)
-          ? Number((confidenceTotal / Object.values(routes).reduce((total, count) => total + count, 0)).toFixed(6))
+        averageConfidence: totalDecisions
+          ? Number((confidenceTotal / totalDecisions).toFixed(6))
           : 0,
         successRate: completedCount ? Number((successCount / completedCount).toFixed(6)) : null,
         meanAbsoluteLatencyErrorMs: latencyErrorCount
