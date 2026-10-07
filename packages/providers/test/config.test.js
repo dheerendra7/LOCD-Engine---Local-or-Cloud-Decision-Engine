@@ -66,6 +66,18 @@ test("provider list rejects duplicate IDs", () => {
   );
 });
 
+test("provider list rejects duplicate target IDs", () => {
+  assert.throws(
+    () => createProvidersFromConfig({
+      providers: [
+        base,
+        { ...base, id: "second-provider", targetId: base.targetId }
+      ]
+    }, env),
+    /duplicate provider target id/
+  );
+});
+
 test("provider list creates multiple adapters", () => {
   const adapters = createProvidersFromConfig({
     providers: [
