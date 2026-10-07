@@ -354,10 +354,40 @@ export function createServer({
       };
       res.setHeader("x-request-id", requestId);
 
+      let authContext = {
+        ok: true,
+        keyId: null,
+        scopes: ["admin"],
+        tenantId: "default"
+      };
+
+      if (pathname.startsWith("/v1/")) {
+        authContext = auth.authorize(req, requiredScope(req.method, pathname));
+
+        if (!authContext.ok) {
+          const status = authContext.reason === "forbidden_scope" ? 403 : 401;
+          const body = {
+            error: authContext.reason === "forbidden_scope"
+              ? "insufficient_scope"
+              : "unauthorized"
+          };
+          const headers = status === 401
+            ? { "www-authenticate": "Bearer" }
+            : {};
+          sendJson(res, status, body, headers);
+          return;
+        }
+      }
+
+      const tenantId = tenantFromAuthContext(authContext);
+      const requestRegistry = typeof targetRegistry.forTenant === "function"
+        ? targetRegistry.forTenant(tenantId)
+        : targetRegistry;
+
       const idempotencyKey = String(req.headers["idempotency-key"] || "").trim() || null;
       const getReplay = async body => {
         if (!idempotencyKey || !["POST", "PUT", "PATCH"].includes(req.method)) return null;
-        const scope = req.method + " " + pathname;
+        const scope = scopeKey(tenantId, req.method + " " + pathname);
 
         if (typeof effectiveIdempotencyStore.claim === "function") {
           const claim = await effectiveIdempotencyStore.claim(
@@ -389,7 +419,7 @@ export function createServer({
       const rememberResponse = async (body, status, responseBody) => {
         if (!idempotencyKey) return;
         await effectiveIdempotencyStore.remember(
-          req.method + " " + pathname,
+          scopeKey(tenantId, req.method + " " + pathname),
           idempotencyKey,
           body,
           { status, body: responseBody }
@@ -864,16 +894,11 @@ if (isMain) {
     maxConcurrent: Number(process.env.LOCD_PROBE_MAX_CONCURRENT || 4),
     logger
   });
-  const executionRegistry = await createConfiguredExecutionRegistry({
-    targetRegistry
-  });
-
   const server = createServer({
     targetFile,
     targetRegistry,
     decisionStore,
     logger,
-    executionRegistry,
     probeScheduler,
     coordinationStore,
     coordinationBackend: stateDbFile
