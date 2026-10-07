@@ -644,7 +644,7 @@ export function createServer({
       }
 
       if (req.method === "GET" && pathname === "/v1/targets") {
-        sendJson(res, 200, { tenantId, targets: await requestRegistry.list() });
+        sendJson(res, 200, { targets: await requestRegistry.list() });
         return;
       }
 
@@ -753,14 +753,15 @@ export function createServer({
       if (req.method === "GET" && pathname === "/v1/decisions") {
         const limit = new URL(req.url || "/", "http://localhost").searchParams.get("limit") || "50";
         sendJson(res, 200, {
-          tenantId,
           decisions: await decisionStore.list({ limit, tenantId })
         });
         return;
       }
 
       if (req.method === "GET" && pathname === "/v1/metrics") {
-        sendJson(res, 200, await decisionStore.summary({ tenantId }));
+        const summary = await decisionStore.summary({ tenantId });
+        delete summary.tenantId;
+        sendJson(res, 200, summary);
         return;
       }
 
@@ -790,7 +791,6 @@ export function createServer({
           service: "locd-api",
           version: serviceVersion,
           status: "ok",
-          tenantId,
           capabilities: {
             executionEnabled: Boolean(executionEnabled),
             persistentTargets: Boolean(targetFile),
