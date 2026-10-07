@@ -22,6 +22,11 @@ import { loadProvidersFromFile } from "../../../packages/providers/src/index.js"
 import { loadScopedAuthFromEnv } from "../../../packages/auth/src/index.js";
 import { createSQLiteStateStores } from "../../../packages/sqlite/src/index.js";
 import { createHTTPCoordinationStore } from "../../../packages/state-client/src/index.js";
+import {
+  assertDecisionStore,
+  assertCoordinationStore,
+  describeStateBackend
+} from "../../../packages/state-contract/src/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
@@ -310,6 +315,9 @@ export function createServer({
   if (!Number.isFinite(idempotencyLockTtlMs) || idempotencyLockTtlMs < 1) {
     throw new Error("idempotencyLockTtlMs must be >= 1");
   }
+
+  assertDecisionStore(decisionStore);
+  if (coordinationStore) assertCoordinationStore(coordinationStore);
   if (!calibrator || typeof calibrator.apply !== "function" ||
       typeof calibrator.observe !== "function" ||
       typeof calibrator.hydrate !== "function") {
@@ -813,6 +821,11 @@ export function createServer({
           service: "locd-api",
           version: serviceVersion,
           status: "ok",
+          stateBackend: describeStateBackend({
+            telemetry: decisionStore,
+            coordination: coordinationStore,
+            kind: telemetryBackend || "process-local"
+          }),
           capabilities: {
             executionEnabled: Boolean(executionEnabled),
             persistentTargets: Boolean(targetFile),
