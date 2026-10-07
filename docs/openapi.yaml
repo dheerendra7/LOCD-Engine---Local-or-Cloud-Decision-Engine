@@ -120,6 +120,41 @@ paths:
           description: No registered execution targets
 
 
+  /v1/policies/simulate:
+    post:
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/RequestId"
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+      summary: Compare two policies without executing or recording telemetry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PolicySimulationRequest"
+      responses:
+        "200":
+          description: Deterministic what-if policy comparison
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PolicySimulationResponse"
+        "400":
+          description: Invalid simulation request
+        "401":
+          description: Authentication required
+        "403":
+          description: Decision scope required
+        "409":
+          description: Idempotency conflict or concurrent duplicate
+        "413":
+          description: Request body too large
+        "429":
+          description: Rate limit exceeded
+
   /v1/status:
     get:
       security:
@@ -572,6 +607,47 @@ components:
               dataSensitivity:
                 type: string
                 enum: [low, medium, high]
+    PolicySimulationRequest:
+      type: object
+      required: [workload]
+      properties:
+        workload:
+          $ref: "#/components/schemas/Workload"
+        constraints:
+          $ref: "#/components/schemas/Constraints"
+        targets:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/Target"
+        currentPolicy:
+          $ref: "#/components/schemas/Policy"
+        candidatePolicy:
+          $ref: "#/components/schemas/Policy"
+    PolicySimulationResponse:
+      type: object
+      required: [version, mutatedState, executedProvider, current, candidate, impact, recommendation]
+      properties:
+        version: {type: string}
+        mutatedState: {type: boolean}
+        executedProvider: {type: boolean}
+        current:
+          type: object
+        candidate:
+          type: object
+        impact:
+          type: object
+          properties:
+            routeChanged: {type: boolean}
+            targetChanged: {type: boolean}
+            scoreDelta: {type: [number, "null"]}
+            confidenceDelta: {type: [number, "null"]}
+            latencyDeltaMs: {type: [number, "null"]}
+            costDeltaUsd: {type: [number, "null"]}
+        recommendation:
+          type: string
+          enum: [review_change, no_routing_change]
+
     DecisionOutcomeRequest:
       type: object
       required: [decisionId, outcome]
@@ -597,7 +673,7 @@ components:
 
 # Authorization scopes
 # read: GET /v1/*
-# decide: POST /v1/decide and /v1/hybrid-plan
+# decide: POST /v1/decide, /v1/hybrid-plan and /v1/policies/simulate
 # telemetry: POST /v1/outcomes
 # targets: target registration/removal/heartbeat/probe
 # execute: POST /v1/execute
