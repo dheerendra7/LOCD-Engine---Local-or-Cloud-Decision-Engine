@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createOpenAICompatibleAdapter } from "./openai-compatible.js";
 import { createOllamaAdapter } from "./ollama.js";
+import { normalizeTenantId } from "../../../packages/tenancy/src/index.js";
 
 function requiredString(value, field) {
   if (!value || typeof value !== "string") throw new Error(field + " is required");
