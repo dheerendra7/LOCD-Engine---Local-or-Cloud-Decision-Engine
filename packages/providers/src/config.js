@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createOpenAICompatibleAdapter } from "./openai-compatible.js";
 import { createOllamaAdapter } from "./ollama.js";
+import { createAnthropicAdapter } from "./anthropic.js";
 
 function requiredString(value, field) {
   if (!value || typeof value !== "string") throw new Error(field + " is required");
@@ -31,7 +32,7 @@ function validateProviderConfig(provider) {
   if (provider.mode && !["local", "private", "cloud", "hybrid"].includes(provider.mode)) {
     throw new Error("provider mode is invalid");
   }
-  if (provider.type && !["openai-compatible", "ollama"].includes(provider.type)) {
+  if (provider.type && !["openai-compatible", "ollama", "anthropic"].includes(provider.type)) {
     throw new Error("provider type is invalid");
   }
 }
@@ -42,7 +43,9 @@ export function createProviderFromConfig(config, env = process.env, fetchImpl = 
 
   const Adapter = config.type === "ollama"
     ? createOllamaAdapter
-    : createOpenAICompatibleAdapter;
+    : config.type === "anthropic"
+      ? createAnthropicAdapter
+      : createOpenAICompatibleAdapter;
 
   return Adapter({
     ...config,
