@@ -127,7 +127,7 @@ test("policy simulation is read-only and respects tenant custom policies", async
   const authorizer = createScopedAuthorizer({
     keys: [
       { id: "acme-reader", secret: "acme-reader", tenantId: "acme", scopes: ["read"] },
-      { id: "acme-decider", secret: "acme-decider", tenantId: "acme", scopes: ["decide"] },
+      { id: "acme-decider", secret: "acme-decider", tenantId: "acme", scopes: ["read", "decide"] },
       { id: "beta-decider", secret: "beta-decider", tenantId: "beta", scopes: ["decide"] }
     ]
   });
