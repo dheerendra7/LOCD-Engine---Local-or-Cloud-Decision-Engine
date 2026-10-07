@@ -222,10 +222,9 @@ test("policy simulation is read-only and respects tenant custom policies", async
       })
     });
 
-    assert.equal(beta.status, 200);
+    assert.equal(beta.status, 400);
     const betaBody = await beta.json();
-    assert.equal(betaBody.current.targetId, "cloud");
-    assert.equal(betaBody.candidate.targetId, "cloud");
+    assert.match(betaBody.error, /unknown policy profile/);
 
     const metrics = await fetch(url + "/v1/metrics", {
       headers: { authorization: "Bearer acme-decider" }
