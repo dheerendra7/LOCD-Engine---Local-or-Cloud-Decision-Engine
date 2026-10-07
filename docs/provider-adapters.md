@@ -52,10 +52,12 @@ Example:
       "mode": "cloud",
       "baseUrl": "https://api.anthropic.com",
       "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "tenantId": "acme",
+      "workspaceId": "wrkspc_...",
       "model": "your-anthropic-model-id"
     }
 
-The adapter is intentionally provider-specific at the execution boundary while exposing the same normalized target snapshot and execution contract used by the other providers.
+The adapter is intentionally provider-specific at the execution boundary while exposing the same normalized target snapshot and execution contract used by the other providers. When a configured model is returned by the Models API, its max input context is copied into LOCD's maxContextTokens signal. Workspace selection is sent only through the server-side provider configuration.
 
 ## Native Ollama adapter
 
