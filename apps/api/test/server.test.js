@@ -2349,7 +2349,8 @@ test("concurrent identical idempotency keys reject the in-progress duplicate", a
     },
     async summary() {
       return { totalDecisions: 0 };
-    }
+    },
+    async clear() {}
   };
 
   const scopedServer = createServer({
