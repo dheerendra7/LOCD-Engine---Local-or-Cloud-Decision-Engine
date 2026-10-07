@@ -791,6 +791,82 @@ export function createServer({
         return;
       }
 
+      if (req.method === "POST" && pathname.startsWith("/v1/policies/") && pathname.endsWith("/rollback")) {
+        const policyId = decodeURIComponent(
+          pathname.slice("/v1/policies/".length, -"/rollback".length)
+        );
+        const body = await readBody(req, maxBodyBytes);
+        const replay = await getReplay(body);
+        if (replay) {
+          sendReplay(replay);
+          return;
+        }
+
+        const version = Number(body.version);
+        if (!Number.isInteger(version) || version < 1) {
+          sendJson(res, 400, { error: "policy version must be a positive integer" });
+          return;
+        }
+
+        const history = policyStore.history(tenantId, policyId);
+        const selected = history?.versions?.find(item => item.version === version);
+        if (!selected) {
+          sendJson(res, 404, { error: "policy_version_not_found" });
+          return;
+        }
+
+        const saved = await policyStore.upsert(tenantId, selected.policy, {
+          updatedBy: authContext.keyId || "admin"
+        });
+
+        const responseBody = {
+          ...saved.policy,
+          source: "custom",
+          version: saved.version,
+          updatedAt: saved.updatedAt,
+          updatedBy: saved.updatedBy,
+          rolledBackFromVersion: version
+        };
+
+        await rememberResponse(body, 200, responseBody);
+        sendJson(res, 200, responseBody);
+        return;
+      }
+
+      if (req.method === "PUT" && pathname.startsWith("/v1/policies/")) {
+        const policyId = decodeURIComponent(pathname.slice("/v1/policies/".length));
+        if (!policyId || policyId.endsWith("/history") || policyId.endsWith("/rollback")) {
+          sendJson(res, 400, { error: "policy id is required" });
+          return;
+        }
+
+        const body = await readBody(req, maxBodyBytes);
+        const replay = await getReplay(body);
+        if (replay) {
+          sendReplay(replay);
+          return;
+        }
+
+        const existing = policyStore.get(tenantId, policyId);
+        const payload = { ...body, id: policyId };
+        const saved = await policyStore.upsert(tenantId, payload, {
+          updatedBy: authContext.keyId || "admin"
+        });
+
+        const responseBody = {
+          ...saved.policy,
+          source: "custom",
+          version: saved.version,
+          updatedAt: saved.updatedAt,
+          updatedBy: saved.updatedBy
+        };
+
+        const status = existing ? 200 : 201;
+        await rememberResponse(body, status, responseBody);
+        sendJson(res, status, responseBody);
+        return;
+      }
+
       if (req.method === "DELETE" && pathname.startsWith("/v1/policies/")) {
         const policyId = decodeURIComponent(pathname.slice("/v1/policies/".length));
         if (!policyId) {
