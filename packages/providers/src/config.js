@@ -44,11 +44,13 @@ export function createProviderFromConfig(config, env = process.env, fetchImpl = 
     ? createOllamaAdapter
     : createOpenAICompatibleAdapter;
 
-  return Adapter({
+  const adapter = Adapter({
     ...config,
     apiKey,
     fetchImpl
   });
+  adapter.tenantId = normalizeTenantId(config.tenantId);
+  return adapter;
 }
 
 export async function loadProvidersFromFile(filePath, env = process.env, fetchImpl = globalThis.fetch) {
