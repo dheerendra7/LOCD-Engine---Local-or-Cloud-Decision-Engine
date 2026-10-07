@@ -57,7 +57,9 @@
       "initial": {
         "available": false,
         "health": 0
-      }
+      },
+      "tenantId": "default",
+      "workspaceId": "wrkspc_optional"
     }
   ]
 }
