@@ -2,18 +2,19 @@ function joinUrl(baseUrl, pathname) {
   return String(baseUrl).replace(/\/$/, "") + pathname;
 }
 
-function headers(apiKey, extra = {}) {
+function headers(apiKey, tenantId, extra = {}) {
   return {
     accept: "application/json",
     ...(apiKey ? { authorization: "Bearer " + apiKey } : {}),
+    ...(tenantId ? { "x-locd-tenant-id": String(tenantId) } : {}),
     ...extra
   };
 }
 
-async function request(fetchImpl, baseUrl, apiKey, pathname, options = {}) {
+async function request(fetchImpl, baseUrl, apiKey, pathname, options = {}, tenantId = null) {
   const response = await fetchImpl(joinUrl(baseUrl, pathname), {
     ...options,
-    headers: headers(apiKey, options.headers)
+    headers: headers(apiKey, tenantId, options.headers)
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -44,36 +45,38 @@ export function createHTTPDecisionStore({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(event)
-      });
+      }, event?.tenantId ?? null);
     },
 
-    async recordOutcome(id, patch) {
+    async recordOutcome(id, patch, { tenantId = null } = {}) {
       return request(fetchImpl, baseUrl, apiKey, "/v1/state/outcomes/" + encodeURIComponent(id), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(patch)
-      });
+      }, tenantId);
     },
 
-    async list({ limit = 50 } = {}) {
+    async list({ limit = 50, tenantId = null } = {}) {
       const safeLimit = Math.min(maxEntries, Math.max(1, Number(limit) || 50));
       const response = await request(
         fetchImpl,
         baseUrl,
         apiKey,
-        "/v1/state/decisions?limit=" + safeLimit
+        "/v1/state/decisions?limit=" + safeLimit,
+        {},
+        tenantId
       );
       return response.decisions || [];
     },
 
-    async summary() {
-      return request(fetchImpl, baseUrl, apiKey, "/v1/state/metrics");
+    async summary({ tenantId = null } = {}) {
+      return request(fetchImpl, baseUrl, apiKey, "/v1/state/metrics", {}, tenantId);
     },
 
-    clear() {
+    clear({ tenantId = null } = {}) {
       return request(fetchImpl, baseUrl, apiKey, "/v1/state/telemetry/clear", {
         method: "POST"
-      });
+      }, tenantId);
     }
   };
 
