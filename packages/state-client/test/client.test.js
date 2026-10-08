@@ -112,8 +112,8 @@ test("HTTP policy client maps tenant-scoped CRUD and rollback", async () => {
 
   assert.equal(calls.every(call => call.options.headers.authorization === "Bearer secret"), true);
   assert.equal(calls[0].options.headers["x-locd-tenant-id"], "acme");
-  assert.match(calls[2].url, //history$/);
-  assert.match(calls[4].url, //acme-policy$/);
+  assert.match(calls[2].url, /\/history$/);
+  assert.match(calls[4].url, /\/acme-policy$/);
 });
 
 test("HTTP state client surfaces non-2xx errors", async () => {
