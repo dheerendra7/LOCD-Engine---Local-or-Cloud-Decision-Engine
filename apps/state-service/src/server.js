@@ -13,7 +13,6 @@ function safeEqual(supplied, expected) {
 }
 
 function authorized(req, apiKey) {
-  if (!apiKey) return true;
   const authorization = String(req.headers.authorization || "");
   const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1] || "";
   const headerKey = String(req.headers["x-locd-state-api-key"] || "");
@@ -80,6 +79,9 @@ export function createStateServiceServer({
 } = {}) {
   if (!stores?.telemetry || !stores?.coordination || !stores?.policies) {
     throw new Error("state service telemetry, coordination and policy stores are required");
+  }
+  if (!apiKey || typeof apiKey !== "string" || !apiKey.trim()) {
+    throw new Error("state service apiKey is required");
   }
   if (!Number.isFinite(maxBodyBytes) || maxBodyBytes < 1) {
     throw new Error("maxBodyBytes must be >= 1");
