@@ -1,4 +1,7 @@
-import { backup, DatabaseSync } from "node:sqlite";
+import * as sqlite from "node:sqlite";
+
+const { DatabaseSync } = sqlite;
+const nativeBackup = sqlite.backup;
 import path from "node:path";
 import { access, mkdir, rename, rm } from "node:fs/promises";
 import { mkdirSync } from "node:fs";
@@ -59,10 +62,14 @@ export async function backupSQLiteDatabase({
   }
 
   const temporary = destination + ".tmp-" + process.pid + "-" + Date.now();
+  if (typeof nativeBackup !== "function") {
+    throw new Error("SQLite online backup requires Node.js 22.16 or newer");
+  }
+
   const database = new DatabaseSync(source, { timeout: 5000 });
 
   try {
-    const pages = await backup(database, temporary, { rate });
+    const pages = await nativeBackup(database, temporary, { rate });
 
     if (overwrite) {
       await rm(destination, { force: true });
