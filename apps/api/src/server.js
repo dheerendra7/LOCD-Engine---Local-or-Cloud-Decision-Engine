@@ -466,6 +466,8 @@ export function createServer({
   rateLimiter = null,
   rateLimitMaxRequests = Number(process.env.LOCD_RATE_LIMIT_RPM || 0),
   rateLimitWindowMs = 60_000,
+  authFailureRateLimiter = null,
+  authFailureRateLimitMaxRequests = Number(process.env.LOCD_AUTH_FAILURE_RPM || 30),
   trustProxy = process.env.LOCD_TRUST_PROXY === "true",
   idempotencyLockTtlMs = Number(process.env.LOCD_IDEMPOTENCY_LOCK_TTL_MS || 30_000),
   logger = createLogger({
@@ -492,6 +494,9 @@ export function createServer({
   }
   if (!Number.isFinite(idempotencyLockTtlMs) || idempotencyLockTtlMs < 1) {
     throw new Error("idempotencyLockTtlMs must be >= 1");
+  }
+  if (!Number.isFinite(authFailureRateLimitMaxRequests) || authFailureRateLimitMaxRequests < 0) {
+    throw new Error("authFailureRateLimitMaxRequests must be >= 0");
   }
   if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs < 1) {
     throw new Error("requestTimeoutMs must be >= 1");
@@ -557,6 +562,23 @@ export function createServer({
           windowMs: rateLimitWindowMs
         }));
 
+  const effectiveAuthFailureRateLimiter = authFailureRateLimiter ||
+    (auth.enabled
+      ? (coordinationStore
+        ? createCoordinatedFixedWindowRateLimiter({
+            store: coordinationStore,
+            maxRequests: authFailureRateLimitMaxRequests,
+            windowMs: rateLimitWindowMs
+          })
+        : createRateLimiter({
+            maxRequests: authFailureRateLimitMaxRequests,
+            windowMs: rateLimitWindowMs
+          }))
+      : createRateLimiter({
+          maxRequests: 0,
+          windowMs: rateLimitWindowMs
+        }));
+
   validateProductionSafety({
     strict: productionStrict,
     authEnabled: auth.enabled,
@@ -604,6 +626,22 @@ export function createServer({
         authContext = auth.authorize(req, requiredScope(req.method, pathname));
 
         if (!authContext.ok) {
+          if (authContext.reason === "unauthorized" && effectiveAuthFailureRateLimiter.enabled) {
+            const authRate = await effectiveAuthFailureRateLimiter.consume(
+              getClientKey(req, { trustProxy })
+            );
+            if (!authRate.allowed) {
+              sendJson(res, 429, { error: "auth_rate_limit_exceeded" }, {
+                "retry-after": String(Math.max(
+                  1,
+                  Math.ceil((authRate.resetAt - Date.now()) / 1000)
+                )),
+                "www-authenticate": "Bearer"
+              });
+              return;
+            }
+          }
+
           const status = authContext.reason === "forbidden_scope" ? 403 : 401;
           const body = {
             error: authContext.reason === "forbidden_scope"
