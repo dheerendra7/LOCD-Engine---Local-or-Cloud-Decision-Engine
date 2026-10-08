@@ -19,8 +19,15 @@ function authorized(req, apiKey) {
   return safeEqual(bearer || headerKey, apiKey);
 }
 
+const SECURITY_HEADERS = Object.freeze({
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+  "referrer-policy": "no-referrer"
+});
+
 function sendJson(res, status, body, headers = {}) {
   res.writeHead(status, {
+    ...SECURITY_HEADERS,
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
     ...headers

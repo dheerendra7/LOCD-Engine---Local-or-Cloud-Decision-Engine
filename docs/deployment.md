@@ -115,6 +115,12 @@ Rate limiting is intentionally local to a process; distributed deployments need 
 
 Live execution also requires the API rate limiter to be enabled. Set `LOCD_RATE_LIMIT_RPM` to a positive value (or supply an enabled custom limiter) before enabling live execution; otherwise `POST /v1/execute` returns HTTP 503 without invoking a provider.
 
+## HTTP security headers
+
+The API and internal State Service add `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy: no-referrer` to responses. Browser-served console assets additionally receive a restrictive Content Security Policy allowing only the local application script and inline styles already embedded in the static page.
+
+TLS termination and HSTS remain deployment-layer concerns; configure HSTS at the trusted HTTPS reverse proxy/load balancer rather than enabling it against an HTTP-only local process.
+
 ## Structured logs
 
 LOCD emits structured JSON request lifecycle events to stdout. Use LOCD_LOG_LEVEL to control verbosity. The logger redacts credentials and other sensitive fields and does not log request bodies.
