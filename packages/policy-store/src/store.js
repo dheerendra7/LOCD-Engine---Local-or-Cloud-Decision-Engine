@@ -281,6 +281,12 @@ export function createPolicyStore({
   }
 
   return {
+    capabilities: Object.freeze({
+      durable: false,
+      shared: false,
+      tenantScoped: true,
+      transactional: false
+    }),
     list,
     get,
     effective,
@@ -318,6 +324,12 @@ export async function createFilePolicyStore({
   const enqueuePersist = createPersistenceQueue(persist);
 
   return {
+    capabilities: Object.freeze({
+      durable: true,
+      shared: false,
+      tenantScoped: true,
+      transactional: false
+    }),
     list: store.list,
     get: store.get,
     effective: store.effective,
