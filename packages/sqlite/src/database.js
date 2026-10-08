@@ -71,6 +71,17 @@ export async function backupSQLiteDatabase({
   try {
     const pages = await nativeBackup(database, temporary, { rate });
 
+    const verification = new DatabaseSync(temporary, { timeout: 5000 });
+    try {
+      const integrity = verification.prepare("PRAGMA integrity_check").get()?.integrity_check;
+      const foreignKeys = verification.prepare("PRAGMA foreign_key_check").all();
+      if (integrity !== "ok" || foreignKeys.length > 0) {
+        throw new Error("SQLite backup integrity check failed");
+      }
+    } finally {
+      verification.close();
+    }
+
     if (overwrite) {
       await rm(destination, { force: true });
     }
