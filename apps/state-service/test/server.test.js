@@ -25,6 +25,39 @@ async function startServer(apiKey = "state-secret") {
   };
 }
 
+test("readBody rejects oversized declared content before consuming the stream", async () => {
+  let consumed = false;
+  const request = {
+    headers: { "content-length": "100" },
+    async *[Symbol.asyncIterator]() {
+      consumed = true;
+      yield '{"should":"not be read"}';
+    }
+  };
+
+  await assert.rejects(
+    () => readBody(request, 10),
+    /request body too large/
+  );
+  assert.equal(consumed, false);
+});
+
+test("readBody enforces the limit across streamed chunks", async () => {
+  const request = {
+    headers: {},
+    async *[Symbol.asyncIterator]() {
+      yield "12345";
+      yield "67890";
+      yield "x";
+    }
+  };
+
+  await assert.rejects(
+    () => readBody(request, 10),
+    /request body too large/
+  );
+});
+
 test("state service exposes public health and protects state APIs", async () => {
   const instance = await startServer();
 

@@ -2,6 +2,12 @@
 
 Malformed client input returns a stable 4xx response. Unexpected server or dependency failures return 500 with an `internal_server_error` code and the request ID. The internal error message is logged as a structured server-side event and is not returned to the caller. Use the request ID with deployment logs to correlate the failure without exposing internal credentials, storage paths or dependency details.
 
+## Request size limits
+
+JSON request bodies are bounded by `LOCD_MAX_BODY_BYTES` (default 1 MB). A declared `Content-Length` above the limit is rejected before the request body is consumed. Chunked requests are counted as they arrive and are rejected as soon as the cumulative UTF-8 byte count exceeds the configured limit.
+
+Oversized requests return HTTP 413 with the stable `request body too large` error. This limit protects both the public API and the internal State Service from oversized payload buffering.
+
 # HTTP API
 
 ## GET /health

@@ -29,14 +29,30 @@ function sendJson(res, status, body, headers = {}) {
   res.end(JSON.stringify(body));
 }
 
-async function readBody(req, maxBytes) {
+export async function readBody(req, maxBytes = 1_000_000) {
+  if (!Number.isFinite(maxBytes) || maxBytes < 1) {
+    throw new Error("maxBytes must be >= 1");
+  }
+
+  const declaredLength = Number(req.headers?.["content-length"]);
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    throw new Error("request body too large");
+  }
+
   let body = "";
+  let receivedBytes = 0;
+
   for await (const chunk of req) {
-    body += chunk;
-    if (Buffer.byteLength(body, "utf8") > maxBytes) {
+    const text = typeof chunk === "string"
+      ? chunk
+      : Buffer.from(chunk).toString("utf8");
+    receivedBytes += Buffer.byteLength(text, "utf8");
+    if (receivedBytes > maxBytes) {
       throw new Error("request body too large");
     }
+    body += text;
   }
+
   try {
     return body ? JSON.parse(body) : {};
   } catch {
