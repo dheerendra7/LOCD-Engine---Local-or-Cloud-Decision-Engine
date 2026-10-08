@@ -63,11 +63,12 @@ Before production use, add:
 - managed/shared policy storage with backup and migration controls (the built-in State Service now provides a reference shared policy store)
 - persistent target registry (LOCD_TARGETS_FILE; use durable storage for hosted production)
 - rate limiting
-- structured logs and traces
+- structured logs and traces with request-correlated internal error logging
 - provider credential isolation
 - backups and migration strategy
 - uptime/error monitoring
 - SLOs for the LOCD control plane
+- generic 500 responses with request-correlated server-side diagnostics
 
 The free deployment is a useful demo and evaluation environment, not a production SLA.
 
@@ -103,7 +104,7 @@ Providers remain unavailable until their first successful probe unless explicitl
 
 Use `GET /health` for liveness and `GET /ready` for readiness. Both are intentionally public so load balancers and platform health checks can call them without application credentials.
 
-The application handles SIGTERM/SIGINT and stops the probe scheduler before closing the HTTP listener.
+The application handles SIGTERM/SIGINT and stops the probe scheduler before closing the HTTP listener. Unexpected request failures are logged server-side and returned to clients only as a generic 500 error with the request ID.
 
 ## Telemetry calibration
 
