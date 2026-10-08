@@ -6,8 +6,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -30,39 +29,8 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: Install
         run: npm ci
-      - name: Test (capture)
-        shell: bash
-        run: |
-          set +e
-          npm test > test-output.txt 2>&1
-          code=$?
-          echo "$code" > test-exit-code.txt
-          cat test-output.txt
-          exit 0
-
-      - name: Publish test output branch
-        if: always() && github.event_name == 'pull_request'
-        shell: bash
-        env:
-          NODE_VERSION: ${{ matrix.node }}
-          RUN_ID: ${{ github.run_id }}
-        run: |
-          branch="ci-debug-${RUN_ID}-${NODE_VERSION}"
-          mkdir -p .ci-diagnostic
-          cp test-output.txt ".ci-diagnostic/test-output-node-${NODE_VERSION}.txt"
-          cp test-exit-code.txt ".ci-diagnostic/test-exit-code-node-${NODE_VERSION}.txt"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch --create "$branch"
-          git add .ci-diagnostic
-          git commit -m "ci: capture policy simulator test output"
-          git push --set-upstream origin "$branch"
-
-      - name: Fail when tests fail
-        shell: bash
-        run: |
-          code=$(cat test-exit-code.txt)
-          exit "$code"
+      - name: Test
+        run: npm test
       - name: Syntax lint
         run: npm run lint
       - name: Smoke test
