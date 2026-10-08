@@ -34,6 +34,47 @@ test.after(async () => {
   await new Promise(resolve => server.close(resolve));
 });
 
+test("HTTP server applies production connection and timeout guards", async () => {
+  const guarded = createServer({
+    requestTimeoutMs: 15_000,
+    headersTimeoutMs: 7_000,
+    keepAliveTimeoutMs: 3_000,
+    maxRequestsPerSocket: 25
+  });
+
+  try {
+    assert.equal(guarded.requestTimeout, 15_000);
+    assert.equal(guarded.headersTimeout, 7_000);
+    assert.equal(guarded.keepAliveTimeout, 3_000);
+    assert.equal(guarded.maxRequestsPerSocket, 25);
+  } finally {
+    await new Promise(resolve => guarded.close(resolve));
+  }
+});
+
+test("HTTP server rejects invalid resource guard configuration", () => {
+  assert.throws(
+    () => createServer({ requestTimeoutMs: 0 }),
+    /requestTimeoutMs must be >= 1/
+  );
+  assert.throws(
+    () => createServer({ headersTimeoutMs: 0 }),
+    /headersTimeoutMs must be >= 1/
+  );
+  assert.throws(
+    () => createServer({ requestTimeoutMs: 5_000, headersTimeoutMs: 5_001 }),
+    /headersTimeoutMs must be <= requestTimeoutMs/
+  );
+  assert.throws(
+    () => createServer({ keepAliveTimeoutMs: -1 }),
+    /keepAliveTimeoutMs must be >= 0/
+  );
+  assert.throws(
+    () => createServer({ maxRequestsPerSocket: 1.5 }),
+    /maxRequestsPerSocket must be a non-negative integer/
+  );
+});
+
 test("health endpoint reports service readiness", async () => {
   const response = await fetch(baseUrl + "/health");
   assert.equal(response.status, 200);

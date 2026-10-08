@@ -82,6 +82,17 @@ The server restores targets from this JSON file at startup and writes the file a
 
 The file is an operator-controlled configuration/state artifact. On managed platforms with ephemeral filesystems, attach persistent storage or use a database-backed registry before depending on restart durability.
 
+## HTTP resource guards
+
+The API applies explicit Node.js HTTP resource limits so incomplete requests and idle keep-alive connections cannot consume server resources indefinitely.
+
+- `LOCD_REQUEST_TIMEOUT_MS`: maximum time to receive the full request (default 30 seconds).
+- `LOCD_HEADERS_TIMEOUT_MS`: maximum time to receive HTTP headers (default 10 seconds). It must not exceed the request timeout.
+- `LOCD_KEEP_ALIVE_TIMEOUT_MS`: idle keep-alive timeout (default 5 seconds).
+- `LOCD_MAX_REQUESTS_PER_SOCKET`: maximum requests served per connection; `0` means unlimited.
+
+Tune these with the deployment proxy/load balancer in mind.
+
 ## API hardening configuration
 
 Use LOCD_MAX_BODY_BYTES to cap JSON request size.
