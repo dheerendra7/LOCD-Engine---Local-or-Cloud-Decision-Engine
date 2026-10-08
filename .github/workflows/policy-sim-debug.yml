@@ -1,0 +1,44 @@
+name: Policy simulator diagnostic
+
+on:
+  push:
+    branches: ["feature/policy-simulator-main"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install
+        run: npm ci
+
+      - name: Test with captured output
+        shell: bash
+        run: |
+          set +e
+          npm test > test-output.txt 2>&1
+          code=$?
+          cat test-output.txt
+          exit $code
+
+      - name: Upload test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: policy-sim-test-node-${{ matrix.node }}
+          path: test-output.txt
+          if-no-files-found: error
