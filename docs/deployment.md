@@ -17,6 +17,10 @@ Render currently documents free web services as suitable for testing, hobby proj
 
 Source: https://render.com/docs/free
 
+## CI runner reproducibility
+
+The CI workflow pins GitHub-hosted Linux jobs to `ubuntu-24.04` instead of `ubuntu-latest`. GitHub has announced that `ubuntu-latest` will migrate to Ubuntu 26.04 during October-November 2026, so the explicit label keeps the test environment stable until the project intentionally upgrades it. citeturn163986search10turn163986search0
+
 ## Runtime version
 
 The repository pins Render's Node.js runtime to `24.21.0` through `.node-version`. The package engine range is bounded to Node.js `>=22.16.0 <25`, and the Docker image is pinned to `node:24.21.0-alpine3.24`. CI continues to exercise the supported 22.x and 24.x lines.
