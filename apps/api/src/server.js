@@ -309,7 +309,8 @@ export function createServer({
   calibrator = createCalibrator(),
   calibrationEnabled = process.env.LOCD_CALIBRATION_ENABLED === "true",
   coordinationBackend = null,
-  telemetryBackend = null
+  telemetryBackend = null,
+  policyBackend = null
 } = {}) {
   if (!Number.isFinite(maxBodyBytes) || maxBodyBytes < 1) {
     throw new Error("maxBodyBytes must be >= 1");
@@ -1061,6 +1062,7 @@ export function createServer({
             coordinationBackend: coordinationBackend ||
               (coordinationStore ? "shared" : "process-local"),
             telemetryBackend: telemetryBackend || "process-local",
+            policyBackend: policyBackend || "process-local",
             rateLimitMode: coordinationStore ? "shared" : "process-local",
             idempotencyMode: coordinationStore ? "shared" : "process-local"
           },
@@ -1178,6 +1180,13 @@ if (isMain) {
       : (stateServiceUrl || telemetryFile)
         ? (stateServiceUrl ? "network" : "file")
         : "process-local",
+    policyBackend: stateDbFile
+      ? "sqlite"
+      : stateServiceUrl
+        ? "network"
+        : policyFile
+          ? "file"
+          : "process-local",
     executionEnabled: process.env.LOCD_EXECUTION_ENABLED === "true"
   });
 
