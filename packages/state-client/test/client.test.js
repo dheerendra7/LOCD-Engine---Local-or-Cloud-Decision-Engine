@@ -82,6 +82,7 @@ test("HTTP policy client maps tenant-scoped CRUD and rollback", async () => {
     { id: "acme-policy", version: 1, policy: { id: "acme-policy" }, versions: [] },
     { id: "acme-policy", versions: [{ version: 1 }] },
     { id: "acme-policy", version: 2, policy: { id: "acme-policy" }, versions: [] },
+    { id: "acme-policy", version: 3, policy: { id: "acme-policy" }, versions: [], rolledBackFromVersion: 1 },
     { removed: "acme-policy" }
   ];
   const calls = [];
