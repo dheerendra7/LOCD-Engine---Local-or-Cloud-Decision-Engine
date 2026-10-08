@@ -2,6 +2,20 @@ function joinUrl(baseUrl, pathname) {
   return String(baseUrl).replace(/\/$/, "") + pathname;
 }
 
+function validateTimeout(timeoutMs) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 1) {
+    throw new Error("timeoutMs must be >= 1");
+  }
+  return timeoutMs;
+}
+
+function timeoutError() {
+  const error = new Error("state_service_timeout");
+  error.code = "STATE_SERVICE_TIMEOUT";
+  error.status = 504;
+  return error;
+}
+
 function headers(apiKey, tenantId, extra = {}) {
   return {
     accept: "application/json",
@@ -21,8 +35,8 @@ async function request(
   timeoutMs = 5_000
 ) {
   const signal = AbortSignal.timeout(validateTimeout(timeoutMs));
-
   let response;
+
   try {
     response = await fetchImpl(joinUrl(baseUrl, pathname), {
       ...options,
@@ -106,7 +120,7 @@ export function createHTTPDecisionStore({
     clear({ tenantId = null } = {}) {
       return request(fetchImpl, baseUrl, apiKey, "/v1/state/telemetry/clear", {
         method: "POST"
-      }, tenantId);
+      }, tenantId, timeoutMs);
     }
   };
 
@@ -119,6 +133,10 @@ export function createHTTPPolicyStore({
   fetchImpl = globalThis.fetch,
   timeoutMs = Number(process.env.LOCD_STATE_CLIENT_TIMEOUT_MS || 5_000)
 } = {}) {
+  if (!baseUrl) throw new Error("baseUrl is required");
+  if (typeof fetchImpl !== "function") throw new Error("fetch implementation is required");
+  validateTimeout(timeoutMs);
+
   const policyPath = id => "/v1/state/policies/" + encodeKey(id);
 
   return {
@@ -131,8 +149,7 @@ export function createHTTPPolicyStore({
 
     async list(tenantId) {
       const response = await request(
-        fetchImpl, baseUrl, apiKey, "/v1/state/policies", {}, tenantId,
-        timeoutMs
+        fetchImpl, baseUrl, apiKey, "/v1/state/policies", {}, tenantId, timeoutMs
       );
       return response.policies || [];
     },
@@ -140,8 +157,7 @@ export function createHTTPPolicyStore({
     async get(tenantId, id) {
       try {
         return await request(
-          fetchImpl, baseUrl, apiKey, policyPath(id), {}, tenantId,
-          timeoutMs
+          fetchImpl, baseUrl, apiKey, policyPath(id), {}, tenantId, timeoutMs
         );
       } catch (error) {
         if (error.status === 404) return null;
@@ -152,8 +168,7 @@ export function createHTTPPolicyStore({
     async history(tenantId, id) {
       try {
         return await request(
-          fetchImpl, baseUrl, apiKey, policyPath(id) + "/history", {}, tenantId,
-          timeoutMs
+          fetchImpl, baseUrl, apiKey, policyPath(id) + "/history", {}, tenantId, timeoutMs
         );
       } catch (error) {
         if (error.status === 404) return null;
@@ -232,6 +247,10 @@ export function createHTTPCoordinationStore({
   fetchImpl = globalThis.fetch,
   timeoutMs = Number(process.env.LOCD_STATE_CLIENT_TIMEOUT_MS || 5_000)
 } = {}) {
+  if (!baseUrl) throw new Error("baseUrl is required");
+  if (typeof fetchImpl !== "function") throw new Error("fetch implementation is required");
+  validateTimeout(timeoutMs);
+
   return {
     capabilities: Object.freeze({
       durable: true,
@@ -245,7 +264,8 @@ export function createHTTPCoordinationStore({
         fetchImpl,
         baseUrl,
         apiKey,
-        "/v1/state/kv/" + encodeKey(key)
+        "/v1/state/kv/" + encodeKey(key),
+        null,
         timeoutMs
       );
       return response.value ?? null;
@@ -261,7 +281,9 @@ export function createHTTPCoordinationStore({
           method: "PUT",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ value, ttlMs })
-        }
+        },
+        null,
+        timeoutMs
       ).then(() => true);
     },
 
@@ -275,7 +297,8 @@ export function createHTTPCoordinationStore({
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ value, ttlMs })
-        }
+        },
+        null,
         timeoutMs
       );
       return response.claimed === true;
@@ -287,7 +310,8 @@ export function createHTTPCoordinationStore({
         baseUrl,
         apiKey,
         "/v1/state/kv/" + encodeKey(key),
-        { method: "DELETE" }
+        { method: "DELETE" },
+        null,
         timeoutMs
       );
       return response.deleted === true;
@@ -303,7 +327,8 @@ export function createHTTPCoordinationStore({
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ ttlMs })
-        }
+        },
+        null,
         timeoutMs
       );
       return Number(response.value);
@@ -312,7 +337,7 @@ export function createHTTPCoordinationStore({
     async clear() {
       return request(fetchImpl, baseUrl, apiKey, "/v1/state/coordination/clear", {
         method: "POST"
-      });
+      }, null, timeoutMs);
     }
   };
 }
