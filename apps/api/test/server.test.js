@@ -53,12 +53,13 @@ test("HTTP server applies production connection and timeout guards", async () =>
 });
 
 test("graceful shutdown rejects an invalid timeout", () => {
-  const server = http.createServer();
+  const server = {
+    close() {}
+  };
   assert.throws(
     () => createGracefulShutdown({ server, shutdownTimeoutMs: 0 }),
     /shutdownTimeoutMs must be >= 1/
   );
-  server.close();
 });
 
 test("HTTP server rejects invalid resource guard configuration", () => {
