@@ -52,6 +52,15 @@ test("HTTP server applies production connection and timeout guards", async () =>
   }
 });
 
+test("graceful shutdown rejects an invalid timeout", () => {
+  const server = http.createServer();
+  assert.throws(
+    () => createGracefulShutdown({ server, shutdownTimeoutMs: 0 }),
+    /shutdownTimeoutMs must be >= 1/
+  );
+  server.close();
+});
+
 test("HTTP server rejects invalid resource guard configuration", () => {
   assert.throws(
     () => createServer({ requestTimeoutMs: 0 }),
@@ -2143,6 +2152,50 @@ test("status endpoint respects read authorization scope", async () => {
   } finally {
     await new Promise(resolve => scopedServer.close(resolve));
   }
+});
+
+test("graceful shutdown force-closes active connections after its deadline", async () => {
+  const events = [];
+  let closeCallback;
+  let forcedClose = 0;
+  const server = {
+    close(callback) {
+      closeCallback = callback;
+    },
+    closeAllConnections() {
+      forcedClose += 1;
+      closeCallback();
+    }
+  };
+  const logger = {
+    info(event) {
+      events.push(event.event);
+    },
+    warn(event) {
+      events.push(event.event);
+      assert.equal(event.timeoutMs, 10);
+    },
+    error(event) {
+      events.push(event.event);
+    }
+  };
+  let closed = 0;
+
+  const shutdown = createGracefulShutdown({
+    server,
+    shutdownTimeoutMs: 10,
+    logger,
+    onClosed: async () => { closed += 1; }
+  });
+
+  assert.equal(await shutdown("SIGTERM"), true);
+  assert.equal(forcedClose, 1);
+  assert.equal(closed, 1);
+  assert.deepEqual(events, [
+    "shutdown_started",
+    "shutdown_timeout",
+    "shutdown_complete"
+  ]);
 });
 
 test("graceful shutdown stops scheduler and closes the server only once", async () => {
