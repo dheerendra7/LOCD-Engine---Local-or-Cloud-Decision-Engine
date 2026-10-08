@@ -1,3 +1,4 @@
+// Pure what-if evaluation: no provider execution or decision telemetry.
 import { decide } from "./engine.js";
 
 function finiteOrNull(value) {
