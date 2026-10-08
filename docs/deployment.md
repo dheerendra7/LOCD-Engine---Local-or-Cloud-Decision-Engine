@@ -145,6 +145,10 @@ The SQLite backend tracks schema versions per component in `locd_schema_migratio
 
 Keep migrations backward-compatible and additive where possible. A failed migration rolls back its transaction so the process does not continue on a partially-applied schema.
 
+## SQLite backup and recovery
+
+Use `npm run state:backup -- <source.db> <destination.db>` or the equivalent CLI command to create a native online SQLite backup. The backup refuses to overwrite an existing destination unless `--force` is supplied, and writes through a temporary file before the final rename. Native SQLite online backup support requires Node.js 22.16+; the application itself remains compatible with Node.js 22+.
+
 ## State Service HTTP resource guards
 
 The internal State Service has its own HTTP resource limits so its trust boundary cannot be left unprotected even when it is deployed separately.

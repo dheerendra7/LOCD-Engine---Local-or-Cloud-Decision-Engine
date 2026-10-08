@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
@@ -14,7 +15,23 @@ test("parseArgs extracts base URL and positional arguments", () => {
       idempotencyKey: null,
       live: false,
       includeOutputs: false,
+      force: false,
       positional: ["metrics"]
+    }
+  );
+});
+
+test("parseArgs supports backup force mode", () => {
+  assert.deepEqual(
+    parseArgs(["backup", "state.db", "backup.db", "--force"]),
+    {
+      baseUrl: "http://localhost:8787",
+      apiKey: null,
+      idempotencyKey: null,
+      live: false,
+      includeOutputs: false,
+      force: true,
+      positional: ["backup", "state.db", "backup.db"]
     }
   );
 });
@@ -62,6 +79,37 @@ test("CLI decide loads a JSON request file", async () => {
   assert.equal(calls[0].url, "http://localhost:8787/v1/decide");
   assert.equal(JSON.parse(calls[0].options.body).workload.type, "batch");
   assert.match(output[0], /local/);
+});
+
+test("CLI backup command creates a database copy", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-cli-backup-"));
+  const source = path.join(dir, "source.db");
+  const destination = path.join(dir, "backup.db");
+
+  try {
+    const database = new DatabaseSync(source);
+    database.exec("CREATE TABLE data(key TEXT PRIMARY KEY, value TEXT) STRICT");
+    database.prepare("INSERT INTO data(key, value) VALUES (?, ?)").run("k", "v");
+    database.close();
+
+    const output = [];
+    const code = await runCli(
+      ["backup", source, destination],
+      { write: value => output.push(value) }
+    );
+
+    assert.equal(code, 0);
+    assert.equal(JSON.parse(output[0]).destination, path.resolve(destination));
+
+    const restored = new DatabaseSync(destination);
+    assert.deepEqual(
+      restored.prepare("SELECT value FROM data WHERE key = ?").get("k"),
+      { value: "v" }
+    );
+    restored.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("targets and probe commands use API key headers", async () => {

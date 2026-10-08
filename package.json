@@ -11,7 +11,8 @@
     "test:coverage": "node --test --experimental-test-coverage",
     "lint": "node scripts/lint.mjs",
     "start:state": "node apps/state-service/src/server.js",
-    "dev:state": "node --watch apps/state-service/src/server.js"
+    "dev:state": "node --watch apps/state-service/src/server.js",
+    "state:backup": "node packages/cli/bin/locd.mjs backup"
   },
   "engines": {
     "node": ">=22"

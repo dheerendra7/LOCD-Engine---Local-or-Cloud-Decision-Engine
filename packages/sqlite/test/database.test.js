@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -7,8 +8,73 @@ import {
   createSQLiteCoordinationStore,
   createSQLiteDecisionStore,
   createSQLitePolicyStore,
-  createSQLiteStateStores
+  createSQLiteStateStores,
+  backupSQLiteDatabase
 } from "../src/index.js";
+
+test("sqlite online backup creates a restorable database", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-backup-"));
+  const source = path.join(dir, "state.db");
+  const destination = path.join(dir, "backups", "state-copy.db");
+
+  try {
+    const stores = createSQLiteStateStores({ filePath: source, maxEntries: 10 });
+    stores.telemetry.record({
+      id: "backup-decision",
+      route: "local",
+      workloadType: "backup-test"
+    });
+    await stores.coordination.set("backup-key", { ok: true });
+    stores.close();
+
+    const result = await backupSQLiteDatabase({
+      sourcePath: source,
+      destinationPath: destination
+    });
+
+    assert.equal(result.destination, path.resolve(destination));
+    assert.ok(result.pages > 0);
+
+    const restored = new DatabaseSync(destination);
+    assert.equal(
+      restored.prepare("SELECT COUNT(*) AS count FROM decision_events").get().count,
+      1
+    );
+    assert.equal(
+      restored.prepare("SELECT value FROM coordination_kv WHERE key = ?").get("backup-key").value,
+      JSON.stringify({ ok: true })
+    );
+    restored.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("sqlite backup refuses accidental destination overwrite", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-backup-guard-"));
+  const source = path.join(dir, "state.db");
+  const destination = path.join(dir, "backup.db");
+
+  try {
+    const stores = createSQLiteStateStores({ filePath: source });
+    stores.close();
+    await writeFile(destination, "existing", "utf8");
+
+    await assert.rejects(
+      () => backupSQLiteDatabase({ sourcePath: source, destinationPath: destination }),
+      /backup destination already exists/
+    );
+
+    const result = await backupSQLiteDatabase({
+      sourcePath: source,
+      destinationPath: destination,
+      overwrite: true
+    });
+    assert.ok(result.pages > 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 test("sqlite records component schema versions", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-schema-version-"));

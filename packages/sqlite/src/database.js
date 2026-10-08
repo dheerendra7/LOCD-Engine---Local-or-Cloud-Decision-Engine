@@ -1,5 +1,9 @@
-import { DatabaseSync } from "node:sqlite";
+import * as sqlite from "node:sqlite";
+
+const { DatabaseSync } = sqlite;
+const nativeBackup = sqlite.backup;
 import path from "node:path";
+import { access, mkdir, rename, rm } from "node:fs/promises";
 import { mkdirSync } from "node:fs";
 import { createDecisionStore, normalizeDecisionEvent } from "../../../packages/telemetry/src/store.js";
 import { createPolicyStore } from "../../../packages/policy-store/src/index.js";
@@ -21,6 +25,67 @@ function openDatabase(filePath, { timeout = 5000 } = {}) {
     database.exec("PRAGMA synchronous = NORMAL");
   }
   return database;
+}
+
+export async function backupSQLiteDatabase({
+  sourcePath,
+  destinationPath,
+  rate = 100,
+  overwrite = false
+} = {}) {
+  if (!sourcePath || !destinationPath) {
+    throw new Error("sourcePath and destinationPath are required");
+  }
+  if (sourcePath === ":memory:" || destinationPath === ":memory:") {
+    throw new Error("SQLite backup requires file paths");
+  }
+  if (!Number.isInteger(rate) || rate < 1) {
+    throw new Error("backup rate must be a positive integer");
+  }
+
+  const source = path.resolve(sourcePath);
+  const destination = path.resolve(destinationPath);
+  if (source === destination) {
+    throw new Error("source and destination must be different");
+  }
+
+  await access(source);
+  await mkdir(path.dirname(destination), { recursive: true });
+
+  if (!overwrite) {
+    try {
+      await access(destination);
+      throw new Error("backup destination already exists");
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+
+  const temporary = destination + ".tmp-" + process.pid + "-" + Date.now();
+  if (typeof nativeBackup !== "function") {
+    throw new Error("SQLite online backup requires Node.js 22.16 or newer");
+  }
+
+  const database = new DatabaseSync(source, { timeout: 5000 });
+
+  try {
+    const pages = await nativeBackup(database, temporary, { rate });
+
+    if (overwrite) {
+      await rm(destination, { force: true });
+    }
+
+    await rename(temporary, destination);
+    return {
+      destination,
+      pages
+    };
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => {});
+    throw error;
+  } finally {
+    database.close();
+  }
 }
 
 function purgeExpired(database, now = Date.now()) {

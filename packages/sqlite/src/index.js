@@ -1,4 +1,5 @@
 export {
+  backupSQLiteDatabase,
   createSQLitePolicyStore,
   createSQLiteCoordinationStore,
   createSQLiteDecisionStore,
