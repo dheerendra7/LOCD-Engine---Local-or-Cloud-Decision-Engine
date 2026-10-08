@@ -160,7 +160,12 @@ async function refreshTargets() {
 }
 
 async function refreshPolicies() {
-  const select = document.querySelector("#policyProfile");
+  const selectors = [
+    document.querySelector("#policyProfile"),
+    document.querySelector("#simulationCurrentPolicy"),
+    document.querySelector("#simulationCandidatePolicy")
+  ].filter(Boolean);
+  const previous = selectors.map(select => select.value);
 
   try {
     const response = await fetch("/v1/policies", {
@@ -170,15 +175,124 @@ async function refreshPolicies() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Policy catalog unavailable");
 
-    const profiles = Array.isArray(data.policies) ? data.policies : [];
-    select.innerHTML = profiles.map(profile =>
+    const profiles = Array.isArray(data.policies) && data.policies.length
+      ? data.policies
+      : [{ id: "balanced", name: "Balanced" }];
+    const options = profiles.map(profile =>
       '<option value="' + escapeHtml(profile.id) + '">' +
       escapeHtml(profile.name || profile.id) +
       "</option>"
-    ).join("") || '<option value="balanced">Balanced</option>';
+    ).join("");
+
+    selectors.forEach((select, index) => {
+      select.innerHTML = options;
+      if (profiles.some(profile => profile.id === previous[index])) {
+        select.value = previous[index];
+      }
+    });
   } catch {
-    select.innerHTML = '<option value="balanced">Balanced</option>';
+    selectors.forEach(select => {
+      select.innerHTML = '<option value="balanced">Balanced</option>';
+    });
   }
+}
+
+function formatDelta(value, unit = "", digits = 3) {
+  if (!Number.isFinite(Number(value))) return "—";
+  const number = Number(value);
+  const sign = number > 0 ? "+" : "";
+  return sign + number.toFixed(digits) + unit;
+}
+
+function renderSimulation(result) {
+  const root = document.querySelector("#simulationOutput");
+  const impact = result.impact || {};
+  const current = result.current || {};
+  const candidate = result.candidate || {};
+  const reasonDiff = impact.reasons || { added: [], removed: [] };
+  const policyDiff = impact.policyRules || { added: [], removed: [] };
+  const rejectedDiff = impact.rejectedReasons || { added: [], removed: [] };
+
+  const pills = values => values?.length
+    ? values.map(value => '<span class="pill">' + escapeHtml(value) + "</span>").join("")
+    : '<span class="status">None</span>';
+
+  root.innerHTML = `
+    <div class="toolbar">
+      <div>
+        <div class="eyebrow">Recommendation</div>
+        <h3 style="margin:4px 0 0">${escapeHtml(
+          result.recommendation === "review_change"
+            ? "Review before rollout"
+            : "No routing change detected"
+        )}</h3>
+      </div>
+      <span class="pill">${escapeHtml(
+        result.mutatedState === false && result.executedProvider === false
+          ? "read-only"
+          : "unexpected side effect"
+      )}</span>
+    </div>
+
+    <div class="diff-grid">
+      <div class="metric">
+        <span class="status">Route</span>
+        <strong>${escapeHtml(current.route || "none")} → ${escapeHtml(candidate.route || "none")}</strong>
+      </div>
+      <div class="metric">
+        <span class="status">Target</span>
+        <strong>${escapeHtml(current.targetId || "none")} → ${escapeHtml(candidate.targetId || "none")}</strong>
+      </div>
+      <div class="metric">
+        <span class="status">Score delta</span>
+        <strong>${escapeHtml(formatDelta(impact.scoreDelta))}</strong>
+      </div>
+      <div class="metric">
+        <span class="status">Latency delta</span>
+        <strong>${escapeHtml(formatDelta(impact.latencyDeltaMs, " ms"))}</strong>
+      </div>
+    </div>
+
+    <div class="change-grid">
+      <div class="change">
+        <strong>Confidence</strong>
+        <div class="status">${escapeHtml(formatDelta(impact.confidenceDelta))}</div>
+      </div>
+      <div class="change">
+        <strong>Estimated cost</strong>
+        <div class="status">${escapeHtml(formatDelta(impact.costDeltaUsd, " USD"))}</div>
+      </div>
+    </div>
+
+    <div class="change">
+      <strong>Reason changes</strong>
+      <div class="status" style="margin-top:6px">Added</div>
+      <div>${pills(reasonDiff.added)}</div>
+      <div class="status" style="margin-top:8px">Removed</div>
+      <div>${pills(reasonDiff.removed)}</div>
+    </div>
+
+    <div class="change">
+      <strong>Policy-rule changes</strong>
+      <div class="status" style="margin-top:6px">Added</div>
+      <div>${pills(policyDiff.added)}</div>
+      <div class="status" style="margin-top:8px">Removed</div>
+      <div>${pills(policyDiff.removed)}</div>
+    </div>
+
+    <div class="change">
+      <strong>Rejected-reason changes</strong>
+      <div class="status" style="margin-top:6px">Added</div>
+      <div>${pills(rejectedDiff.added)}</div>
+      <div class="status" style="margin-top:8px">Removed</div>
+      <div>${pills(rejectedDiff.removed)}</div>
+    </div>
+
+    <details style="margin-top:14px">
+      <summary>Raw simulation JSON</summary>
+      <pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre>
+    </details>
+  `;
 }
 
 async function refreshMetrics() {
@@ -318,3 +432,71 @@ document.querySelector("#apiKey").addEventListener("change", refreshAll);
 document.querySelector("#refreshAll").addEventListener("click", refreshAll);
 
 refreshAll();
+
+
+document.querySelector("#simulatePolicy").addEventListener("click", async event => {
+  const button = event.currentTarget;
+  const status = document.querySelector("#simulationStatus");
+  const simulationOutput = document.querySelector("#simulationOutput");
+  button.disabled = true;
+  status.textContent = "Running deterministic comparison…";
+  simulationOutput.textContent = "Comparing current and candidate policies…";
+
+  try {
+    const privacyOverride = document.querySelector("#privacyMode").value;
+    const basePolicy = {
+      profile: document.querySelector("#simulationCurrentPolicy").value
+    };
+    const candidatePolicy = {
+      profile: document.querySelector("#simulationCandidatePolicy").value
+    };
+
+    if (privacyOverride) {
+      basePolicy.sensitiveDataMode = privacyOverride;
+      candidatePolicy.sensitiveDataMode = privacyOverride;
+    }
+
+    const body = {
+      workload: {
+        type: document.querySelector("#workloadType").value.trim(),
+        sensitivity: document.querySelector("#sensitivity").value,
+        requiredCapabilities: ["text-generation"]
+      },
+      constraints: {
+        latencyBudgetMs: Number(document.querySelector("#latency").value),
+        maxCostUsd: Number(document.querySelector("#cost").value),
+        strictLatency: true,
+        strictCost: true
+      },
+      currentPolicy: basePolicy,
+      candidatePolicy
+    };
+
+    if (!body.workload.type) throw new Error("Workload type is required");
+
+    const idempotencyKey = globalThis.crypto?.randomUUID?.()
+      || "simulation-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+
+    const response = await fetch("/v1/policies/simulate", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": idempotencyKey,
+        ...apiHeaders()
+      },
+      body: JSON.stringify(body)
+    });
+
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Policy simulation failed");
+
+    renderSimulation(result);
+    status.textContent = "Comparison complete · read-only";
+  } catch (error) {
+    status.textContent = "Simulation failed";
+    simulationOutput.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
