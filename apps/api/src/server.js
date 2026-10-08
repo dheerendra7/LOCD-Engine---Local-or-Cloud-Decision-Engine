@@ -70,8 +70,15 @@ function requiredScope(method, pathname) {
   return "admin";
 }
 
+const SECURITY_HEADERS = Object.freeze({
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+  "referrer-policy": "no-referrer"
+});
+
 function sendJson(res, status, body, extraHeaders = {}) {
   res.writeHead(status, {
+    ...SECURITY_HEADERS,
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
     ...extraHeaders
@@ -146,6 +153,8 @@ async function serveWeb(res, pathname) {
     };
     const type = types[extension] || "text/plain";
     res.writeHead(200, {
+      ...SECURITY_HEADERS,
+      "content-security-policy": "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self';",
       "content-type": type + "; charset=utf-8",
       "cache-control": "no-store"
     });
