@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createStateServiceServer } from "../src/server.js";
+import { createGracefulShutdown, createStateServiceServer } from "../src/server.js";
 import { createSQLiteStateStores } from "../../../packages/sqlite/src/index.js";
 
 async function startServer(apiKey = "state-secret") {
@@ -56,6 +56,55 @@ test("readBody enforces the limit across streamed chunks", async () => {
     () => readBody(request, 10),
     /request body too large/
   );
+});
+
+test("state service graceful shutdown force-closes active connections after its deadline", async () => {
+  const events = [];
+  let closeCallback;
+  let forcedClose = 0;
+  let storesClosed = 0;
+  const server = {
+    close(callback) {
+      closeCallback = callback;
+    },
+    closeAllConnections() {
+      forcedClose += 1;
+      closeCallback();
+    }
+  };
+  const stores = {
+    close() {
+      storesClosed += 1;
+    }
+  };
+  const logger = {
+    info(event) {
+      events.push(event.event);
+    },
+    warn(event) {
+      events.push(event.event);
+      assert.equal(event.timeoutMs, 10);
+    },
+    error(event) {
+      events.push(event.event);
+    }
+  };
+
+  const shutdown = createGracefulShutdown({
+    server,
+    stores,
+    logger,
+    shutdownTimeoutMs: 10
+  });
+
+  assert.equal(await shutdown("SIGTERM"), true);
+  assert.equal(forcedClose, 1);
+  assert.equal(storesClosed, 1);
+  assert.deepEqual(events, [
+    "shutdown_started",
+    "shutdown_timeout",
+    "shutdown_complete"
+  ]);
 });
 
 test("state service exposes public health and protects state APIs", async () => {
