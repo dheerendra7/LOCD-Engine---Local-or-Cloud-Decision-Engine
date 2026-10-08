@@ -92,6 +92,64 @@ test("malformed JSON returns a client error", async () => {
   assert.deepEqual(await response.json(), { error: "invalid JSON" });
 });
 
+test("unexpected dependency failures return a generic 500 without leaking internals", async () => {
+  const policyStore = createPolicyStore();
+  policyStore.get = async () => {
+    throw new Error("database credential leaked in internal failure");
+  };
+
+  const failingServer = createServer({
+    policyStore,
+    authorizer: createScopedAuthorizer({
+      keys: [
+        {
+          id: "decision",
+          secret: "decision-secret",
+          tenantId: "default",
+          scopes: ["decide"]
+        }
+      ]
+    })
+  });
+
+  await new Promise(resolve => failingServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + failingServer.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer decision-secret",
+        "content-type": "application/json",
+        "x-request-id": "error-contract-test"
+      },
+      body: JSON.stringify({
+        workload: { type: "classification", sensitivity: "low" },
+        policy: { profile: "custom-policy" },
+        targets: [
+          {
+            id: "local",
+            mode: "local",
+            health: 1,
+            capacity: 0.1,
+            privacy: 1,
+            estimatedLatencyMs: 20,
+            estimatedCostUsd: 0
+          }
+        ]
+      })
+    });
+
+    assert.equal(response.status, 500);
+    const body = await response.json();
+    assert.equal(body.error, "internal_server_error");
+    assert.equal(body.requestId, "error-contract-test");
+    assert.equal("database credential leaked in internal failure" in JSON.stringify(body), false);
+  } finally {
+    await new Promise(resolve => failingServer.close(resolve));
+  }
+});
+
 test("unsupported methods are rejected", async () => {
   const response = await fetch(baseUrl + "/v1/decide", { method: "PUT" });
   assert.equal(response.status, 405);
