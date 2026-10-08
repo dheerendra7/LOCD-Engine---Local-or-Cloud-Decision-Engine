@@ -292,7 +292,9 @@ export function createStateServiceServer({
         method: req.method,
         path: req.url,
         errorClass: error instanceof Error ? error.constructor.name : "unknown_error",
-        errorMessage: error instanceof Error ? error.message : String(error)
+        errorCode: error && typeof error === "object" && "code" in error
+          ? String(error.code)
+          : null
       });
       sendJson(res, 500, {
         error: "internal_server_error",
