@@ -9,9 +9,20 @@ paths:
   /ready:
     get:
       summary: Readiness probe
+      description: Checks critical backing stores before an instance is considered ready for traffic.
       responses:
         "200":
           description: API is ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Readiness"
+        "503":
+          description: API is not ready because a critical dependency check failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Readiness"
   /health:
     get:
       summary: Service health
@@ -585,6 +596,23 @@ components:
         targetUtilization: {type: [number, "null"], minimum: 0, maximum: 1}
         errorClass: {type: string}
         timestamp: {type: string, format: date-time}
+    Readiness:
+      type: object
+      required: [status, service, version, checks]
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
+        service:
+          type: string
+        version:
+          type: string
+        checks:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [ok, failed, not_configured]
+
     Health:
       type: object
       properties:
