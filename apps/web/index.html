@@ -48,9 +48,14 @@
     ul { padding-left: 18px; color: #bac4db; line-height: 1.7; }
     pre { overflow: auto; background: #0a0f1c; border: 1px solid #27314a; border-radius: 12px; padding: 14px; font-size: 12px; }
     .full { grid-column: 1 / -1; }
+    .diff-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+    .diff-grid .metric strong { font-size: 18px; }
+    .change { margin-top: 14px; padding: 12px; border: 1px solid #27314a; border-radius: 12px; background: #0c1220; }
+    .change-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
     @media (max-width: 920px) {
       header { display: block; }
       .grid.two, .grid.three { grid-template-columns: 1fr; }
+      .diff-grid, .change-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -77,6 +82,7 @@
         <div class="metric"><span class="status">Decisions</span><strong id="decisionCount">—</strong></div>
         <div class="metric"><span class="status">Success rate</span><strong id="successRate">—</strong></div>
       </div>
+      <div id="metrics" class="status" style="margin-top:10px"></div>
     </section>
 
     <div class="grid two">
@@ -128,6 +134,35 @@
       <section class="card result" aria-live="polite">
         <div class="eyebrow">Engine output</div>
         <div id="output" class="muted">Ready. Register or load targets, then evaluate a workload.</div>
+      </section>
+
+      <section class="card full" aria-live="polite">
+        <div class="toolbar">
+          <div>
+            <div class="eyebrow">Policy what-if</div>
+            <h2 style="margin:4px 0 0">Simulate a policy change safely</h2>
+          </div>
+          <div id="simulationStatus" class="status">Read-only · no execution</div>
+        </div>
+        <p class="muted">Compares the current and candidate policy against the same workload and registered targets. The simulator never executes a provider or records decision telemetry.</p>
+        <div class="grid three">
+          <label>
+            Current policy
+            <select id="simulationCurrentPolicy">
+              <option value="balanced">Balanced</option>
+            </select>
+          </label>
+          <label>
+            Candidate policy
+            <select id="simulationCandidatePolicy">
+              <option value="balanced">Balanced</option>
+            </select>
+          </label>
+          <div style="display:flex;align-items:end">
+            <button id="simulatePolicy">Compare policies</button>
+          </div>
+        </div>
+        <div id="simulationOutput" class="muted" style="margin-top:14px">Choose two policies and run a what-if comparison.</div>
       </section>
 
       <section class="card full">
