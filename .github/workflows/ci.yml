@@ -30,25 +30,18 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: Install
         run: npm ci
-      - name: Test
+      - name: Test (capture)
         shell: bash
         run: |
           set +e
           npm test > test-output.txt 2>&1
           code=$?
+          echo "$code" > test-exit-code.txt
           cat test-output.txt
-          exit $code
-
-      - name: Upload test output on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-output-node-${{ matrix.node }}
-          path: test-output.txt
-          if-no-files-found: error
+          exit 0
 
       - name: Publish test diagnostics
-        if: failure() && github.event_name == 'pull_request'
+        if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
@@ -56,8 +49,13 @@ jobs:
             const output = fs.existsSync("test-output.txt")
               ? fs.readFileSync("test-output.txt", "utf8")
               : "test-output.txt was not created";
+            const code = fs.existsSync("test-exit-code.txt")
+              ? fs.readFileSync("test-exit-code.txt", "utf8").trim()
+              : "unknown";
             const body = [
               "### CI test diagnostics",
+              "",
+              `exit code: ${code}`,
               "",
               "```text",
               output.slice(-60000),
@@ -69,6 +67,12 @@ jobs:
               issue_number: context.issue.number,
               body
             });
+
+      - name: Fail when tests fail
+        shell: bash
+        run: |
+          code=$(cat test-exit-code.txt)
+          exit "$code"
       - name: Syntax lint
         run: npm run lint
       - name: Smoke test
