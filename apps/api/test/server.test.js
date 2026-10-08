@@ -171,6 +171,26 @@ test("API replaces unsafe caller request IDs with a generated ID", async () => {
   assert.match(requestId, /^[0-9a-f-]{36}$/);
   assert.equal(requestId.includes("\n"), false);
 });
+test("API responses include browser security headers", async () => {
+  const health = await fetch(baseUrl + "/health");
+  assert.equal(health.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(health.headers.get("x-frame-options"), "DENY");
+  assert.equal(health.headers.get("referrer-policy"), "no-referrer");
+
+  const page = await fetch(baseUrl + "/");
+  assert.equal(page.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(page.headers.get("x-frame-options"), "DENY");
+  assert.equal(page.headers.get("referrer-policy"), "no-referrer");
+  assert.match(
+    page.headers.get("content-security-policy") || "",
+    /default-src 'none'/
+  );
+  assert.match(
+    page.headers.get("content-security-policy") || "",
+    /script-src 'self'/
+  );
+});
+
 test("health endpoint reports service readiness", async () => {
   const response = await fetch(baseUrl + "/health");
   assert.equal(response.status, 200);
