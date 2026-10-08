@@ -1,3 +1,11 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { createFilePolicyStore, createPolicyStore } from "../src/index.js";
+import { createPersistenceQueue } from "../src/store.js";
+
 test("policy stores expose persistence capabilities", async () => {
   const memory = createPolicyStore();
   assert.deepEqual(memory.capabilities, {
@@ -22,14 +30,6 @@ test("policy stores expose persistence capabilities", async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
-
-import test from "node:test";
-import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { createFilePolicyStore, createPolicyStore } from "../src/index.js";
-import { createPersistenceQueue } from "../src/store.js";
 
 const policy = {
   id: "acme-fast",
