@@ -221,6 +221,25 @@ export function createPolicyStore({
     return clonePolicy(record);
   }
 
+  function rollback(tenantId, id, version, metadata = {}) {
+    const normalizedTenantId = normalizeTenantId(tenantId);
+    const policyId = String(id || "").trim().toLowerCase();
+    const selectedVersion = Number(version);
+    if (!Number.isInteger(selectedVersion) || selectedVersion < 1) {
+      throw new Error("policy version must be a positive integer");
+    }
+
+    const record = state.tenants[normalizedTenantId]?.policies?.[policyId];
+    const selected = record?.versions?.find(item => item.version === selectedVersion);
+    if (!selected) return null;
+
+    const restored = upsert(normalizedTenantId, selected.policy, metadata);
+    return {
+      ...restored,
+      rolledBackFromVersion: selectedVersion
+    };
+  }
+
   function remove(tenantId, id) {
     const normalizedTenantId = normalizeTenantId(tenantId);
     const policyId = String(id || "").trim().toLowerCase();
@@ -267,6 +286,7 @@ export function createPolicyStore({
     effective,
     history,
     upsert,
+    rollback,
     remove,
     exportState,
     importState
@@ -304,6 +324,12 @@ export async function createFilePolicyStore({
     history: store.history,
     async upsert(tenantId, input, metadata) {
       const result = store.upsert(tenantId, input, metadata);
+      await enqueuePersist(store.exportState());
+      return result;
+    },
+    async rollback(tenantId, id, version, metadata) {
+      const result = store.rollback(tenantId, id, version, metadata);
+      if (!result) return null;
       await enqueuePersist(store.exportState());
       return result;
     },
