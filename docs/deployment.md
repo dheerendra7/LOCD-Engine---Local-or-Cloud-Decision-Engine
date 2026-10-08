@@ -139,6 +139,15 @@ The SQLite path uses Node's built-in node:sqlite, WAL mode and a busy timeout fo
 
 When LOCD_STATE_DB_FILE is set, it becomes the source for telemetry persistence and coordination-backed rate limiting/idempotency.
 
+## State Service HTTP resource guards
+
+The internal State Service has its own HTTP resource limits so its trust boundary cannot be left unprotected even when it is deployed separately.
+
+- `LOCD_STATE_SERVICE_REQUEST_TIMEOUT_MS`: maximum time to receive a complete request (default 30 seconds).
+- `LOCD_STATE_SERVICE_HEADERS_TIMEOUT_MS`: maximum time to receive HTTP headers (default 10 seconds); it must not exceed the request timeout.
+- `LOCD_STATE_SERVICE_KEEP_ALIVE_TIMEOUT_MS`: idle keep-alive timeout (default 5 seconds).
+- `LOCD_STATE_SERVICE_MAX_REQUESTS_PER_SOCKET`: maximum requests per connection; `0` means unlimited.
+
 ## Network coordination service
 
 For multiple LOCD API instances on different hosts, set LOCD_COORDINATION_URL and LOCD_COORDINATION_API_KEY to use the reference network state service.
