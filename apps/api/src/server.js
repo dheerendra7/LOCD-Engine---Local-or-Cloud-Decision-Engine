@@ -145,10 +145,14 @@ export function createGracefulShutdown({
   server,
   probeScheduler = null,
   logger = createLogger({ level: "info" }),
-  onClosed = null
+  onClosed = null,
+  shutdownTimeoutMs = Number(process.env.LOCD_SHUTDOWN_TIMEOUT_MS || 10_000)
 } = {}) {
   if (!server || typeof server.close !== "function") {
     throw new Error("server is required");
+  }
+  if (!Number.isFinite(shutdownTimeoutMs) || shutdownTimeoutMs < 1) {
+    throw new Error("shutdownTimeoutMs must be >= 1");
   }
 
   let shuttingDown = false;
@@ -160,14 +164,22 @@ export function createGracefulShutdown({
     }
 
     shuttingDown = true;
-    logger.info({ event: "shutdown_started", signal });
+    let forced = false;
+    let settled = false;
+    let timer = null;
 
-    if (probeScheduler) probeScheduler.stop();
+    const finish = async () => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
 
-    server.close(async () => {
       try {
         if (typeof onClosed === "function") await onClosed();
-        logger.info({ event: "shutdown_complete", signal });
+        logger.info({
+          event: "shutdown_complete",
+          signal,
+          forced
+        });
         resolve(true);
       } catch (error) {
         logger.error({
@@ -176,6 +188,35 @@ export function createGracefulShutdown({
         });
         resolve(false);
       }
+    };
+
+    logger.info({ event: "shutdown_started", signal });
+
+    if (probeScheduler) probeScheduler.stop();
+
+    timer = setTimeout(() => {
+      if (settled) return;
+
+      forced = true;
+      logger.warn({
+        event: "shutdown_timeout",
+        signal,
+        timeoutMs: shutdownTimeoutMs
+      });
+
+      if (typeof server.closeAllConnections === "function") {
+        server.closeAllConnections();
+      } else {
+        logger.error({
+          event: "shutdown_force_close_unavailable",
+          signal
+        });
+        void finish();
+      }
+    }, shutdownTimeoutMs);
+
+    server.close(() => {
+      void finish();
     });
   });
 }

@@ -320,6 +320,75 @@ export function createStateServiceServer({
   });
 }
 
+export function createGracefulShutdown({
+  server,
+  stores = null,
+  logger = createLogger({ level: "info" }),
+  shutdownTimeoutMs = Number(process.env.LOCD_SHUTDOWN_TIMEOUT_MS || 10_000)
+} = {}) {
+  if (!server || typeof server.close !== "function") {
+    throw new Error("server is required");
+  }
+  if (!Number.isFinite(shutdownTimeoutMs) || shutdownTimeoutMs < 1) {
+    throw new Error("shutdownTimeoutMs must be >= 1");
+  }
+
+  let shuttingDown = false;
+
+  return signal => new Promise(resolve => {
+    if (shuttingDown) {
+      resolve(false);
+      return;
+    }
+
+    shuttingDown = true;
+    let forced = false;
+    let settled = false;
+    let timer = null;
+
+    const finish = async () => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+
+      try {
+        if (stores && typeof stores.close === "function") stores.close();
+        logger.info({ event: "shutdown_complete", signal, forced });
+        resolve(true);
+      } catch (error) {
+        logger.error({
+          event: "shutdown_close_error",
+          errorClass: error instanceof Error ? error.message : "shutdown_close_error"
+        });
+        resolve(false);
+      }
+    };
+
+    logger.info({ event: "shutdown_started", signal });
+
+    timer = setTimeout(() => {
+      if (settled) return;
+      forced = true;
+      logger.warn({
+        event: "shutdown_timeout",
+        signal,
+        timeoutMs: shutdownTimeoutMs
+      });
+
+      if (typeof server.closeAllConnections === "function") {
+        server.closeAllConnections();
+      } else {
+        logger.error({ event: "shutdown_force_close_unavailable", signal });
+        void finish();
+      }
+    }, shutdownTimeoutMs);
+
+    server.close(() => {
+      void finish();
+    });
+  });
+}
+
 const isMain = process.argv[1] && process.argv[1].endsWith("/apps/state-service/src/server.js");
 
 if (isMain) {
@@ -340,10 +409,12 @@ if (isMain) {
     console.log("LOCD State Service listening on 0.0.0.0:" + port);
   });
 
-  const close = () => {
-    server.close(() => stores.close());
-  };
+  const shutdown = createGracefulShutdown({
+    server,
+    stores,
+    shutdownTimeoutMs: Number(process.env.LOCD_SHUTDOWN_TIMEOUT_MS || 10_000)
+  });
 
-  process.once("SIGTERM", close);
-  process.once("SIGINT", close);
+  process.once("SIGTERM", () => { void shutdown("SIGTERM"); });
+  process.once("SIGINT", () => { void shutdown("SIGINT"); });
 }
