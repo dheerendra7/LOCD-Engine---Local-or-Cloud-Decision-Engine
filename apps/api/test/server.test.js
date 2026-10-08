@@ -62,6 +62,10 @@ test("HTTP server rejects invalid resource guard configuration", () => {
     /headersTimeoutMs must be >= 1/
   );
   assert.throws(
+    () => createServer({ requestTimeoutMs: 5_000, headersTimeoutMs: 5_001 }),
+    /headersTimeoutMs must be <= requestTimeoutMs/
+  );
+  assert.throws(
     () => createServer({ keepAliveTimeoutMs: -1 }),
     /keepAliveTimeoutMs must be >= 0/
   );
