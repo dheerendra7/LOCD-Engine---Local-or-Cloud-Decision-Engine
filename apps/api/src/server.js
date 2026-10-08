@@ -1084,7 +1084,8 @@ export function createServer({
 
       sendJson(res, 405, { error: "method_not_allowed" });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "bad_request";
+      const message = error instanceof Error ? error.message : "internal_server_error";
+
       if (message === "idempotency_key_reused") {
         sendJson(res, 409, { error: message });
         return;
@@ -1097,7 +1098,23 @@ export function createServer({
         sendJson(res, 413, { error: message });
         return;
       }
-      sendJson(res, 400, { error: message });
+      if (message === "invalid JSON") {
+        sendJson(res, 400, { error: message });
+        return;
+      }
+
+      logger.error({
+        event: "http_request_error",
+        requestId,
+        method: req.method,
+        path: pathname,
+        errorClass: error instanceof Error ? error.constructor.name : "unknown_error",
+        errorMessage: error instanceof Error ? error.message : String(error)
+      });
+      sendJson(res, 500, {
+        error: "internal_server_error",
+        requestId
+      });
     }
   });
 }
