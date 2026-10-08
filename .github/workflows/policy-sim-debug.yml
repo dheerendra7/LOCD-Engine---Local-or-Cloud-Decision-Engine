@@ -3,6 +3,8 @@ name: Policy simulator diagnostic
 on:
   push:
     branches: ["feature/policy-simulator-main"]
+  pull_request:
+    branches: ["main"]
 
 permissions:
   contents: read
