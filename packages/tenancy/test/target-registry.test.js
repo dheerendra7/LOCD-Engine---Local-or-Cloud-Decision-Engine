@@ -53,6 +53,33 @@ test("tenant target file preserves per-tenant state", async () => {
   }
 });
 
+test("concurrent target file saves are serialized without losing state", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-target-save-race-"));
+  const file = path.join(dir, "targets.json");
+
+  try {
+    const registry = createTenantTargetRegistry();
+    registry.forTenant("acme").register(target("gpu-a"));
+    registry.forTenant("beta").register(target("gpu-b"));
+
+    await Promise.all(
+      Array.from({ length: 20 }, (_, index) => registry.saveToFile(file + (index % 2 ? "" : "")))
+    );
+
+    const raw = JSON.parse(await readFile(file, "utf8"));
+    assert.deepEqual(
+      raw.tenants.acme.map(item => item.id),
+      ["gpu-a"]
+    );
+    assert.deepEqual(
+      raw.tenants.beta.map(item => item.id),
+      ["gpu-b"]
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("legacy target array loads into default tenant", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "locd-tenant-targets-legacy-"));
   const file = path.join(dir, "targets.json");
