@@ -371,10 +371,11 @@ export function createServer({
     const requestId = createRequestId(req.headers["x-request-id"]);
     const startedAt = process.hrtime.bigint();
     let requestLogWritten = false;
+    let pathname = "unknown";
 
     try {
       const url = new URL(req.url || "/", "http://localhost");
-      const pathname = url.pathname;
+      pathname = url.pathname;
 
       const originalEnd = res.end.bind(res);
       res.end = (...args) => {
