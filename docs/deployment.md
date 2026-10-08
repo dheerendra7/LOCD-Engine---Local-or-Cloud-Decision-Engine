@@ -139,6 +139,12 @@ The SQLite path uses Node's built-in node:sqlite, WAL mode and a busy timeout fo
 
 When LOCD_STATE_DB_FILE is set, it becomes the source for telemetry persistence and coordination-backed rate limiting/idempotency.
 
+## SQLite schema migrations
+
+The SQLite backend tracks schema versions per component in `locd_schema_migrations`. Database initialization applies any missing migrations before the store is used. Existing legacy decision databases are upgraded in place for tenant and utilization fields, while new databases start at the latest component schema.
+
+Keep migrations backward-compatible and additive where possible. A failed migration rolls back its transaction so the process does not continue on a partially-applied schema.
+
 ## State Service HTTP resource guards
 
 The internal State Service has its own HTTP resource limits so its trust boundary cannot be left unprotected even when it is deployed separately.
