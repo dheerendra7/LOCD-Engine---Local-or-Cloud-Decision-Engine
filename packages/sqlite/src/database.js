@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { mkdirSync } from "node:fs";
 import { createDecisionStore, normalizeDecisionEvent } from "../../../packages/telemetry/src/store.js";
+import { createPolicyStore } from "../../../packages/policy-store/src/index.js";
 import { normalizeTenantId } from "../../../packages/tenancy/src/index.js";
 
 function resolveDatabasePath(filePath) {
@@ -197,6 +198,184 @@ export function createSQLiteDecisionStore({ filePath, maxEntries = 5000, databas
   };
 }
 
+export function createSQLitePolicyStore({
+  filePath,
+  database = null,
+  maxVersionsPerPolicy = 20,
+  now = () => new Date().toISOString()
+} = {}) {
+  if (!filePath && !database) throw new Error("filePath or database is required");
+  if (!Number.isInteger(maxVersionsPerPolicy) || maxVersionsPerPolicy < 1) {
+    throw new Error("maxVersionsPerPolicy must be a positive integer");
+  }
+
+  const db = database || openDatabase(filePath);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS policy_records (
+      tenant_id TEXT NOT NULL,
+      policy_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      updated_at TEXT NOT NULL,
+      updated_by TEXT,
+      policy_json TEXT NOT NULL,
+      versions_json TEXT NOT NULL,
+      PRIMARY KEY (tenant_id, policy_id)
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS idx_policy_records_tenant
+      ON policy_records(tenant_id, policy_id);
+  `);
+
+  const tenant = tenantId => normalizeTenantId(tenantId);
+  const policyId = id => String(id || "").trim().toLowerCase();
+
+  function recordFromRow(row) {
+    if (!row) return null;
+    return {
+      id: row.policy_id,
+      tenantId: row.tenant_id,
+      version: Number(row.version),
+      updatedAt: row.updated_at,
+      updatedBy: row.updated_by,
+      policy: JSON.parse(row.policy_json),
+      versions: JSON.parse(row.versions_json)
+    };
+  }
+
+  function readRow(tenantId, id) {
+    return db.prepare(
+      "SELECT * FROM policy_records WHERE tenant_id = ? AND policy_id = ?"
+    ).get(tenant(tenantId), policyId(id));
+  }
+
+  function hydrate(row) {
+    const store = createPolicyStore({ maxVersionsPerPolicy, now });
+    store.importState({
+      version: 1,
+      tenants: {
+        [row.tenant_id]: {
+          policies: {
+            [row.policy_id]: recordFromRow(row)
+          }
+        }
+      }
+    });
+    return store;
+  }
+
+  function writeRecord(record) {
+    db.prepare(`
+      INSERT INTO policy_records (
+        tenant_id, policy_id, version, updated_at, updated_by, policy_json, versions_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(tenant_id, policy_id) DO UPDATE SET
+        version = excluded.version,
+        updated_at = excluded.updated_at,
+        updated_by = excluded.updated_by,
+        policy_json = excluded.policy_json,
+        versions_json = excluded.versions_json
+    `).run(
+      record.tenantId,
+      record.id,
+      record.version,
+      record.updatedAt,
+      record.updatedBy,
+      JSON.stringify(record.policy),
+      JSON.stringify(record.versions)
+    );
+  }
+
+  return {
+    capabilities: Object.freeze({
+      durable: true,
+      shared: true,
+      tenantScoped: true,
+      transactional: true
+    }),
+
+    list(tenantId) {
+      return db.prepare(
+        "SELECT * FROM policy_records WHERE tenant_id = ? ORDER BY policy_id ASC"
+      ).all(tenant(tenantId)).map(recordFromRow);
+    },
+
+    get(tenantId, id) {
+      return recordFromRow(readRow(tenantId, id));
+    },
+
+    history(tenantId, id) {
+      const record = recordFromRow(readRow(tenantId, id));
+      return record ? { id: record.id, versions: structuredClone(record.versions) } : null;
+    },
+
+    effective(tenantId, id) {
+      const row = readRow(tenantId, id);
+      if (!row) return null;
+      return hydrate(row).effective(tenantId, id);
+    },
+
+    upsert(tenantId, input, metadata) {
+      const normalizedTenantId = tenant(tenantId);
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const existing = readRow(normalizedTenantId, input?.id);
+        const store = existing
+          ? hydrate(existing)
+          : createPolicyStore({ maxVersionsPerPolicy, now });
+        const record = store.upsert(normalizedTenantId, input, metadata);
+        writeRecord(record);
+        db.exec("COMMIT");
+        return record;
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
+
+    rollback(tenantId, id, version, metadata) {
+      const normalizedTenantId = tenant(tenantId);
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const existing = readRow(normalizedTenantId, id);
+        if (!existing) {
+          db.exec("ROLLBACK");
+          return null;
+        }
+        const store = hydrate(existing);
+        const record = store.rollback(normalizedTenantId, id, version, metadata);
+        if (!record) {
+          db.exec("ROLLBACK");
+          return null;
+        }
+        writeRecord(record);
+        db.exec("COMMIT");
+        return record;
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
+
+    remove(tenantId, id) {
+      const result = db.prepare(
+        "DELETE FROM policy_records WHERE tenant_id = ? AND policy_id = ?"
+      ).run(tenant(tenantId), policyId(id));
+      return result.changes === 1;
+    },
+
+    clear(tenantId = null) {
+      if (tenantId == null) db.exec("DELETE FROM policy_records");
+      else db.prepare("DELETE FROM policy_records WHERE tenant_id = ?").run(tenant(tenantId));
+    },
+
+    close() {
+      if (!database) db.close();
+    },
+
+    database: db
+  };
+}
+
 export function createSQLiteCoordinationStore({ filePath, database = null } = {}) {
   if (!filePath && !database) throw new Error("filePath or database is required");
   const db = database || openDatabase(filePath);
@@ -307,12 +486,17 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
   };
 }
 
-export function createSQLiteStateStores({ filePath, maxEntries = 5000 } = {}) {
+export function createSQLiteStateStores({
+  filePath,
+  maxEntries = 5000,
+  maxVersionsPerPolicy = 20
+} = {}) {
   const db = openDatabase(filePath);
   return {
     database: db,
     telemetry: createSQLiteDecisionStore({ database: db, maxEntries }),
     coordination: createSQLiteCoordinationStore({ database: db }),
+    policies: createSQLitePolicyStore({ database: db, maxVersionsPerPolicy }),
     close() { db.close(); }
   };
 }

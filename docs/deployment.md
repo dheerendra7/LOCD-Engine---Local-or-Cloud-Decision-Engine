@@ -51,6 +51,8 @@ Set LOCD_POLICIES_FILE to persist tenant-scoped custom policies and their bounde
 
 The file is written atomically. On hosted platforms with ephemeral filesystems, use durable storage or a managed configuration backend before relying on restart persistence.
 
+For multi-instance deployments, the internal State Service also provides tenant-scoped transactional policy storage when LOCD_STATE_SERVICE_URL is configured. LOCD_POLICIES_FILE remains the local/file-backed fallback when shared state is not enabled.
+
 ## Production checklist
 
 Before production use, add:
@@ -58,7 +60,7 @@ Before production use, add:
 - authentication and authorization
 - secret management
 - durable database-backed telemetry
-- centralized policy storage
+- managed/shared policy storage with backup and migration controls (the built-in State Service now provides a reference shared policy store)
 - persistent target registry (LOCD_TARGETS_FILE; use durable storage for hosted production)
 - rate limiting
 - structured logs and traces

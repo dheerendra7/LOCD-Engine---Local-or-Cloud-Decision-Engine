@@ -162,6 +162,8 @@ Removes an authenticated tenant's custom policy. Built-in profiles cannot be del
 
 Policy state can be persisted with LOCD_POLICIES_FILE. The file-backed store serializes concurrent writes inside the API process and writes snapshots atomically. Hosted deployments with ephemeral filesystems still need durable storage or a managed configuration backend for restart persistence.
 
+When LOCD_STATE_SERVICE_URL is configured, the API uses the State Service policy store instead of LOCD_POLICIES_FILE. This makes tenant custom policies shared across API instances and persists version history in the State Service SQLite database.
+
 
 ## Target registry
 

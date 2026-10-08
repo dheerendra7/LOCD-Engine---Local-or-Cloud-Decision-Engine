@@ -37,6 +37,7 @@ Possible destinations:
 - Scoped API authorization with least-privilege execution controls.
 - Trusted multi-tenant control-plane isolation with tenant-scoped targets, telemetry, calibration and request coordination.
 - Explicit state backend contracts and capability descriptors for replaceable telemetry/coordination backends.
+- Shared tenant-scoped policy state through the internal State Service when network state mode is enabled.
 - Browser dashboard shell.
 - Live provider probes and server-side provider configuration.
 - Optional automatic probe scheduling with bounded concurrency.
@@ -122,7 +123,7 @@ Decision core, hard/soft policy semantics, workload-aware policy rules, explaina
 
 ### Next
 
-Managed/shared database and event backends beyond the current SQLite/network state modes, richer provider-specific execution adapters, fleet-level policy management, and production deployment hardening for shared infrastructure.
+Managed/shared database and event backends beyond the current reference SQLite/network state modes, richer provider-specific execution adapters, fleet-level policy management, and production deployment hardening for shared infrastructure.
 
 ### Later
 

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   createHTTPCoordinationStore,
   createHTTPDecisionStore,
+  createHTTPPolicyStore,
   createHTTPStateStores
 } from "../src/index.js";
 
@@ -72,6 +73,48 @@ test("HTTP telemetry client maps decision and metric responses", async () => {
 
   assert.match(calls[0].url, /\/v1\/state\/decisions$/);
   assert.deepEqual(events, [{ id: "d-1" }]);
+});
+
+test("HTTP policy client maps tenant-scoped CRUD and rollback", async () => {
+  let index = 0;
+  const responses = [
+    { policies: [{ id: "acme-policy" }] },
+    { id: "acme-policy", version: 1, policy: { id: "acme-policy" }, versions: [] },
+    { id: "acme-policy", versions: [{ version: 1 }] },
+    { id: "acme-policy", version: 2, policy: { id: "acme-policy" }, versions: [] },
+    { id: "acme-policy", version: 3, policy: { id: "acme-policy" }, versions: [], rolledBackFromVersion: 1 },
+    { removed: "acme-policy" }
+  ];
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify(responses[index++]), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+
+  const store = createHTTPPolicyStore({
+    baseUrl: "http://state.internal",
+    apiKey: "secret",
+    fetchImpl
+  });
+
+  assert.deepEqual(await store.list("acme"), [{ id: "acme-policy" }]);
+  assert.equal((await store.get("acme", "acme-policy")).version, 1);
+  assert.equal((await store.history("acme", "acme-policy")).versions.length, 1);
+  assert.equal((await store.upsert(
+    "acme",
+    { id: "acme-policy", baseProfile: "balanced" },
+    { updatedBy: "admin" }
+  )).version, 2);
+  assert.equal((await store.rollback("acme", "acme-policy", 1, { updatedBy: "rollback" })).version, 2);
+  assert.equal(await store.remove("acme", "acme-policy"), true);
+
+  assert.equal(calls.every(call => call.options.headers.authorization === "Bearer secret"), true);
+  assert.equal(calls[0].options.headers["x-locd-tenant-id"], "acme");
+  assert.match(calls[2].url, /\/history$/);
+  assert.match(calls[4].url, /\/acme-policy$/);
 });
 
 test("HTTP state client surfaces non-2xx errors", async () => {

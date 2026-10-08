@@ -1,4 +1,5 @@
 export {
+  createHTTPPolicyStore,
   createHTTPCoordinationStore,
   createHTTPDecisionStore,
   createHTTPStateStores

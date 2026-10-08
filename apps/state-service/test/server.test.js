@@ -89,6 +89,67 @@ test("state service stores telemetry and outcomes", async () => {
   }
 });
 
+test("state service exposes tenant-scoped policy CRUD and rollback", async () => {
+  const instance = await startServer();
+
+  try {
+    const headers = {
+      authorization: "Bearer state-secret",
+      "content-type": "application/json",
+      "x-locd-tenant-id": "acme"
+    };
+    const policy = {
+      id: "shared-policy",
+      name: "Shared Policy",
+      baseProfile: "balanced",
+      allowedModes: ["local"]
+    };
+
+    const created = await fetch(instance.url + "/v1/state/policies", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ policy, updatedBy: "admin" })
+    });
+    assert.equal(created.status, 200);
+    assert.equal((await created.json()).version, 1);
+
+    const updated = await fetch(instance.url + "/v1/state/policies", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ policy: { ...policy, description: "v2" } })
+    });
+    assert.equal((await updated.json()).version, 2);
+
+    const history = await fetch(
+      instance.url + "/v1/state/policies/shared-policy/history",
+      { headers }
+    );
+    assert.equal(history.status, 200);
+    assert.equal((await history.json()).versions.length, 2);
+
+    const otherTenant = await fetch(
+      instance.url + "/v1/state/policies/shared-policy",
+      { headers: { authorization: "Bearer state-secret", "x-locd-tenant-id": "beta" } }
+    );
+    assert.equal(otherTenant.status, 404);
+
+    const rollback = await fetch(
+      instance.url + "/v1/state/policies/shared-policy/rollback",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ version: 1, updatedBy: "rollback" })
+      }
+    );
+    assert.equal(rollback.status, 200);
+    const rollbackBody = await rollback.json();
+    assert.equal(rollbackBody.version, 3);
+    assert.equal(rollbackBody.rolledBackFromVersion, 1);
+  } finally {
+    await instance.cleanup();
+  }
+});
+
 test("state service provides atomic coordination operations", async () => {
   const instance = await startServer();
 

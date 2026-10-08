@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   createSQLiteCoordinationStore,
   createSQLiteDecisionStore,
+  createSQLitePolicyStore,
   createSQLiteStateStores
 } from "../src/index.js";
 
@@ -65,6 +66,46 @@ test("sqlite telemetry is bounded", async () => {
     }
     assert.deepEqual(store.list({ limit: 10 }).map(event => event.id), ["3", "2"]);
     store.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("sqlite policy store persists versions and isolates tenants", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-policy-"));
+  const file = path.join(dir, "state.db");
+
+  const policy = {
+    id: "acme-policy",
+    name: "Acme",
+    baseProfile: "balanced",
+    allowedModes: ["local"]
+  };
+
+  try {
+    const one = createSQLitePolicyStore({ filePath: file, maxVersionsPerPolicy: 5 });
+    const two = createSQLitePolicyStore({ filePath: file, maxVersionsPerPolicy: 5 });
+
+    assert.equal(one.upsert("acme", policy, { updatedBy: "admin" }).version, 1);
+    assert.equal(two.upsert("acme", { ...policy, description: "v2" }).version, 2);
+    assert.equal(two.upsert("beta", { ...policy, id: "beta-policy" }).version, 1);
+
+    assert.equal(one.get("acme", "acme-policy").version, 2);
+    assert.equal(one.list("beta").length, 1);
+    assert.equal(one.list("acme").length, 1);
+
+    const rolledBack = one.rollback("acme", "acme-policy", 1, { updatedBy: "rollback" });
+    assert.equal(rolledBack.version, 3);
+    assert.equal(rolledBack.rolledBackFromVersion, 1);
+    assert.equal(rolledBack.policy.name, "Acme");
+
+    two.close();
+    one.close();
+
+    const restored = createSQLitePolicyStore({ filePath: file, maxVersionsPerPolicy: 5 });
+    assert.equal(restored.get("acme", "acme-policy").version, 3);
+    assert.equal(restored.history("acme", "acme-policy").versions.length, 3);
+    restored.close();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

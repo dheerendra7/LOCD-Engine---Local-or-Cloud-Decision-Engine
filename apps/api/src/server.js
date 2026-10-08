@@ -309,7 +309,8 @@ export function createServer({
   calibrator = createCalibrator(),
   calibrationEnabled = process.env.LOCD_CALIBRATION_ENABLED === "true",
   coordinationBackend = null,
-  telemetryBackend = null
+  telemetryBackend = null,
+  policyBackend = null
 } = {}) {
   if (!Number.isFinite(maxBodyBytes) || maxBodyBytes < 1) {
     throw new Error("maxBodyBytes must be >= 1");
@@ -590,7 +591,7 @@ export function createServer({
           : rawTargets;
         let policy = body.policy || {};
         if (policyStore && policy.profile) {
-          const custom = policyStore.get(tenantId, policy.profile);
+          const custom = await policyStore.get(tenantId, policy.profile);
           if (custom) {
             policy = {
               ...custom.policy,
@@ -688,8 +689,8 @@ export function createServer({
       }
 
       if (req.method === "GET" && pathname === "/v1/policies") {
-        const customPolicies = policyStore
-          .list(tenantId)
+        const customPolicies = (await policyStore
+          .list(tenantId))
           .map(record => ({
             ...record.policy,
             source: "custom",
@@ -716,7 +717,7 @@ export function createServer({
           return;
         }
 
-        const history = policyStore.history(tenantId, policyId);
+        const history = await policyStore.history(tenantId, policyId);
         if (!history) {
           sendJson(res, 404, { error: "policy_not_found" });
           return;
@@ -737,7 +738,7 @@ export function createServer({
           return;
         }
 
-        const custom = policyStore.get(tenantId, policyId);
+        const custom = await policyStore.get(tenantId, policyId);
         if (!custom) {
           const builtIn = listPolicyProfiles().find(profile => profile.id === policyId);
           if (!builtIn) {
@@ -771,7 +772,7 @@ export function createServer({
         }
 
         const policyId = String(body.id || "").trim().toLowerCase();
-        const existed = policyStore.get(tenantId, policyId) != null;
+        const existed = (await policyStore.get(tenantId, policyId)) != null;
 
         const saved = await policyStore.upsert(tenantId, body, {
           updatedBy: authContext.keyId || "admin"
@@ -808,16 +809,27 @@ export function createServer({
           return;
         }
 
-        const history = policyStore.history(tenantId, policyId);
-        const selected = history?.versions?.find(item => item.version === version);
-        if (!selected) {
-          sendJson(res, 404, { error: "policy_version_not_found" });
-          return;
+        let saved;
+        if (typeof policyStore.rollback === "function") {
+          saved = await policyStore.rollback(tenantId, policyId, version, {
+            updatedBy: authContext.keyId || "admin"
+          });
+          if (!saved) {
+            sendJson(res, 404, { error: "policy_version_not_found" });
+            return;
+          }
+        } else {
+          const history = await policyStore.history(tenantId, policyId);
+          const selected = history?.versions?.find(item => item.version === version);
+          if (!selected) {
+            sendJson(res, 404, { error: "policy_version_not_found" });
+            return;
+          }
+          saved = await policyStore.upsert(tenantId, selected.policy, {
+            updatedBy: authContext.keyId || "admin"
+          });
+          saved = { ...saved, rolledBackFromVersion: version };
         }
-
-        const saved = await policyStore.upsert(tenantId, selected.policy, {
-          updatedBy: authContext.keyId || "admin"
-        });
 
         const responseBody = {
           ...saved.policy,
@@ -847,7 +859,7 @@ export function createServer({
           return;
         }
 
-        const existing = policyStore.get(tenantId, policyId);
+        const existing = await policyStore.get(tenantId, policyId);
         const payload = { ...body, id: policyId };
         const saved = await policyStore.upsert(tenantId, payload, {
           updatedBy: authContext.keyId || "admin"
@@ -1050,12 +1062,13 @@ export function createServer({
             coordinationBackend: coordinationBackend ||
               (coordinationStore ? "shared" : "process-local"),
             telemetryBackend: telemetryBackend || "process-local",
+            policyBackend: policyBackend || "process-local",
             rateLimitMode: coordinationStore ? "shared" : "process-local",
             idempotencyMode: coordinationStore ? "shared" : "process-local"
           },
           counts: {
             targets: targets.length,
-            customPolicies: policyStore.list(tenantId).length,
+            customPolicies: (await policyStore.list(tenantId)).length,
             probeableTargets: probeableTargets.length,
             executionAdapters: executionAdapters.length,
             decisions: (await decisionStore.summary({ tenantId })).totalDecisions
@@ -1143,9 +1156,11 @@ if (isMain) {
     maxConcurrent: Number(process.env.LOCD_PROBE_MAX_CONCURRENT || 4),
     logger
   });
-  const policyStore = policyFile
-    ? await createFilePolicyStore({ filePath: policyFile, maxVersionsPerPolicy: 20 })
-    : createPolicyStore();
+  const policyStore = stateStores?.policies ||
+    networkState?.policies ||
+    (policyFile
+      ? await createFilePolicyStore({ filePath: policyFile, maxVersionsPerPolicy: 20 })
+      : createPolicyStore());
 
   const server = createServer({
     targetFile,
@@ -1165,6 +1180,13 @@ if (isMain) {
       : (stateServiceUrl || telemetryFile)
         ? (stateServiceUrl ? "network" : "file")
         : "process-local",
+    policyBackend: stateDbFile
+      ? "sqlite"
+      : stateServiceUrl
+        ? "network"
+        : policyFile
+          ? "file"
+          : "process-local",
     executionEnabled: process.env.LOCD_EXECUTION_ENABLED === "true"
   });
 

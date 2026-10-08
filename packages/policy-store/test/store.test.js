@@ -83,6 +83,31 @@ test("policy versions increment and history is bounded", () => {
   assert.equal(store.history("acme", "acme-fast").versions.length, 2);
 });
 
+test("policy store rollback creates a new version from history", () => {
+  const store = createPolicyStore({
+    now: (() => {
+      let i = 0;
+      return () => "2026-10-08T00:00:0" + (++i) + ".000Z";
+    })()
+  });
+
+  const first = store.upsert("acme", { ...policy, description: "v1" });
+  store.upsert("acme", { ...policy, description: "v2" });
+
+  const restored = store.rollback("acme", "acme-fast", first.version, { updatedBy: "rollback" });
+
+  assert.equal(restored.version, 3);
+  assert.equal(restored.rolledBackFromVersion, 1);
+  assert.equal(restored.policy.description, "v1");
+  assert.equal(store.history("acme", "acme-fast").versions.at(-1).version, 3);
+});
+
+test("policy store rollback returns null for missing version", () => {
+  const store = createPolicyStore();
+  store.upsert("acme", policy);
+  assert.equal(store.rollback("acme", "acme-fast", 99), null);
+});
+
 test("tenant policies are isolated", () => {
   const store = createPolicyStore();
   store.upsert("acme", policy);

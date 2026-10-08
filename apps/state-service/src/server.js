@@ -56,8 +56,8 @@ export function createStateServiceServer({
   apiKey = process.env.LOCD_STATE_SERVICE_API_KEY?.trim() || null,
   maxBodyBytes = Number(process.env.LOCD_STATE_SERVICE_MAX_BODY_BYTES || 1_000_000)
 } = {}) {
-  if (!stores?.telemetry || !stores?.coordination) {
-    throw new Error("state service stores are required");
+  if (!stores?.telemetry || !stores?.coordination || !stores?.policies) {
+    throw new Error("state service telemetry, coordination and policy stores are required");
   }
   if (!Number.isFinite(maxBodyBytes) || maxBodyBytes < 1) {
     throw new Error("maxBodyBytes must be >= 1");
@@ -119,6 +119,87 @@ export function createStateServiceServer({
       if (req.method === "GET" && pathname === "/v1/state/metrics") {
         const tenantId = requestTenantId(req);
         sendJson(res, 200, stores.telemetry.summary({ tenantId }));
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/v1/state/policies") {
+        const tenantId = requestTenantId(req);
+        sendJson(res, 200, {
+          tenantId,
+          policies: await stores.policies.list(tenantId)
+        });
+        return;
+      }
+
+      if (req.method === "GET" && pathname.startsWith("/v1/state/policies/") &&
+          pathname.endsWith("/history")) {
+        const tenantId = requestTenantId(req);
+        const id = decodeKey(pathname, "/v1/state/policies/", "/history");
+        const history = await stores.policies.history(tenantId, id);
+        if (!history) {
+          sendJson(res, 404, { error: "policy_not_found" });
+          return;
+        }
+        sendJson(res, 200, history);
+        return;
+      }
+
+      if (req.method === "GET" && pathname.startsWith("/v1/state/policies/")) {
+        const tenantId = requestTenantId(req);
+        const id = decodeKey(pathname, "/v1/state/policies/");
+        const policy = await stores.policies.get(tenantId, id);
+        if (!policy) {
+          sendJson(res, 404, { error: "policy_not_found" });
+          return;
+        }
+        sendJson(res, 200, policy);
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/v1/state/policies") {
+        const tenantId = requestTenantId(req);
+        const body = await readBody(req, maxBodyBytes);
+        if (!body.policy || typeof body.policy !== "object") {
+          sendJson(res, 400, { error: "policy is required" });
+          return;
+        }
+        const saved = await stores.policies.upsert(tenantId, body.policy, {
+          updatedBy: body.updatedBy ?? null
+        });
+        sendJson(res, 200, saved);
+        return;
+      }
+
+      if (req.method === "POST" && pathname.startsWith("/v1/state/policies/") &&
+          pathname.endsWith("/rollback")) {
+        const tenantId = requestTenantId(req);
+        const id = decodeKey(pathname, "/v1/state/policies/", "/rollback");
+        const body = await readBody(req, maxBodyBytes);
+        const version = Number(body.version);
+        if (!Number.isInteger(version) || version < 1) {
+          sendJson(res, 400, { error: "policy version must be a positive integer" });
+          return;
+        }
+        const saved = await stores.policies.rollback(tenantId, id, version, {
+          updatedBy: body.updatedBy ?? null
+        });
+        if (!saved) {
+          sendJson(res, 404, { error: "policy_version_not_found" });
+          return;
+        }
+        sendJson(res, 200, saved);
+        return;
+      }
+
+      if (req.method === "DELETE" && pathname.startsWith("/v1/state/policies/")) {
+        const tenantId = requestTenantId(req);
+        const id = decodeKey(pathname, "/v1/state/policies/");
+        const removed = await stores.policies.remove(tenantId, id);
+        if (!removed) {
+          sendJson(res, 404, { error: "policy_not_found" });
+          return;
+        }
+        sendJson(res, 200, { removed: id });
         return;
       }
 
