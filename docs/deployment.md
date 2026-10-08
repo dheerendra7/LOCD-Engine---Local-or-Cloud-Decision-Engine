@@ -27,6 +27,12 @@ Then open:
 
     http://localhost:8787/
 
+## Container deployment
+
+The Docker image runs the application as the unprivileged `node` user. The Compose configuration mounts `/data` as a named persistent volume and configures `LOCD_STATE_DB_FILE=/data/locd.db`, so the reference container deployment keeps telemetry, coordination and policy state across container restarts.
+
+For production, place a TLS-terminating reverse proxy or load balancer in front of the container and use managed persistent storage with backup/restore controls. The image healthcheck remains a local liveness check against `/health`.
+
 ## Multi-tenant deployment
 
 Bind each scoped API credential to a tenant using its tenantId in LOCD_API_KEYS_JSON. Keep tenant identifiers stable because they become part of target, telemetry, calibration, idempotency and rate-limit namespaces.
