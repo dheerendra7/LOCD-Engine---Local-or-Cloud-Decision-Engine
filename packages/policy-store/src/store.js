@@ -25,6 +25,20 @@ const ALLOWED_FIELDS = new Set([
 const WEIGHT_KEYS = new Set(["privacy", "latency", "cost", "capacity", "reliability"]);
 const BUILTIN_POLICY_IDS = new Set(listPolicyProfiles().map(profile => profile.id));
 
+export function createPersistenceQueue(persist) {
+  if (typeof persist !== "function") {
+    throw new Error("persist must be a function");
+  }
+
+  let tail = Promise.resolve();
+
+  return value => {
+    const operation = tail.then(() => persist(value));
+    tail = operation.catch(() => {});
+    return operation;
+  };
+}
+
 function validatePolicyDocument(input) {
   if (!input || typeof input !== "object") {
     throw new Error("policy document must be an object");
@@ -182,19 +196,22 @@ export function createPolicyStore({
     const previous = bucket.policies[policy.id];
     const nextVersion = previous ? previous.version + 1 : 1;
 
+    const updatedAt = String(metadata.updatedAt || now());
+    const updatedBy = metadata.updatedBy == null ? null : String(metadata.updatedBy);
+
     const record = {
       id: policy.id,
       tenantId: normalizedTenantId,
       version: nextVersion,
-      updatedAt: String(metadata.updatedAt || now()),
-      updatedBy: metadata.updatedBy == null ? null : String(metadata.updatedBy),
+      updatedAt,
+      updatedBy,
       policy,
       versions: [
         ...(previous?.versions || []),
         {
           version: nextVersion,
-          updatedAt: String(metadata.updatedAt || now()),
-          updatedBy: metadata.updatedBy == null ? null : String(metadata.updatedBy),
+          updatedAt,
+          updatedBy,
           policy: clonePolicy(policy)
         }
       ].slice(-maxVersionsPerPolicy)
@@ -272,12 +289,13 @@ export async function createFilePolicyStore({
     if (error?.code !== "ENOENT") throw error;
   }
 
-  const persist = async () => {
+  const persist = async snapshot => {
     await mkdir(path.dirname(resolved), { recursive: true });
     const temp = resolved + ".tmp-" + process.pid + "-" + Date.now();
-    await writeFile(temp, JSON.stringify(store.exportState(), null, 2) + "\n", "utf8");
+    await writeFile(temp, JSON.stringify(snapshot, null, 2) + "\n", "utf8");
     await rename(temp, resolved);
   };
+  const enqueuePersist = createPersistenceQueue(persist);
 
   return {
     list: store.list,
@@ -286,12 +304,12 @@ export async function createFilePolicyStore({
     history: store.history,
     async upsert(tenantId, input, metadata) {
       const result = store.upsert(tenantId, input, metadata);
-      await persist();
+      await enqueuePersist(store.exportState());
       return result;
     },
     async remove(tenantId, id) {
       const removed = store.remove(tenantId, id);
-      if (removed) await persist();
+      if (removed) await enqueuePersist(store.exportState());
       return removed;
     },
     exportState: store.exportState,
