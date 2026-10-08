@@ -83,6 +83,46 @@ function requestTenantId(req) {
   return normalizeTenantId(req.headers["x-locd-tenant-id"]);
 }
 
+export async function checkReadiness({ stores } = {}) {
+  const checks = {};
+
+  try {
+    if (!stores?.telemetry || typeof stores.telemetry.summary !== "function") {
+      throw new Error("telemetry_unavailable");
+    }
+    await stores.telemetry.summary({ tenantId: "default" });
+    checks.telemetry = "ok";
+  } catch {
+    checks.telemetry = "failed";
+  }
+
+  try {
+    if (!stores?.policies || typeof stores.policies.list !== "function") {
+      throw new Error("policies_unavailable");
+    }
+    await stores.policies.list("default");
+    checks.policies = "ok";
+  } catch {
+    checks.policies = "failed";
+  }
+
+  try {
+    if (!stores?.coordination || typeof stores.coordination.get !== "function") {
+      throw new Error("coordination_unavailable");
+    }
+    await stores.coordination.get("locd:readiness:probe");
+    checks.coordination = "ok";
+  } catch {
+    checks.coordination = "failed";
+  }
+
+  const failed = Object.values(checks).some(value => value === "failed");
+  return {
+    ready: !failed,
+    checks
+  };
+}
+
 export function createStateServiceServer({
   stores,
   apiKey = process.env.LOCD_STATE_SERVICE_API_KEY?.trim() || null,
@@ -131,6 +171,17 @@ export function createStateServiceServer({
           status: "ok",
           service: "locd-state-service",
           storage: "sqlite"
+        });
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/ready") {
+        const readiness = await checkReadiness({ stores });
+        sendJson(res, readiness.ready ? 200 : 503, {
+          status: readiness.ready ? "ready" : "not_ready",
+          service: "locd-state-service",
+          storage: "sqlite",
+          checks: readiness.checks
         });
         return;
       }
