@@ -121,6 +121,8 @@ Providers remain unavailable until their first successful probe unless explicitl
 
 Use `GET /health` for liveness and `GET /ready` for readiness. Both are intentionally public so load balancers and platform health checks can call them without application credentials.
 
+The API and internal State Service allow `LOCD_SHUTDOWN_TIMEOUT_MS` (default 10 seconds) for graceful termination. During the grace window, in-flight requests can complete normally; after the deadline, established HTTP connections are force-closed so process shutdown cannot hang indefinitely.
+
 The application handles SIGTERM/SIGINT and stops the probe scheduler before closing the HTTP listener. Unexpected request failures are logged server-side and returned to clients only as a generic 500 error with the request ID.
 
 ## Telemetry calibration
