@@ -90,6 +90,111 @@ export function createHTTPDecisionStore({
   return store;
 }
 
+export function createHTTPPolicyStore({
+  baseUrl,
+  apiKey = null,
+  fetchImpl = globalThis.fetch
+} = {}) {
+  if (!baseUrl) throw new Error("baseUrl is required");
+  if (typeof fetchImpl !== "function") throw new Error("fetch implementation is required");
+
+  const policyPath = id => "/v1/state/policies/" + encodeKey(id);
+
+  return {
+    capabilities: Object.freeze({
+      durable: true,
+      shared: true,
+      tenantScoped: true,
+      transactional: false
+    }),
+
+    async list(tenantId) {
+      const response = await request(
+        fetchImpl, baseUrl, apiKey, "/v1/state/policies", {}, tenantId
+      );
+      return response.policies || [];
+    },
+
+    async get(tenantId, id) {
+      try {
+        return await request(
+          fetchImpl, baseUrl, apiKey, policyPath(id), {}, tenantId
+        );
+      } catch (error) {
+        if (error.status === 404) return null;
+        throw error;
+      }
+    },
+
+    async history(tenantId, id) {
+      try {
+        return await request(
+          fetchImpl, baseUrl, apiKey, policyPath(id) + "/history", {}, tenantId
+        );
+      } catch (error) {
+        if (error.status === 404) return null;
+        throw error;
+      }
+    },
+
+    async upsert(tenantId, input, metadata = {}) {
+      const body = {
+        policy: input,
+        updatedBy: metadata.updatedBy ?? null
+      };
+      const response = await request(
+        fetchImpl,
+        baseUrl,
+        apiKey,
+        "/v1/state/policies",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body)
+        },
+        tenantId
+      );
+      return response;
+    },
+
+    async rollback(tenantId, id, version, metadata = {}) {
+      const response = await request(
+        fetchImpl,
+        baseUrl,
+        apiKey,
+        policyPath(id) + "/rollback",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            version,
+            updatedBy: metadata.updatedBy ?? null
+          })
+        },
+        tenantId
+      );
+      return response;
+    },
+
+    async remove(tenantId, id) {
+      try {
+        await request(
+          fetchImpl,
+          baseUrl,
+          apiKey,
+          policyPath(id),
+          { method: "DELETE" },
+          tenantId
+        );
+        return true;
+      } catch (error) {
+        if (error.status === 404) return false;
+        throw error;
+      }
+    }
+  };
+}
+
 export function createHTTPCoordinationStore({
   baseUrl,
   apiKey = null,
@@ -187,6 +292,7 @@ export function createHTTPStateStores({
 } = {}) {
   return {
     telemetry: createHTTPDecisionStore({ baseUrl, apiKey, fetchImpl, maxEntries }),
-    coordination: createHTTPCoordinationStore({ baseUrl, apiKey, fetchImpl })
+    coordination: createHTTPCoordinationStore({ baseUrl, apiKey, fetchImpl }),
+    policies: createHTTPPolicyStore({ baseUrl, apiKey, fetchImpl })
   };
 }
