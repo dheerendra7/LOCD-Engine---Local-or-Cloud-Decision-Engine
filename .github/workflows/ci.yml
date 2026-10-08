@@ -6,7 +6,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
 
 concurrency:
@@ -40,33 +40,23 @@ jobs:
           cat test-output.txt
           exit 0
 
-      - name: Publish test diagnostics
+      - name: Publish test output branch
         if: always() && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require("node:fs");
-            const output = fs.existsSync("test-output.txt")
-              ? fs.readFileSync("test-output.txt", "utf8")
-              : "test-output.txt was not created";
-            const code = fs.existsSync("test-exit-code.txt")
-              ? fs.readFileSync("test-exit-code.txt", "utf8").trim()
-              : "unknown";
-            const body = [
-              "### CI test diagnostics",
-              "",
-              `exit code: ${code}`,
-              "",
-              "```text",
-              output.slice(-60000),
-              "```"
-            ].join("\n");
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body
-            });
+        shell: bash
+        env:
+          NODE_VERSION: ${{ matrix.node }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          branch="ci-debug-${RUN_ID}-${NODE_VERSION}"
+          mkdir -p .ci-diagnostic
+          cp test-output.txt ".ci-diagnostic/test-output-node-${NODE_VERSION}.txt"
+          cp test-exit-code.txt ".ci-diagnostic/test-exit-code-node-${NODE_VERSION}.txt"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --create "$branch"
+          git add .ci-diagnostic
+          git commit -m "ci: capture policy simulator test output"
+          git push --set-upstream origin "$branch"
 
       - name: Fail when tests fail
         shell: bash
