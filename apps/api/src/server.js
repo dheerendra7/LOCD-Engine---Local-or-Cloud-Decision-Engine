@@ -310,13 +310,29 @@ export function createServer({
   calibrationEnabled = process.env.LOCD_CALIBRATION_ENABLED === "true",
   coordinationBackend = null,
   telemetryBackend = null,
-  policyBackend = null
+  policyBackend = null,
+  requestTimeoutMs = Number(process.env.LOCD_REQUEST_TIMEOUT_MS || 30_000),
+  headersTimeoutMs = Number(process.env.LOCD_HEADERS_TIMEOUT_MS || 10_000),
+  keepAliveTimeoutMs = Number(process.env.LOCD_KEEP_ALIVE_TIMEOUT_MS || 5_000),
+  maxRequestsPerSocket = Number(process.env.LOCD_MAX_REQUESTS_PER_SOCKET || 0)
 } = {}) {
   if (!Number.isFinite(maxBodyBytes) || maxBodyBytes < 1) {
     throw new Error("maxBodyBytes must be >= 1");
   }
   if (!Number.isFinite(idempotencyLockTtlMs) || idempotencyLockTtlMs < 1) {
     throw new Error("idempotencyLockTtlMs must be >= 1");
+  }
+  if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs < 1) {
+    throw new Error("requestTimeoutMs must be >= 1");
+  }
+  if (!Number.isFinite(headersTimeoutMs) || headersTimeoutMs < 1) {
+    throw new Error("headersTimeoutMs must be >= 1");
+  }
+  if (!Number.isFinite(keepAliveTimeoutMs) || keepAliveTimeoutMs < 0) {
+    throw new Error("keepAliveTimeoutMs must be >= 0");
+  }
+  if (!Number.isInteger(maxRequestsPerSocket) || maxRequestsPerSocket < 0) {
+    throw new Error("maxRequestsPerSocket must be a non-negative integer");
   }
 
   assertDecisionStore(decisionStore);
@@ -367,7 +383,7 @@ export function createServer({
           windowMs: rateLimitWindowMs
         }));
 
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     const requestId = createRequestId(req.headers["x-request-id"]);
     const startedAt = process.hrtime.bigint();
     let requestLogWritten = false;
@@ -1100,6 +1116,14 @@ export function createServer({
       sendJson(res, 400, { error: message });
     }
   });
+
+  // Bound HTTP resources at the server edge to reduce Slowloris and idle-connection risk.
+  server.requestTimeout = requestTimeoutMs;
+  server.headersTimeout = headersTimeoutMs;
+  server.keepAliveTimeout = keepAliveTimeoutMs;
+  server.maxRequestsPerSocket = maxRequestsPerSocket;
+
+  return server;
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
