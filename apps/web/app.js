@@ -453,6 +453,7 @@ document.querySelector("#simulatePolicy").addEventListener("click", async event 
     };
 
     if (privacyOverride) {
+      basePolicy.sensitiveDataMode = privacyOverride;
       candidatePolicy.sensitiveDataMode = privacyOverride;
     }
 
