@@ -2,7 +2,7 @@ import http from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { decide } from "../../../packages/core/src/index.js";
+import { decide, simulatePolicy } from "../../../packages/core/src/index.js";
 import { createDecisionStore, createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { listPolicyProfiles } from "../../../packages/policy/src/index.js";
 import { createPolicyStore, createFilePolicyStore } from "../../../packages/policy-store/src/index.js";
@@ -38,6 +38,7 @@ function requiredScope(method, pathname) {
   if (method === "POST" && pathname === "/v1/decide") return "decide";
   if (method === "POST" && pathname === "/v1/hybrid-plan") return "decide";
   if (method === "POST" && pathname === "/v1/outcomes") return "telemetry";
+  if (method === "POST" && pathname === "/v1/policies/simulate") return "decide";
   if (method === "POST" && pathname === "/v1/execute") return "execute";
   if (method === "POST" && pathname === "/v1/targets") return "targets";
   if (method === "POST" && pathname.startsWith("/v1/targets/")) return "targets";
@@ -685,6 +686,55 @@ export function createServer({
           }
           throw error;
         }
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/v1/policies/simulate") {
+        const body = await readBody(req, maxBodyBytes);
+        const replay = await getReplay(body);
+        if (replay) {
+          sendReplay(replay);
+          return;
+        }
+
+        if (!body.workload?.type) {
+          sendJson(res, 400, { error: "workload.type is required" });
+          return;
+        }
+
+        const resolvePolicyForTenant = async input => {
+          const candidate = input && typeof input === "object" ? input : {};
+          if (!candidate.profile) return candidate;
+
+          const custom = await policyStore.get(tenantId, candidate.profile);
+          if (!custom) return candidate;
+
+          return {
+            ...custom.policy,
+            ...candidate,
+            profile: custom.baseProfile
+          };
+        };
+
+        const rawTargets = Array.isArray(body.targets) && body.targets.length > 0
+          ? body.targets
+          : await requestRegistry.list();
+
+        if (!rawTargets.length) {
+          sendJson(res, 503, { error: "no_registered_targets" });
+          return;
+        }
+
+        const result = simulatePolicy({
+          workload: body.workload,
+          constraints: body.constraints || {},
+          targets: rawTargets,
+          currentPolicy: await resolvePolicyForTenant(body.currentPolicy || {}),
+          candidatePolicy: await resolvePolicyForTenant(body.candidatePolicy || {})
+        });
+
+        await rememberResponse(body, 200, result);
+        sendJson(res, 200, result);
         return;
       }
 
