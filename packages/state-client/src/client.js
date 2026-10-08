@@ -265,6 +265,7 @@ export function createHTTPCoordinationStore({
         baseUrl,
         apiKey,
         "/v1/state/kv/" + encodeKey(key),
+        {},
         null,
         timeoutMs
       );
