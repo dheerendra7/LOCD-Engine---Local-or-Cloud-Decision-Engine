@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -46,6 +47,28 @@ jobs:
           path: test-output.txt
           if-no-files-found: error
 
+      - name: Publish test diagnostics
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("node:fs");
+            const output = fs.existsSync("test-output.txt")
+              ? fs.readFileSync("test-output.txt", "utf8")
+              : "test-output.txt was not created";
+            const body = [
+              "### CI test diagnostics",
+              "",
+              "```text",
+              output.slice(-60000),
+              "```"
+            ].join("\n");
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });
       - name: Syntax lint
         run: npm run lint
       - name: Smoke test
