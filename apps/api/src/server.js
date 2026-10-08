@@ -37,19 +37,19 @@ function validateProductionSafety({
   strict = false,
   authEnabled,
   rateLimitEnabled,
-  telemetryBackend = "process-local",
-  policyBackend = "process-local"
+  decisionStore,
+  policyStore
 } = {}) {
   if (!strict) return;
 
   const failures = [];
   if (!authEnabled) failures.push("authentication is disabled");
   if (!rateLimitEnabled) failures.push("rate limiting is disabled");
-  if (!telemetryBackend || telemetryBackend === "process-local") {
-    failures.push("telemetry is not durable");
+  if (decisionStore?.capabilities?.durable !== true) {
+    failures.push("telemetry store is not durable");
   }
-  if (!policyBackend || policyBackend === "process-local") {
-    failures.push("policy state is not durable");
+  if (policyStore?.capabilities?.durable !== true) {
+    failures.push("policy store is not durable");
   }
 
   if (failures.length) {
@@ -552,8 +552,8 @@ export function createServer({
     strict: productionStrict,
     authEnabled: auth.enabled,
     rateLimitEnabled: effectiveRateLimiter.enabled,
-    telemetryBackend,
-    policyBackend
+    decisionStore,
+    policyStore
   });
 
   const server = http.createServer(async (req, res) => {
