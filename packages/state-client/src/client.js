@@ -158,22 +158,26 @@ export function createHTTPPolicyStore({
     },
 
     async rollback(tenantId, id, version, metadata = {}) {
-      const response = await request(
-        fetchImpl,
-        baseUrl,
-        apiKey,
-        policyPath(id) + "/rollback",
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            version,
-            updatedBy: metadata.updatedBy ?? null
-          })
-        },
-        tenantId
-      );
-      return response;
+      try {
+        return await request(
+          fetchImpl,
+          baseUrl,
+          apiKey,
+          policyPath(id) + "/rollback",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              version,
+              updatedBy: metadata.updatedBy ?? null
+            })
+          },
+          tenantId
+        );
+      } catch (error) {
+        if (error.status === 404) return null;
+        throw error;
+      }
     },
 
     async remove(tenantId, id) {
