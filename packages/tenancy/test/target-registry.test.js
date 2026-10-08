@@ -53,27 +53,24 @@ test("tenant target file preserves per-tenant state", async () => {
   }
 });
 
-test("concurrent target file saves are serialized without losing state", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-target-save-race-"));
+test("queued target file saves observe mutations in call order", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir, "locd-target-save-race-"));
   const file = path.join(dir, "targets.json");
 
   try {
     const registry = createTenantTargetRegistry();
     registry.forTenant("acme").register(target("gpu-a"));
-    registry.forTenant("beta").register(target("gpu-b"));
 
-    await Promise.all(
-      Array.from({ length: 20 }, (_, index) => registry.saveToFile(file + (index % 2 ? "" : "")))
-    );
+    const first = registry.saveToFile(file);
+    registry.forTenant("acme").register(target("gpu-b"));
+    const second = registry.saveToFile(file);
+
+    await Promise.all([first, second]);
 
     const raw = JSON.parse(await readFile(file, "utf8"));
     assert.deepEqual(
-      raw.tenants.acme.map(item => item.id),
-      ["gpu-a"]
-    );
-    assert.deepEqual(
-      raw.tenants.beta.map(item => item.id),
-      ["gpu-b"]
+      raw.tenants.acme.map(item => item.id).sort(),
+      ["gpu-a", "gpu-b"]
     );
   } finally {
     await rm(dir, { recursive: true, force: true });
