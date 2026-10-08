@@ -10,6 +10,16 @@ Returns service readiness metadata.
       "version": "0.1.0"
     }
 
+## GET /ready
+
+Returns deployment readiness based on the API's critical backing stores.
+
+- HTTP `200` with `status: "ready"` when all configured checks pass.
+- HTTP `503` with `status: "not_ready"` when a dependency check fails.
+- `checks` reports telemetry, target registry, policy store, and coordination state.
+
+The endpoint is intended for load balancers and orchestrators. A `503` must remove the instance from service until the dependency recovers.
+
 ## POST /v1/decide
 
 Accepts a workload, constraints, policy and normalized execution targets.
