@@ -2,7 +2,7 @@ import http from "node:http";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { checkReadiness, createConfiguredExecutionRegistry, createConfiguredProbeScheduler, createConfiguredTargetRegistry, createGracefulShutdown, createServer } from "../src/server.js";
-import { createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
+import { createDecisionStore, createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { createCalibrator } from "../../../packages/calibration/src/index.js";
 import { createPolicyStore } from "../../../packages/policy-store/src/index.js";
 import { createScopedAuthorizer } from "../../../packages/auth/src/index.js";
@@ -325,6 +325,112 @@ test("decision history and metrics expose metadata without request payloads", as
   const metricsBody = await metrics.json();
   assert.equal(metricsBody.totalDecisions >= 1, true);
   assert.equal(metricsBody.routes.local >= 1, true);
+});
+
+test("policy simulation is read-only and tenant-scoped", async () => {
+  const authorizer = createScopedAuthorizer({
+    keys: [
+      { id: "acme-reader", secret: "acme-reader", tenantId: "acme", scopes: ["read"] },
+      { id: "acme-decider", secret: "acme-decider", tenantId: "acme", scopes: ["read", "decide"] },
+      { id: "beta-decider", secret: "beta-decider", tenantId: "beta", scopes: ["decide"] }
+    ]
+  });
+
+  const policyStore = createPolicyStore();
+  policyStore.upsert("acme", {
+    id: "acme-local-only",
+    baseProfile: "balanced",
+    allowedModes: ["local"]
+  });
+
+  const decisionStore = createDecisionStore({ maxEntries: 20 });
+  const server = createServer({ authorizer, policyStore, decisionStore });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + server.address().port;
+
+  const targets = [
+    {
+      id: "local",
+      mode: "local",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1,
+      estimatedLatencyMs: 100,
+      estimatedCostUsd: 0
+    },
+    {
+      id: "cloud",
+      mode: "cloud",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 0.2,
+      estimatedLatencyMs: 20,
+      estimatedCostUsd: 0.01
+    }
+  ];
+
+  try {
+    const readDenied = await fetch(url + "/v1/policies/simulate", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer acme-reader",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        workload: { type: "sim", sensitivity: "low" },
+        targets,
+        currentPolicy: { allowedModes: ["cloud"] },
+        candidatePolicy: { profile: "acme-local-only" }
+      })
+    });
+    assert.equal(readDenied.status, 403);
+
+    const acme = await fetch(url + "/v1/policies/simulate", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer acme-decider",
+        "content-type": "application/json",
+        "idempotency-key": "simulation-acme-1"
+      },
+      body: JSON.stringify({
+        workload: { type: "sim", sensitivity: "low" },
+        targets,
+        currentPolicy: { allowedModes: ["cloud"] },
+        candidatePolicy: { profile: "acme-local-only" }
+      })
+    });
+
+    assert.equal(acme.status, 200);
+    const acmeBody = await acme.json();
+    assert.equal(acmeBody.mutatedState, false);
+    assert.equal(acmeBody.executedProvider, false);
+    assert.equal(acmeBody.current.targetId, "cloud");
+    assert.equal(acmeBody.candidate.targetId, "local");
+    assert.equal(acmeBody.impact.targetChanged, true);
+    assert.equal(acmeBody.recommendation, "review_change");
+
+    const beta = await fetch(url + "/v1/policies/simulate", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer beta-decider",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        workload: { type: "sim", sensitivity: "low" },
+        targets,
+        currentPolicy: { allowedModes: ["cloud"] },
+        candidatePolicy: { profile: "acme-local-only" }
+      })
+    });
+
+    assert.equal(beta.status, 400);
+    assert.match((await beta.json()).error, /unknown policy profile/);
+    assert.equal((await decisionStore.summary()).totalDecisions, 0);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
 });
 
 test("tenant custom policies are isolated, versioned and enforced", async () => {
