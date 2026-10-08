@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createGracefulShutdown, createStateServiceServer } from "../src/server.js";
+import { checkReadiness, createGracefulShutdown, createStateServiceServer } from "../src/server.js";
 import { createSQLiteStateStores } from "../../../packages/sqlite/src/index.js";
 
 async function startServer(apiKey = "state-secret") {
@@ -193,6 +193,55 @@ test("state service rejects body-bearing requests without JSON content type", as
     assert.equal(response.status, 415);
     assert.deepEqual(await response.json(), { error: "unsupported_media_type" });
   } finally {
+    await instance.cleanup();
+  }
+});
+
+test("state service readiness reports dependency health", async () => {
+  const healthy = await checkReadiness({
+    stores: {
+      telemetry: { summary: async () => ({}) },
+      policies: { list: async () => [] },
+      coordination: { get: async () => null }
+    }
+  });
+
+  assert.equal(healthy.ready, true);
+  assert.deepEqual(healthy.checks, {
+    telemetry: "ok",
+    policies: "ok",
+    coordination: "ok"
+  });
+
+  const degraded = await checkReadiness({
+    stores: {
+      telemetry: { summary: async () => { throw new Error("db unavailable"); } },
+      policies: { list: async () => [] },
+      coordination: { get: async () => null }
+    }
+  });
+
+  assert.equal(degraded.ready, false);
+  assert.equal(degraded.checks.telemetry, "failed");
+  assert.equal(degraded.checks.policies, "ok");
+  assert.equal(degraded.checks.coordination, "ok");
+});
+
+test("state service /ready returns 503 when a dependency fails", async () => {
+  const instance = await startServer();
+  const originalSummary = instance.stores.telemetry.summary;
+  instance.stores.telemetry.summary = () => {
+    throw new Error("telemetry unavailable");
+  };
+
+  try {
+    const response = await fetch(instance.url + "/ready");
+    assert.equal(response.status, 503);
+    const body = await response.json();
+    assert.equal(body.status, "not_ready");
+    assert.equal(body.checks.telemetry, "failed");
+  } finally {
+    instance.stores.telemetry.summary = originalSummary;
     await instance.cleanup();
   }
 });
