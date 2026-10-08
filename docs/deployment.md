@@ -17,6 +17,12 @@ Render currently documents free web services as suitable for testing, hobby proj
 
 Source: https://render.com/docs/free
 
+## Runtime version
+
+The repository pins Render's Node.js runtime to `24.21.0` through `.node-version`. The package engine range is bounded to Node.js `>=22.16.0 <25`, and the Docker image is pinned to `node:24.21.0-alpine3.24`. CI continues to exercise the supported 22.x and 24.x lines.
+
+Keeping an upper bound prevents an unrelated future Node major from silently changing deployment behavior.
+
 ## Docker
 
 Build and run locally:

@@ -15,7 +15,7 @@
     "state:backup": "node packages/cli/bin/locd.mjs backup"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.16.0 <25.0.0"
   },
   "license": "MIT",
   "packageManager": "npm@11"
