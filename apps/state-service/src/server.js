@@ -2,6 +2,7 @@ import http from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { createSQLiteStateStores } from "../../../packages/sqlite/src/index.js";
 import { normalizeTenantId } from "../../../packages/tenancy/src/index.js";
+import { createLogger, createRequestId } from "../../../packages/observability/src/index.js";
 
 function safeEqual(supplied, expected) {
   if (typeof supplied !== "string" || typeof expected !== "string") return false;
@@ -54,7 +55,8 @@ function requestTenantId(req) {
 export function createStateServiceServer({
   stores,
   apiKey = process.env.LOCD_STATE_SERVICE_API_KEY?.trim() || null,
-  maxBodyBytes = Number(process.env.LOCD_STATE_SERVICE_MAX_BODY_BYTES || 1_000_000)
+  maxBodyBytes = Number(process.env.LOCD_STATE_SERVICE_MAX_BODY_BYTES || 1_000_000),
+  logger = createLogger({ level: process.env.LOCD_LOG_LEVEL || "info" })
 } = {}) {
   if (!stores?.telemetry || !stores?.coordination || !stores?.policies) {
     throw new Error("state service telemetry, coordination and policy stores are required");
@@ -64,6 +66,9 @@ export function createStateServiceServer({
   }
 
   return http.createServer(async (req, res) => {
+    const requestId = createRequestId(req.headers["x-request-id"]);
+    res.setHeader("x-request-id", requestId);
+
     try {
       const url = new URL(req.url || "/", "http://localhost");
       const pathname = url.pathname;
@@ -267,13 +272,34 @@ export function createStateServiceServer({
 
       sendJson(res, 405, { error: "method_not_allowed" });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "bad_request";
-      const status =
-        message === "request body too large" ? 413 :
-        message === "decision_not_found" ? 404 :
-        message === "invalid JSON" ? 400 :
-        400;
-      sendJson(res, status, { error: message });
+      const message = error instanceof Error ? error.message : "internal_server_error";
+      if (message === "request body too large") {
+        sendJson(res, 413, { error: message });
+        return;
+      }
+      if (message === "decision_not_found") {
+        sendJson(res, 404, { error: message });
+        return;
+      }
+      if (message === "invalid JSON") {
+        sendJson(res, 400, { error: message });
+        return;
+      }
+
+      logger.error({
+        event: "state_request_error",
+        requestId,
+        method: req.method,
+        path: req.url,
+        errorClass: error instanceof Error ? error.constructor.name : "unknown_error",
+        errorCode: error && typeof error === "object" && "code" in error
+          ? String(error.code)
+          : null
+      });
+      sendJson(res, 500, {
+        error: "internal_server_error",
+        requestId
+      });
     }
   });
 }
