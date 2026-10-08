@@ -697,6 +697,10 @@ export function createServer({
             sendJson(res, 403, { error: "live_execution_requires_execute_scope" });
             return;
           }
+          if (!effectiveRateLimiter.enabled) {
+            sendJson(res, 503, { error: "live_execution_requires_rate_limit" });
+            return;
+          }
         }
 
         const registry = executionRegistry ||
