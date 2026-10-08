@@ -1941,7 +1941,8 @@ test("live execution rejects static target fallbacks", async () => {
       privacy: 1
     }]),
     executionEnabled: true,
-    apiKey: "server-secret"
+    apiKey: "server-secret",
+    rateLimitMaxRequests: 20
   });
 
   await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
@@ -2070,7 +2071,8 @@ test("live execution requires execute scope even when execution is enabled", asy
   const scopedServer = createServer({
     authorizer,
     executionEnabled: true,
-    executionRegistry
+    executionRegistry,
+    rateLimitMaxRequests: 20
   });
   await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
   const url = "http://127.0.0.1:" + scopedServer.address().port;
