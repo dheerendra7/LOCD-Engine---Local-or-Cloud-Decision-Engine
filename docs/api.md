@@ -352,7 +352,7 @@ Executes a previously validated execution plan against server-registered adapter
 - failFast: optional boolean, default true
 - plan: validated plan with target IDs and optional per-step payload
 
-Live execution requires LOCD_EXECUTION_ENABLED=true and LOCD_API_KEY to be configured.
+Live execution requires LOCD_EXECUTION_ENABLED=true and authentication. A positive rate-limit configuration is also mandatory for live execution; otherwise the API returns HTTP 503 with `live_execution_requires_rate_limit` and does not invoke a provider.
 
 Static target snapshots receive dry-run-only execution adapters. They cannot be used for live execution.
 
