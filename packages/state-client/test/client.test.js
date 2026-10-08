@@ -64,6 +64,20 @@ function fakeFetch(responseBody, status = 200) {
   return { fetchImpl, calls };
 }
 
+test("HTTP coordination applies timeout without dropping request options", async () => {
+  const { fetchImpl, calls } = fakeFetch({ value: 42 });
+  const store = createHTTPCoordinationStore({
+    baseUrl: "http://state.internal:8787",
+    apiKey: "secret",
+    fetchImpl,
+    timeoutMs: 1234
+  });
+
+  assert.equal(await store.get("tenant/a"), 42);
+  assert.ok(calls[0].options.signal instanceof AbortSignal);
+  assert.equal(calls[0].options.headers.authorization, "Bearer secret");
+});
+
 test("HTTP coordination client encodes keys and sends auth", async () => {
   const { fetchImpl, calls } = fakeFetch({ value: 42 });
   const store = createHTTPCoordinationStore({
