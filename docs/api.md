@@ -232,7 +232,7 @@ When enabled:
 
 - GET /health remains public for health checks.
 - All /v1/* endpoints require either Authorization: Bearer <key> or X-LOCD-API-Key: <key>.
-- Invalid or missing credentials return HTTP 401.
+- Invalid or missing credentials return HTTP 401 until the client-address failed-authentication budget is exhausted; then HTTP 429 with `auth_rate_limit_exceeded` is returned. Valid credentials are evaluated independently of that failed-authentication budget.
 
 For production deployments, use a high-entropy secret from the platform secret manager. Do not commit the key to Git.
 
