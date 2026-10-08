@@ -163,6 +163,10 @@ Keep migrations backward-compatible and additive where possible. A failed migrat
 
 Use `npm run state:backup -- <source.db> <destination.db>` or the equivalent CLI command to create a native online SQLite backup. The backup refuses to overwrite an existing destination unless `--force` is supplied, and writes through a temporary file before the final rename. Native SQLite online backup support requires Node.js 22.16+; the application itself remains compatible with Node.js 22+.
 
+## State Service client timeout
+
+When the API uses the network State Service, `LOCD_STATE_CLIENT_TIMEOUT_MS` bounds each HTTP state request (default 5 seconds). A timeout is converted to a safe HTTP 503 response by the API and does not invoke a provider after the dependency timeout is detected.
+
 ## State Service HTTP resource guards
 
 The internal State Service has its own HTTP resource limits so its trust boundary cannot be left unprotected even when it is deployed separately.
