@@ -246,6 +246,18 @@ test("state service /ready returns 503 when a dependency fails", async () => {
   }
 });
 
+test("state service responses include browser security headers", async () => {
+  const instance = await startServer();
+  try {
+    const response = await fetch(instance.url + "/health");
+    assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+    assert.equal(response.headers.get("x-frame-options"), "DENY");
+    assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+  } finally {
+    await instance.cleanup();
+  }
+});
+
 test("state service exposes public health and protects state APIs", async () => {
   const instance = await startServer();
 
