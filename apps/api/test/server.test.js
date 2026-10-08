@@ -333,6 +333,89 @@ test("API accepts JSON media types with parameters and structured suffixes", asy
   assert.equal(response.status, 200);
 });
 
+test("failed authentication attempts are throttled independently of tenant quotas", async () => {
+  const executionServer = createServer({
+    authorizer: createScopedAuthorizer({
+      keys: [{
+        id: "valid",
+        secret: "valid-secret",
+        tenantId: "default",
+        scopes: ["read"]
+      }]
+    }),
+    rateLimitMaxRequests: 100,
+    authFailureRateLimitMaxRequests: 2
+  });
+
+  await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + executionServer.address().port;
+
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await fetch(url + "/v1/status", {
+        headers: { authorization: "Bearer wrong-secret" }
+      });
+      assert.equal(response.status, 401);
+    }
+
+    const blocked = await fetch(url + "/v1/status", {
+      headers: { authorization: "Bearer wrong-secret" }
+    });
+    assert.equal(blocked.status, 429);
+    assert.equal((await blocked.json()).error, "auth_rate_limit_exceeded");
+    assert.ok(Number(blocked.headers.get("retry-after")) >= 1);
+
+    const valid = await fetch(url + "/v1/status", {
+      headers: { authorization: "Bearer valid-secret" }
+    });
+    assert.equal(valid.status, 200);
+  } finally {
+    await new Promise(resolve => executionServer.close(resolve));
+  }
+});
+
+test("forbidden scopes do not consume the failed-authentication budget", async () => {
+  const server = createServer({
+    authorizer: createScopedAuthorizer({
+      keys: [{
+        id: "reader",
+        secret: "reader-secret",
+        tenantId: "default",
+        scopes: ["read"]
+      }]
+    }),
+    rateLimitMaxRequests: 20,
+    authFailureRateLimitMaxRequests: 1
+  });
+
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + server.address().port;
+
+  try {
+    const denied = await fetch(url + "/v1/targets", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer reader-secret",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ id: "not-allowed", mode: "local" })
+    });
+    assert.equal(denied.status, 403);
+
+    const unauthorized = await fetch(url + "/v1/status", {
+      headers: { authorization: "Bearer wrong-secret" }
+    });
+    assert.equal(unauthorized.status, 401);
+
+    const blocked = await fetch(url + "/v1/status", {
+      headers: { authorization: "Bearer wrong-secret-2" }
+    });
+    assert.equal(blocked.status, 429);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
 test("malformed JSON returns a client error", async () => {
   const response = await fetch(baseUrl + "/v1/decide", {
     method: "POST",
