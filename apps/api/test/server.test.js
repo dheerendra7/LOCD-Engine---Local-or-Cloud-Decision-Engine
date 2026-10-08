@@ -343,6 +343,63 @@ test("malformed JSON returns a client error", async () => {
   assert.deepEqual(await response.json(), { error: "invalid JSON" });
 });
 
+test("API returns 503 when the configured State Service times out", async () => {
+  const decisionStore = createDecisionStore({ maxEntries: 10 });
+  const policyStore = createPolicyStore();
+  const timeoutError = new Error("state_service_timeout");
+  timeoutError.code = "STATE_SERVICE_TIMEOUT";
+  timeoutError.status = 504;
+  policyStore.get = async () => {
+    throw timeoutError;
+  };
+
+  const server = createServer({
+    decisionStore,
+    policyStore,
+    authorizer: createScopedAuthorizer({
+      keys: [{
+        id: "decider",
+        secret: "decider-secret",
+        tenantId: "default",
+        scopes: ["decide", "read"]
+      }]
+    })
+  });
+
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + server.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer decider-secret",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        workload: { type: "timeout-test", sensitivity: "low" },
+        policy: { profile: "custom-timeout-policy" },
+        targets: [{
+          id: "local",
+          mode: "local",
+          health: 1,
+          capacity: 0.1,
+          privacy: 1,
+          estimatedLatencyMs: 10,
+          estimatedCostUsd: 0
+        }]
+      })
+    });
+
+    assert.equal(response.status, 503);
+    const body = await response.json();
+    assert.equal(body.error, "state_service_unavailable");
+    assert.equal(body.requestId ? typeof body.requestId : "missing", "string");
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
 test("unexpected dependency failures return a generic 500 without leaking internals", async () => {
   const policyStore = createPolicyStore();
   policyStore.get = async () => {
