@@ -34,6 +34,38 @@ test.after(async () => {
   await new Promise(resolve => server.close(resolve));
 });
 
+test("production strict mode rejects unsafe control-plane configuration", () => {
+  assert.throws(
+    () => createServer({
+      productionStrict: true,
+      authorizer: createScopedAuthorizer(),
+      rateLimitMaxRequests: 0,
+      telemetryBackend: "process-local",
+      policyBackend: "process-local"
+    }),
+    /authentication is disabled.*rate limiting is disabled.*telemetry is not durable.*policy state is not durable/
+  );
+});
+
+test("production strict mode accepts durable authenticated rate-limited configuration", () => {
+  const strictServer = createServer({
+    productionStrict: true,
+    authorizer: createScopedAuthorizer({
+      keys: [{
+        id: "ops",
+        secret: "ops-secret",
+        tenantId: "default",
+        scopes: ["admin"]
+      }]
+    }),
+    rateLimitMaxRequests: 60,
+    telemetryBackend: "sqlite",
+    policyBackend: "sqlite"
+  });
+
+  assert.equal(typeof strictServer.listen, "function");
+});
+
 test("HTTP server applies production connection and timeout guards", async () => {
   const guarded = createServer({
     requestTimeoutMs: 15_000,
