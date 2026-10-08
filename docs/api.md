@@ -128,11 +128,39 @@ Returns in-memory aggregate decision metrics:
 
 V1 telemetry is process-local and bounded. A durable production event pipeline is a later milestone.
 
-## GET /v1/policies
+## Policies
 
-Returns the built-in policy profiles for dashboard and client discovery.
+### GET /v1/policies
 
-A request can select a profile with policy.profile and override individual fields without changing the underlying preset definition.
+Returns built-in policy profiles plus authenticated tenant-scoped custom policies.
+
+A request can select a built-in or custom profile with policy.profile and override individual fields without changing built-in preset definitions.
+
+### GET /v1/policies/:id
+
+Returns one built-in profile or the authenticated tenant's custom policy.
+
+### POST /v1/policies
+
+Creates a custom tenant policy or creates a new version of an existing custom policy. Requires admin scope. Built-in policy IDs are read-only.
+
+### PUT /v1/policies/:id
+
+Creates or versions the named custom tenant policy. The path ID is authoritative; built-in policy IDs cannot be overwritten.
+
+### GET /v1/policies/:id/history
+
+Returns the bounded version history for an authenticated tenant's custom policy.
+
+### POST /v1/policies/:id/rollback
+
+Creates a new policy version from a selected historical version. Requires admin scope.
+
+### DELETE /v1/policies/:id
+
+Removes an authenticated tenant's custom policy. Built-in profiles cannot be deleted.
+
+Policy state can be persisted with LOCD_POLICIES_FILE. The file-backed store serializes concurrent writes inside the API process and writes snapshots atomically. Hosted deployments with ephemeral filesystems still need durable storage or a managed configuration backend for restart persistence.
 
 
 ## Target registry
