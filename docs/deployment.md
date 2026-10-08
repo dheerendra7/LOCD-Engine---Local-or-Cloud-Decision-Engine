@@ -59,6 +59,12 @@ The file is written atomically. On hosted platforms with ephemeral filesystems, 
 
 For multi-instance deployments, the internal State Service also provides tenant-scoped transactional policy storage when LOCD_STATE_SERVICE_URL is configured. LOCD_POLICIES_FILE remains the local/file-backed fallback when shared state is not enabled.
 
+## Strict production safety mode
+
+Set `LOCD_PRODUCTION_STRICT=true` for hosted production deployments that should fail closed at startup when core control-plane safety requirements are missing.
+
+Strict mode requires API authentication, an enabled rate limiter, durable telemetry, and durable policy state. Local development remains unchanged with the default `false`.
+
 ## Production checklist
 
 Before production use, add:
