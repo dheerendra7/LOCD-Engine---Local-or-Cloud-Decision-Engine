@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { backupSQLiteDatabase } from "../../sqlite/src/index.js";
 
 function usage() {
   return [
@@ -15,6 +16,7 @@ function usage() {
     "  probe <target-id>",
     "  decide <request.json>",
     "  execute <plan.json> [--live] [--include-outputs]",
+    "  backup <source.db> <destination.db> [--force]",
     "",
     "Options:",
     "  --base-url <url>    LOCD API base URL (default: http://localhost:8787)",
@@ -30,6 +32,7 @@ export function parseArgs(argv) {
   let idempotencyKey = null;
   let live = false;
   let includeOutputs = false;
+  let force = false;
   const positional = [];
 
   while (args.length) {
@@ -47,12 +50,14 @@ export function parseArgs(argv) {
       live = true;
     } else if (token === "--include-outputs") {
       includeOutputs = true;
+    } else if (token === "--force") {
+      force = true;
     } else {
       positional.push(token);
     }
   }
 
-  return { baseUrl, apiKey, idempotencyKey, live, includeOutputs, positional };
+  return { baseUrl, apiKey, idempotencyKey, live, includeOutputs, force, positional };
 }
 
 async function apiRequest(fetchImpl, baseUrl, pathname, options = {}) {
@@ -78,6 +83,7 @@ export async function runCli(argv, { fetchImpl = globalThis.fetch, write = conso
     idempotencyKey,
     live,
     includeOutputs,
+    force,
     positional
   } = parseArgs(argv);
   const apiKey = parsedApiKey || process.env.LOCD_API_KEY || null;
@@ -162,6 +168,22 @@ export async function runCli(argv, { fetchImpl = globalThis.fetch, write = conso
       null,
       2
     ));
+    return 0;
+  }
+
+  if (command === "backup") {
+    const sourcePath = positional[1];
+    const destinationPath = positional[2];
+    if (!sourcePath || !destinationPath) {
+      throw new Error("backup requires source and destination database paths");
+    }
+
+    const result = await backupSQLiteDatabase({
+      sourcePath,
+      destinationPath,
+      overwrite: force
+    });
+    write(JSON.stringify(result, null, 2));
     return 0;
   }
 
