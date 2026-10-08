@@ -328,6 +328,9 @@ export function createServer({
   if (!Number.isFinite(headersTimeoutMs) || headersTimeoutMs < 1) {
     throw new Error("headersTimeoutMs must be >= 1");
   }
+  if (headersTimeoutMs > requestTimeoutMs) {
+    throw new Error("headersTimeoutMs must be <= requestTimeoutMs");
+  }
   if (!Number.isFinite(keepAliveTimeoutMs) || keepAliveTimeoutMs < 0) {
     throw new Error("keepAliveTimeoutMs must be >= 0");
   }
