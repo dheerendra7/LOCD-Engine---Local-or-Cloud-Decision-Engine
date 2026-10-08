@@ -34,6 +34,49 @@ test.after(async () => {
   await new Promise(resolve => server.close(resolve));
 });
 
+test("production strict mode rejects unsafe control-plane configuration", () => {
+  assert.throws(
+    () => createServer({
+      productionStrict: true,
+      authorizer: createScopedAuthorizer(),
+      rateLimitMaxRequests: 0
+    }),
+    /authentication is disabled.*rate limiting is disabled.*telemetry store is not durable.*policy store is not durable/
+  );
+});
+
+test("production strict mode accepts genuinely durable stores", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-strict-safe-"));
+  const file = path.join(dir, "state.db");
+
+  try {
+    const stores = createSQLiteStateStores({ filePath: file, maxEntries: 20 });
+    const strictServer = createServer({
+      productionStrict: true,
+      authorizer: createScopedAuthorizer({
+        keys: [{
+          id: "ops",
+          secret: "ops-secret",
+          tenantId: "default",
+          scopes: ["admin"]
+        }]
+      }),
+      rateLimitMaxRequests: 60,
+      decisionStore: stores.telemetry,
+      policyStore: stores.policies,
+      coordinationStore: stores.coordination,
+      telemetryBackend: "sqlite",
+      policyBackend: "sqlite"
+    });
+
+    assert.equal(typeof strictServer.listen, "function");
+    strictServer.close();
+    stores.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("HTTP server applies production connection and timeout guards", async () => {
   const guarded = createServer({
     requestTimeoutMs: 15_000,

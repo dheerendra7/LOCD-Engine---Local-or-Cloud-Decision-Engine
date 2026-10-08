@@ -6,6 +6,31 @@ import path from "node:path";
 import { createFilePolicyStore, createPolicyStore } from "../src/index.js";
 import { createPersistenceQueue } from "../src/store.js";
 
+test("policy stores expose persistence capabilities", async () => {
+  const memory = createPolicyStore();
+  assert.deepEqual(memory.capabilities, {
+    durable: false,
+    shared: false,
+    tenantScoped: true,
+    transactional: false
+  });
+
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-policy-capabilities-"));
+  try {
+    const file = await createFilePolicyStore({
+      filePath: path.join(dir, "policies.json")
+    });
+    assert.deepEqual(file.capabilities, {
+      durable: true,
+      shared: false,
+      tenantScoped: true,
+      transactional: false
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 const policy = {
   id: "acme-fast",
   name: "Acme Fast",

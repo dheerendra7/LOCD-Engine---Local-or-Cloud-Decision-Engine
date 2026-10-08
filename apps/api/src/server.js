@@ -33,6 +33,30 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
 
 
+function validateProductionSafety({
+  strict = false,
+  authEnabled,
+  rateLimitEnabled,
+  decisionStore,
+  policyStore
+} = {}) {
+  if (!strict) return;
+
+  const failures = [];
+  if (!authEnabled) failures.push("authentication is disabled");
+  if (!rateLimitEnabled) failures.push("rate limiting is disabled");
+  if (decisionStore?.capabilities?.durable !== true) {
+    failures.push("telemetry store is not durable");
+  }
+  if (policyStore?.capabilities?.durable !== true) {
+    failures.push("policy store is not durable");
+  }
+
+  if (failures.length) {
+    throw new Error("production safety requirements not met: " + failures.join("; "));
+  }
+}
+
 function requiredScope(method, pathname) {
   if (method === "GET") return "read";
   if (method === "POST" && pathname === "/v1/decide") return "decide";
@@ -451,7 +475,8 @@ export function createServer({
   requestTimeoutMs = Number(process.env.LOCD_REQUEST_TIMEOUT_MS || 30_000),
   headersTimeoutMs = Number(process.env.LOCD_HEADERS_TIMEOUT_MS || 10_000),
   keepAliveTimeoutMs = Number(process.env.LOCD_KEEP_ALIVE_TIMEOUT_MS || 5_000),
-  maxRequestsPerSocket = Number(process.env.LOCD_MAX_REQUESTS_PER_SOCKET || 0)
+  maxRequestsPerSocket = Number(process.env.LOCD_MAX_REQUESTS_PER_SOCKET || 0),
+  productionStrict = process.env.LOCD_PRODUCTION_STRICT === "true"
 } = {}) {
   if (!Number.isFinite(maxBodyBytes) || maxBodyBytes < 1) {
     throw new Error("maxBodyBytes must be >= 1");
@@ -522,6 +547,14 @@ export function createServer({
           maxRequests: rateLimitMaxRequests,
           windowMs: rateLimitWindowMs
         }));
+
+  validateProductionSafety({
+    strict: productionStrict,
+    authEnabled: auth.enabled,
+    rateLimitEnabled: effectiveRateLimiter.enabled,
+    decisionStore,
+    policyStore
+  });
 
   const server = http.createServer(async (req, res) => {
     const requestId = createRequestId(req.headers["x-request-id"]);
