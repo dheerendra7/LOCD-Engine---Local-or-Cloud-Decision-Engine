@@ -1,3 +1,7 @@
+## JSON request media types
+
+All body-bearing API endpoints require a JSON media type. `application/json` and structured JSON suffixes such as `application/*+json` are accepted; media-type parameters are ignored. Missing or unsupported content types return HTTP 415 before request-body parsing.
+
 ## Request IDs
 
 Every HTTP response includes an `X-Request-ID`. Callers may supply a request ID for distributed correlation; it is accepted only when it matches LOCD's safe request-ID character set and length limit. Invalid, control-character-containing or otherwise unsafe values are replaced with a generated UUID so structured logs cannot be split or forged through the correlation field.
