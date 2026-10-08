@@ -402,6 +402,37 @@ Targets use their capacity value as the current utilization signal. Historical t
 The calibration endpoint exposes these bands through config.utilizationBands.
 
 
+## POST /v1/policies/simulate
+
+Runs a deterministic, read-only what-if comparison between currentPolicy and candidatePolicy using the canonical decision engine.
+
+Request:
+
+    {
+      "workload": {
+        "type": "llm-inference",
+        "sensitivity": "high"
+      },
+      "constraints": {
+        "latencyBudgetMs": 800,
+        "maxCostUsd": 0.05
+      },
+      "currentPolicy": {
+        "profile": "balanced"
+      },
+      "candidatePolicy": {
+        "profile": "localFirst"
+      },
+      "targets": []
+    }
+
+When targets is omitted or empty, the authenticated tenant's registered targets are evaluated.
+
+Custom policy profiles are resolved inside the authenticated tenant namespace. A simulation never persists a policy, records a decision telemetry event, invokes a provider, or executes a plan. The optional Idempotency-Key only stores the replay response according to the normal API retry-safety rules.
+
+The response includes the current and candidate decisions plus impact deltas for route, target, score, confidence, latency, cost, reasons, policy rules and rejection causes.
+
+
 ## Custom policies
 
 GET /v1/policies returns built-in profiles plus the authenticated tenant custom policies. POST /v1/policies creates or versions a tenant custom policy and requires admin scope. GET /v1/policies/:id/history returns bounded policy versions. DELETE /v1/policies/:id removes a tenant custom policy; built-in profiles cannot be deleted or overwritten.
