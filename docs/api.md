@@ -1,3 +1,7 @@
+## Request IDs
+
+Every HTTP response includes an `X-Request-ID`. Callers may supply a request ID for distributed correlation; it is accepted only when it matches LOCD's safe request-ID character set and length limit. Invalid, control-character-containing or otherwise unsafe values are replaced with a generated UUID so structured logs cannot be split or forged through the correlation field.
+
 ## Error handling
 
 Malformed client input returns a stable 4xx response. Unexpected server or dependency failures return 500 with an `internal_server_error` code and the request ID. The internal error message is logged as a structured server-side event and is not returned to the caller. Use the request ID with deployment logs to correlate the failure without exposing internal credentials, storage paths or dependency details.

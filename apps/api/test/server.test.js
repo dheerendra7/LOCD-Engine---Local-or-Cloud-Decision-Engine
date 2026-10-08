@@ -118,6 +118,16 @@ test("readBody enforces the limit across streamed chunks", async () => {
   );
 });
 
+test("API replaces unsafe caller request IDs with a generated ID", async () => {
+  const response = await fetch(baseUrl + "/health", {
+    headers: { "x-request-id": "trace\nforged" }
+  });
+
+  assert.equal(response.status, 200);
+  const requestId = response.headers.get("x-request-id");
+  assert.match(requestId, /^[0-9a-f-]{36}$/);
+  assert.equal(requestId.includes("\n"), false);
+});
 test("health endpoint reports service readiness", async () => {
   const response = await fetch(baseUrl + "/health");
   assert.equal(response.status, 200);
