@@ -117,6 +117,8 @@ Tune these with the deployment proxy/load balancer in mind.
 
 ## API hardening configuration
 
+Failed authentication attempts are independently throttled with `LOCD_AUTH_FAILURE_RPM` (default 30/min when API authentication is enabled). This budget is keyed by client address, is separate from tenant request quotas, and is shared through the configured coordination backend when one is present.
+
 Use LOCD_MAX_BODY_BYTES to cap JSON request size.
 
 Use LOCD_RATE_LIMIT_RPM to enable an in-process /v1 rate limit. Use LOCD_TRUST_PROXY=true only behind a trusted reverse proxy.
