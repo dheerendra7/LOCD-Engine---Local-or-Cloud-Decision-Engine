@@ -176,6 +176,27 @@ test("state service rejects invalid HTTP resource guard configuration", () => {
   );
 });
 
+test("state service rejects body-bearing requests without JSON content type", async () => {
+  const instance = await startServer();
+
+  try {
+    const response = await fetch(instance.url + "/v1/state/decisions", {
+      method: "POST",
+      headers: { authorization: "Bearer state-secret" },
+      body: JSON.stringify({
+        id: "bad-content-type",
+        route: "local",
+        workloadType: "test"
+      })
+    });
+
+    assert.equal(response.status, 415);
+    assert.deepEqual(await response.json(), { error: "unsupported_media_type" });
+  } finally {
+    await instance.cleanup();
+  }
+});
+
 test("state service exposes public health and protects state APIs", async () => {
   const instance = await startServer();
 

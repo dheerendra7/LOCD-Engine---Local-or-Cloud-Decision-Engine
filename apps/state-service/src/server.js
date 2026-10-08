@@ -59,6 +59,22 @@ export async function readBody(req, maxBytes = 1_000_000) {
   }
 }
 
+function assertJsonContentType(req) {
+  const contentType = String(req.headers?.["content-type"] || "")
+    .split(";", 1)[0]
+    .trim()
+    .toLowerCase();
+
+  if (!contentType || (contentType !== "application/json" && !contentType.endsWith("+json"))) {
+    throw new Error("unsupported_media_type");
+  }
+}
+
+async function readJsonBody(req, maxBytes = 1_000_000) {
+  assertJsonContentType(req);
+  return readBody(req, maxBytes);
+}
+
 function decodeKey(pathname, prefix, suffix = "") {
   return decodeURIComponent(pathname.slice(prefix.length, suffix ? -suffix.length : undefined));
 }
@@ -133,7 +149,7 @@ export function createStateServiceServer({
 
       if (req.method === "POST" && pathname === "/v1/state/decisions") {
         const tenantId = requestTenantId(req);
-        const event = await readBody(req, maxBodyBytes);
+        const event = await readJsonBody(req, maxBodyBytes);
         const saved = stores.telemetry.record({ ...event, tenantId });
         sendJson(res, 201, saved);
         return;
@@ -142,7 +158,7 @@ export function createStateServiceServer({
       if (req.method === "POST" && pathname.startsWith("/v1/state/outcomes/")) {
         const tenantId = requestTenantId(req);
         const id = decodeKey(pathname, "/v1/state/outcomes/");
-        const patch = await readBody(req, maxBodyBytes);
+        const patch = await readJsonBody(req, maxBodyBytes);
         const saved = stores.telemetry.recordOutcome(id, patch, { tenantId });
         sendJson(res, 200, saved);
         return;
@@ -200,7 +216,7 @@ export function createStateServiceServer({
 
       if (req.method === "POST" && pathname === "/v1/state/policies") {
         const tenantId = requestTenantId(req);
-        const body = await readBody(req, maxBodyBytes);
+        const body = await readJsonBody(req, maxBodyBytes);
         if (!body.policy || typeof body.policy !== "object") {
           sendJson(res, 400, { error: "policy is required" });
           return;
@@ -216,7 +232,7 @@ export function createStateServiceServer({
           pathname.endsWith("/rollback")) {
         const tenantId = requestTenantId(req);
         const id = decodeKey(pathname, "/v1/state/policies/", "/rollback");
-        const body = await readBody(req, maxBodyBytes);
+        const body = await readJsonBody(req, maxBodyBytes);
         const version = Number(body.version);
         if (!Number.isInteger(version) || version < 1) {
           sendJson(res, 400, { error: "policy version must be a positive integer" });
@@ -258,7 +274,7 @@ export function createStateServiceServer({
 
       if (req.method === "PUT" && pathname.startsWith("/v1/state/kv/")) {
         const key = decodeKey(pathname, "/v1/state/kv/");
-        const body = await readBody(req, maxBodyBytes);
+        const body = await readJsonBody(req, maxBodyBytes);
         await stores.coordination.set(key, body.value, { ttlMs: body.ttlMs ?? null });
         sendJson(res, 200, { stored: true });
         return;
@@ -266,7 +282,7 @@ export function createStateServiceServer({
 
       if (req.method === "POST" && pathname.startsWith("/v1/state/kv/") && pathname.endsWith("/set-if-absent")) {
         const key = decodeKey(pathname, "/v1/state/kv/", "/set-if-absent");
-        const body = await readBody(req, maxBodyBytes);
+        const body = await readJsonBody(req, maxBodyBytes);
         const claimed = await stores.coordination.setIfAbsent(
           key,
           body.value,
@@ -278,7 +294,7 @@ export function createStateServiceServer({
 
       if (req.method === "POST" && pathname.startsWith("/v1/state/kv/") && pathname.endsWith("/incr")) {
         const key = decodeKey(pathname, "/v1/state/kv/", "/incr");
-        const body = await readBody(req, maxBodyBytes);
+        const body = await readJsonBody(req, maxBodyBytes);
         const value = await stores.coordination.incr(
           key,
           { ttlMs: body.ttlMs ?? null }
@@ -316,6 +332,10 @@ export function createStateServiceServer({
       }
       if (message === "decision_not_found") {
         sendJson(res, 404, { error: message });
+        return;
+      }
+      if (message === "unsupported_media_type") {
+        sendJson(res, 415, { error: message });
         return;
       }
       if (message === "invalid JSON") {

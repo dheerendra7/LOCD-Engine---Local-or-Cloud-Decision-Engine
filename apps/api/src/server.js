@@ -86,6 +86,22 @@ export async function readBody(req, maxBytes = 1_000_000) {
   }
 }
 
+function assertJsonContentType(req) {
+  const contentType = String(req.headers?.["content-type"] || "")
+    .split(";", 1)[0]
+    .trim()
+    .toLowerCase();
+
+  if (!contentType || (contentType !== "application/json" && !contentType.endsWith("+json"))) {
+    throw new Error("unsupported_media_type");
+  }
+}
+
+async function readJsonBody(req, maxBytes = 1_000_000) {
+  assertJsonContentType(req);
+  return readBody(req, maxBytes);
+}
+
 async function serveWeb(res, pathname) {
   const requested = pathname === "/" ? "index.html" : pathname.replace(/^\//, "");
   const file = path.normalize(path.join(webRoot, requested));
@@ -654,7 +670,7 @@ export function createServer({
       }
 
       if (req.method === "POST" && pathname === "/v1/execute") {
-        const body = await readBody(req, maxBodyBytes);
+        const body = await readJsonBody(req, maxBodyBytes);
         const replay = await getReplay(body);
         if (replay) {
           sendReplay(replay);
@@ -700,7 +716,7 @@ export function createServer({
       }
 
       if (req.method === "POST" && pathname === "/v1/hybrid-plan") {
-        const body = await readBody(req, maxBodyBytes);
+        const body = await readJsonBody(req, maxBodyBytes);
         const replay = await getReplay(body);
         if (replay) {
           sendReplay(replay);
@@ -724,7 +740,7 @@ export function createServer({
 
       if (req.method === "POST" && pathname === "/v1/decide") {
         await calibrationReady;
-        const body = await readBody(req, maxBodyBytes);
+        const body = await readJsonBody(req, maxBodyBytes);
         const replay = await getReplay(body);
         if (replay) {
           sendReplay(replay);
@@ -800,7 +816,7 @@ export function createServer({
       }
 
       if (req.method === "POST" && pathname === "/v1/outcomes") {
-        const body = await readBody(req, maxBodyBytes);
+        const body = await readJsonBody(req, maxBodyBytes);
         const replay = await getReplay(body);
         if (replay) {
           sendReplay(replay);
@@ -837,7 +853,7 @@ export function createServer({
       }
 
       if (req.method === "POST" && pathname === "/v1/policies/simulate") {
-        const body = await readBody(req, maxBodyBytes);
+        const body = await readJsonBody(req, maxBodyBytes);
         const replay = await getReplay(body);
         if (replay) {
           sendReplay(replay);
@@ -961,7 +977,7 @@ export function createServer({
       }
 
       if (req.method === "POST" && pathname === "/v1/policies") {
-        const body = await readBody(req, maxBodyBytes);
+        const body = await readJsonBody(req, maxBodyBytes);
         const replay = await getReplay(body);
         if (replay) {
           sendReplay(replay);
@@ -993,7 +1009,7 @@ export function createServer({
         const policyId = decodeURIComponent(
           pathname.slice("/v1/policies/".length, -"/rollback".length)
         );
-        const body = await readBody(req, maxBodyBytes);
+        const body = await readJsonBody(req, maxBodyBytes);
         const replay = await getReplay(body);
         if (replay) {
           sendReplay(replay);
@@ -1049,7 +1065,7 @@ export function createServer({
           return;
         }
 
-        const body = await readBody(req, maxBodyBytes);
+        const body = await readJsonBody(req, maxBodyBytes);
         const replay = await getReplay(body);
         if (replay) {
           sendReplay(replay);
@@ -1099,7 +1115,7 @@ export function createServer({
       }
 
       if (req.method === "POST" && pathname === "/v1/targets") {
-        const body = await readBody(req, maxBodyBytes);
+        const body = await readJsonBody(req, maxBodyBytes);
         const replay = await getReplay(body);
         if (replay) {
           sendReplay(replay);
@@ -1123,7 +1139,7 @@ export function createServer({
           return;
         }
 
-        const body = await readBody(req, maxBodyBytes);
+        const body = await readJsonBody(req, maxBodyBytes);
         const replay = await getReplay(body);
         if (replay) {
           sendReplay(replay);
@@ -1158,7 +1174,7 @@ export function createServer({
           return;
         }
 
-        const body = await readBody(req, maxBodyBytes);
+        const body = await readJsonBody(req, maxBodyBytes);
         const replay = await getReplay(body);
         if (replay) {
           sendReplay(replay);
@@ -1293,6 +1309,10 @@ export function createServer({
       }
       if (message === "request body too large") {
         sendJson(res, 413, { error: message });
+        return;
+      }
+      if (message === "unsupported_media_type") {
+        sendJson(res, 415, { error: message });
         return;
       }
       if (message === "invalid JSON") {

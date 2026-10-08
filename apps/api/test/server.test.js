@@ -228,6 +228,48 @@ test("decision endpoint returns an explainable route", async () => {
   assert.ok(Array.isArray(body.rejected));
 });
 
+test("API rejects body-bearing requests without JSON content type", async () => {
+  const response = await fetch(baseUrl + "/v1/decide", {
+    method: "POST",
+    body: JSON.stringify({
+      workload: { type: "classification", sensitivity: "low" },
+      targets: [{
+        id: "local",
+        mode: "local",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 10,
+        estimatedCostUsd: 0
+      }]
+    })
+  });
+
+  assert.equal(response.status, 415);
+  assert.deepEqual(await response.json(), { error: "unsupported_media_type" });
+});
+
+test("API accepts JSON media types with parameters and structured suffixes", async () => {
+  const response = await fetch(baseUrl + "/v1/decide", {
+    method: "POST",
+    headers: { "content-type": "application/vnd.locd+json" },
+    body: JSON.stringify({
+      workload: { type: "classification", sensitivity: "low" },
+      targets: [{
+        id: "local",
+        mode: "local",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 10,
+        estimatedCostUsd: 0
+      }]
+    })
+  });
+
+  assert.equal(response.status, 200);
+});
+
 test("malformed JSON returns a client error", async () => {
   const response = await fetch(baseUrl + "/v1/decide", {
     method: "POST",
