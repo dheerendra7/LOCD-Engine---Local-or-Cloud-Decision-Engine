@@ -284,6 +284,69 @@ export async function createConfiguredTargetRegistry({
   return targetRegistry;
 }
 
+export async function checkReadiness({
+  decisionStore,
+  targetRegistry,
+  policyStore,
+  coordinationStore = null
+} = {}) {
+  const checks = {};
+
+  try {
+    if (!decisionStore || typeof decisionStore.summary !== "function") {
+      throw new Error("decision_store_unavailable");
+    }
+    await decisionStore.summary({ tenantId: "default" });
+    checks.telemetry = "ok";
+  } catch {
+    checks.telemetry = "failed";
+  }
+
+  try {
+    if (!targetRegistry || typeof targetRegistry.forTenant !== "function") {
+      throw new Error("target_registry_unavailable");
+    }
+    const registry = targetRegistry.forTenant("default");
+    if (!registry || typeof registry.list !== "function") {
+      throw new Error("tenant_target_registry_unavailable");
+    }
+    await registry.list();
+    checks.targets = "ok";
+  } catch {
+    checks.targets = "failed";
+  }
+
+  try {
+    if (!policyStore || typeof policyStore.list !== "function") {
+      throw new Error("policy_store_unavailable");
+    }
+    await policyStore.list("default");
+    checks.policies = "ok";
+  } catch {
+    checks.policies = "failed";
+  }
+
+  if (coordinationStore) {
+    try {
+      if (typeof coordinationStore.get !== "function") {
+        throw new Error("coordination_store_unavailable");
+      }
+      await coordinationStore.get("locd:readiness:probe");
+      checks.coordination = "ok";
+    } catch {
+      checks.coordination = "failed";
+    }
+  } else {
+    checks.coordination = "not_configured";
+  }
+
+  const failed = Object.values(checks).some(value => value === "failed");
+  return {
+    ready: !failed,
+    checks
+  };
+}
+
 export function createServer({
   apiKey = process.env.LOCD_API_KEY?.trim() || null,
   decisionStore = createDecisionStore({ maxEntries: 1000 }),
@@ -497,10 +560,17 @@ export function createServer({
       }
 
       if (req.method === "GET" && pathname === "/ready") {
-        sendJson(res, 200, {
-          status: "ready",
+        const readiness = await checkReadiness({
+          decisionStore,
+          targetRegistry,
+          policyStore,
+          coordinationStore
+        });
+        sendJson(res, readiness.ready ? 200 : 503, {
+          status: readiness.ready ? "ready" : "not_ready",
           service: "locd-api",
-          version: serviceVersion
+          version: serviceVersion,
+          checks: readiness.checks
         });
         return;
       }
