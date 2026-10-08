@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createFilePolicyStore, createPolicyStore } from "../src/index.js";
+import { createPersistenceQueue } from "../src/store.js";
 
 const policy = {
   id: "acme-fast",
@@ -26,6 +27,48 @@ const policy = {
     }
   ]
 };
+
+test("policy update metadata is generated once per version", () => {
+  let nowCalls = 0;
+  const store = createPolicyStore({
+    now: () => "2026-10-08T00:00:0" + (++nowCalls) + ".000Z"
+  });
+
+  const saved = store.upsert("acme", policy, { updatedBy: "admin" });
+
+  assert.equal(nowCalls, 1);
+  assert.equal(saved.updatedAt, "2026-10-08T00:00:01.000Z");
+  assert.equal(saved.versions[0].updatedAt, saved.updatedAt);
+});
+
+test("persistence queue serializes overlapping writes", async () => {
+  const events = [];
+  let releaseFirst;
+  const firstBlocked = new Promise(resolve => {
+    releaseFirst = resolve;
+  });
+
+  const persist = createPersistenceQueue(async snapshot => {
+    events.push("start:" + snapshot.version);
+    if (snapshot.version === 1) await firstBlocked;
+    events.push("done:" + snapshot.version);
+  });
+
+  const first = persist({ version: 1 });
+  const second = persist({ version: 2 });
+
+  await Promise.resolve();
+  assert.deepEqual(events, ["start:1"]);
+
+  releaseFirst();
+  await Promise.all([first, second]);
+  assert.deepEqual(events, [
+    "start:1",
+    "done:1",
+    "start:2",
+    "done:2"
+  ]);
+});
 
 test("policy versions increment and history is bounded", () => {
   const store = createPolicyStore({ maxVersionsPerPolicy: 2, now: () => "2026-10-08T00:00:00.000Z" });
