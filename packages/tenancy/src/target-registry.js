@@ -16,6 +16,7 @@ export function createTenantTargetRegistry({
 } = {}) {
   const defaultTenant = normalizeTenantId(defaultTenantId);
   const registries = new Map();
+  let saveQueue = Promise.resolve();
 
   function getRegistry(tenantId = defaultTenant) {
     const normalized = normalizeTenantId(tenantId);
@@ -155,20 +156,33 @@ export function createTenantTargetRegistry({
 
       return registries.size;
     },
-    async saveToFile(filePath) {
-      if (!filePath) throw new Error("filePath is required");
-      const resolved = path.resolve(filePath);
-      await mkdir(path.dirname(resolved), { recursive: true });
+    saveToFile(filePath) {
+      if (!filePath) return Promise.reject(new Error("filePath is required"));
 
-      const tenants = {};
-      for (const tenantId of this.listTenantIds()) {
-        tenants[tenantId] = await getRegistry(tenantId).list();
-      }
+      // Serialize asynchronous persistence operations in-process so concurrent
+      // register/remove/probe/heartbeat requests cannot lose each other's writes.
+      const persist = async () => {
+        const resolved = path.resolve(filePath);
+        await mkdir(path.dirname(resolved), { recursive: true });
 
-      const temp = resolved + ".tmp-" + process.pid + "-" + Date.now();
-      await writeFile(temp, JSON.stringify(tenantFilePayload(Object.entries(tenants)), null, 2) + "\n", "utf8");
-      await rename(temp, resolved);
-      return resolved;
+        const tenants = {};
+        for (const tenantId of this.listTenantIds()) {
+          tenants[tenantId] = await getRegistry(tenantId).list();
+        }
+
+        const temp = resolved + ".tmp-" + process.pid + "-" + Date.now();
+        await writeFile(
+          temp,
+          JSON.stringify(tenantFilePayload(Object.entries(tenants)), null, 2) + "\n",
+          "utf8"
+        );
+        await rename(temp, resolved);
+        return resolved;
+      };
+
+      const result = saveQueue.then(persist, persist);
+      saveQueue = result.catch(() => {});
+      return result;
     },
     async listAll() {
       const output = [];
