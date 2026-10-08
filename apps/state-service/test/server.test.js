@@ -44,6 +44,42 @@ test("state service exposes public health and protects state APIs", async () => 
   }
 });
 
+test("state service hides unexpected storage failures behind a generic 500", async () => {
+  const instance = await startServer();
+  const originalRecord = instance.stores.telemetry.record;
+  instance.stores.telemetry.record = () => {
+    throw new Error("internal sqlite password should never reach the client");
+  };
+
+  try {
+    const response = await fetch(instance.url + "/v1/state/decisions", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer state-secret",
+        "content-type": "application/json",
+        "x-request-id": "state-error-contract"
+      },
+      body: JSON.stringify({
+        id: "unexpected-failure",
+        route: "local",
+        workloadType: "test"
+      })
+    });
+
+    assert.equal(response.status, 500);
+    assert.equal(response.headers.get("x-request-id"), "state-error-contract");
+    const body = await response.json();
+    assert.deepEqual(body, {
+      error: "internal_server_error",
+      requestId: "state-error-contract"
+    });
+    assert.equal("internal sqlite password should never reach the client" in JSON.stringify(body), false);
+  } finally {
+    instance.stores.telemetry.record = originalRecord;
+    await instance.cleanup();
+  }
+});
+
 test("state service stores telemetry and outcomes", async () => {
   const instance = await startServer();
 
