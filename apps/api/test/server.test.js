@@ -39,31 +39,42 @@ test("production strict mode rejects unsafe control-plane configuration", () => 
     () => createServer({
       productionStrict: true,
       authorizer: createScopedAuthorizer(),
-      rateLimitMaxRequests: 0,
-      telemetryBackend: "process-local",
-      policyBackend: "process-local"
+      rateLimitMaxRequests: 0
     }),
-    /authentication is disabled.*rate limiting is disabled.*telemetry is not durable.*policy state is not durable/
+    /authentication is disabled.*rate limiting is disabled.*telemetry store is not durable.*policy store is not durable/
   );
 });
 
-test("production strict mode accepts durable authenticated rate-limited configuration", () => {
-  const strictServer = createServer({
-    productionStrict: true,
-    authorizer: createScopedAuthorizer({
-      keys: [{
-        id: "ops",
-        secret: "ops-secret",
-        tenantId: "default",
-        scopes: ["admin"]
-      }]
-    }),
-    rateLimitMaxRequests: 60,
-    telemetryBackend: "sqlite",
-    policyBackend: "sqlite"
-  });
+test("production strict mode accepts genuinely durable stores", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-strict-safe-"));
+  const file = path.join(dir, "state.db");
 
-  assert.equal(typeof strictServer.listen, "function");
+  try {
+    const stores = createSQLiteStateStores({ filePath: file, maxEntries: 20 });
+    const strictServer = createServer({
+      productionStrict: true,
+      authorizer: createScopedAuthorizer({
+        keys: [{
+          id: "ops",
+          secret: "ops-secret",
+          tenantId: "default",
+          scopes: ["admin"]
+        }]
+      }),
+      rateLimitMaxRequests: 60,
+      decisionStore: stores.telemetry,
+      policyStore: stores.policies,
+      coordinationStore: stores.coordination,
+      telemetryBackend: "sqlite",
+      policyBackend: "sqlite"
+    });
+
+    assert.equal(typeof strictServer.listen, "function");
+    strictServer.close();
+    stores.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("HTTP server applies production connection and timeout guards", async () => {
