@@ -30,7 +30,22 @@ jobs:
       - name: Install
         run: npm ci
       - name: Test
-        run: npm test
+        shell: bash
+        run: |
+          set +e
+          npm test > test-output.txt 2>&1
+          code=$?
+          cat test-output.txt
+          exit $code
+
+      - name: Upload test output on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-output-node-${{ matrix.node }}
+          path: test-output.txt
+          if-no-files-found: error
+
       - name: Syntax lint
         run: npm run lint
       - name: Smoke test
