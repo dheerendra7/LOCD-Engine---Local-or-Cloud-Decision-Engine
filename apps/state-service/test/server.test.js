@@ -126,6 +126,23 @@ test("state service applies HTTP resource guards", () => {
   assert.equal(guarded.maxRequestsPerSocket, 25);
 });
 
+test("state service rejects missing authentication configuration", () => {
+  const stores = {
+    telemetry: {},
+    coordination: {},
+    policies: {}
+  };
+
+  assert.throws(
+    () => createStateServiceServer({ stores, apiKey: null }),
+    /state service apiKey is required/
+  );
+  assert.throws(
+    () => createStateServiceServer({ stores, apiKey: "   " }),
+    /state service apiKey is required/
+  );
+});
+
 test("state service rejects invalid HTTP resource guard configuration", () => {
   const stores = {
     telemetry: {},
