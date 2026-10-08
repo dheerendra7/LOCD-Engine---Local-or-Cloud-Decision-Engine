@@ -27,6 +27,60 @@ function purgeExpired(database, now = Date.now()) {
   database.prepare("DELETE FROM coordination_kv WHERE expires_at IS NOT NULL AND expires_at <= ?").run(now);
 }
 
+function ensureMigrationTable(database) {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS locd_schema_migrations (
+      component TEXT PRIMARY KEY,
+      version INTEGER NOT NULL,
+      applied_at TEXT NOT NULL
+    ) STRICT;
+  `);
+}
+
+function currentMigrationVersion(database, component) {
+  const row = database.prepare(
+    "SELECT version FROM locd_schema_migrations WHERE component = ?"
+  ).get(component);
+  return row ? Number(row.version) : 0;
+}
+
+function runMigrations(database, component, migrations) {
+  ensureMigrationTable(database);
+
+  let current = currentMigrationVersion(database, component);
+  for (const migration of migrations) {
+    if (migration.version <= current) continue;
+
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      const latest = currentMigrationVersion(database, component);
+      if (migration.version <= latest) {
+        database.exec("COMMIT");
+        current = latest;
+        continue;
+      }
+
+      migration.up(database);
+      database.prepare(`
+        INSERT INTO locd_schema_migrations(component, version, applied_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(component) DO UPDATE SET
+          version = excluded.version,
+          applied_at = excluded.applied_at
+      `).run(component, migration.version, new Date().toISOString());
+
+      database.exec("COMMIT");
+      current = migration.version;
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  return current;
+}
+
+
 export function createSQLiteDecisionStore({ filePath, maxEntries = 5000, database = null } = {}) {
   if (!filePath && !database) throw new Error("filePath or database is required");
   if (!Number.isInteger(maxEntries) || maxEntries < 1) {
@@ -57,16 +111,22 @@ export function createSQLiteDecisionStore({ filePath, maxEntries = 5000, databas
       ON decision_events(timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_decision_events_target
       ON decision_events(target_id, workload_type);
-
   `);
 
-  const columns = db.prepare("PRAGMA table_info(decision_events)").all();
-  if (!columns.some(column => column.name === "tenant_id")) {
-    db.exec("ALTER TABLE decision_events ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'");
-  }
-  if (!columns.some(column => column.name === "target_utilization")) {
-    db.exec("ALTER TABLE decision_events ADD COLUMN target_utilization REAL");
-  }
+  runMigrations(db, "decision_events", [
+    {
+      version: 1,
+      up(database) {
+        const columns = database.prepare("PRAGMA table_info(decision_events)").all();
+        if (!columns.some(column => column.name === "tenant_id")) {
+          database.exec("ALTER TABLE decision_events ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'");
+        }
+        if (!columns.some(column => column.name === "target_utilization")) {
+          database.exec("ALTER TABLE decision_events ADD COLUMN target_utilization REAL");
+        }
+      }
+    }
+  ]);
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_decision_events_tenant_time
@@ -225,6 +285,13 @@ export function createSQLitePolicyStore({
     CREATE INDEX IF NOT EXISTS idx_policy_records_tenant
       ON policy_records(tenant_id, policy_id);
   `);
+
+  runMigrations(db, "policy_records", [
+    {
+      version: 1,
+      up() {}
+    }
+  ]);
 
   const tenant = tenantId => normalizeTenantId(tenantId);
   const policyId = id => String(id || "").trim().toLowerCase();
@@ -389,6 +456,13 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
     CREATE INDEX IF NOT EXISTS idx_coordination_expiry
       ON coordination_kv(expires_at);
   `);
+
+  runMigrations(db, "coordination_kv", [
+    {
+      version: 1,
+      up() {}
+    }
+  ]);
 
   function validateTtl(ttlMs) {
     if (ttlMs == null) return;

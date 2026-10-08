@@ -10,6 +10,29 @@ import {
   createSQLiteStateStores
 } from "../src/index.js";
 
+test("sqlite records component schema versions", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-schema-version-"));
+  const file = path.join(dir, "state.db");
+
+  try {
+    const stores = createSQLiteStateStores({ filePath: file });
+
+    const rows = stores.database.prepare(
+      "SELECT component, version FROM locd_schema_migrations ORDER BY component"
+    ).all();
+
+    assert.deepEqual(rows, [
+      { component: "coordination_kv", version: 1 },
+      { component: "decision_events", version: 1 },
+      { component: "policy_records", version: 1 }
+    ]);
+
+    stores.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("sqlite telemetry survives store recreation", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-telemetry-"));
   const file = path.join(dir, "state.db");
@@ -261,6 +284,11 @@ test("sqlite migrates legacy decision tables without tenant columns", async () =
     const restored = store.list({ tenantId: "default" });
     assert.equal(restored.length, 1);
     assert.equal(restored[0].id, "legacy");
+
+    const migration = store.database.prepare(
+      "SELECT component, version FROM locd_schema_migrations WHERE component = ?"
+    ).get("decision_events");
+    assert.deepEqual(migration, { component: "decision_events", version: 1 });
     store.close();
   } finally {
     await rm(dir, { recursive: true, force: true });
