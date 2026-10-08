@@ -70,7 +70,20 @@ test("log levels filter lower-priority events", () => {
 
 test("request IDs preserve valid caller values and generate fallback IDs", () => {
   assert.equal(createRequestId("req-123"), "req-123");
+  assert.equal(createRequestId("trace:/worker_01~prod"), "trace:/worker_01~prod");
   assert.match(createRequestId("x".repeat(129)), /^[0-9a-f-]{36}$/);
+});
+
+test("request IDs reject unsafe caller values", () => {
+  for (const value of [
+    "\nforged-log-line",
+    "trace\r\nX-Forged: true",
+    "trace id with spaces",
+    "unicode-✓",
+    "-leading-punctuation"
+  ]) {
+    assert.match(createRequestId(value), /^[0-9a-f-]{36}$/);
+  }
 });
 
 test("camelCase API keys are redacted", () => {
