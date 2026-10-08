@@ -1727,6 +1727,56 @@ test("live execution is disabled unless explicitly enabled", async () => {
   }
 });
 
+test("live execution requires an enabled rate limiter", async () => {
+  const executionServer = createServer({
+    targetRegistry: createTargetRegistry([{
+      id: "rate-limited-target",
+      mode: "private",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1
+    }]),
+    executionRegistry: createExecutionRegistry([{
+      id: "rate-limited-adapter",
+      targetId: "rate-limited-target",
+      async execute() {
+        throw new Error("must-not-run");
+      }
+    }]),
+    executionEnabled: true,
+    apiKey: "server-secret",
+    rateLimitMaxRequests: 0
+  });
+
+  await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + executionServer.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer server-secret"
+      },
+      body: JSON.stringify({
+        mode: "live",
+        plan: {
+          valid: true,
+          steps: [{ id: "step-1", targetId: "rate-limited-target" }]
+        }
+      })
+    });
+
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), {
+      error: "live_execution_requires_rate_limit"
+    });
+  } finally {
+    await new Promise(resolve => executionServer.close(resolve));
+  }
+});
+
 test("live execution returns provider results only when requested", async () => {
   const adapter = {
     id: "provider-adapter",
@@ -1754,7 +1804,8 @@ test("live execution returns provider results only when requested", async () => 
     }]),
     executionRegistry: createExecutionRegistry([adapter]),
     executionEnabled: true,
-    apiKey: "server-secret"
+    apiKey: "server-secret",
+    rateLimitMaxRequests: 20
   });
 
   await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
@@ -1822,7 +1873,8 @@ test("execution retries replay the original result", async () => {
       }
     }]),
     executionEnabled: true,
-    apiKey: "server-secret"
+    apiKey: "server-secret",
+    rateLimitMaxRequests: 20
   });
 
   await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
