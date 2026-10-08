@@ -164,6 +164,8 @@ For multiple LOCD API instances on different hosts, set LOCD_COORDINATION_URL an
 
 The local SQLite mode remains the simpler single-host option. The network service is a coordination endpoint, not a public-facing application API.
 
+The State Service exposes `/health` for liveness and `/ready` for readiness. Readiness checks telemetry, policy and coordination storage and returns HTTP 503 while a dependency is unavailable.
+
 ## State Service authentication
 
 The internal State Service requires `LOCD_STATE_SERVICE_API_KEY`. Its health endpoint remains public for liveness checks, but all `/v1/state/*` endpoints fail closed when the key is missing and require the configured credential.
