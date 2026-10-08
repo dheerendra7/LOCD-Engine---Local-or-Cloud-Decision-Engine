@@ -107,6 +107,58 @@ test("state service graceful shutdown force-closes active connections after its 
   ]);
 });
 
+test("state service applies HTTP resource guards", () => {
+  const guarded = createStateServiceServer({
+    stores: {
+      telemetry: {},
+      coordination: {},
+      policies: {}
+    },
+    requestTimeoutMs: 15_000,
+    headersTimeoutMs: 7_000,
+    keepAliveTimeoutMs: 3_000,
+    maxRequestsPerSocket: 25
+  });
+
+  assert.equal(guarded.requestTimeout, 15_000);
+  assert.equal(guarded.headersTimeout, 7_000);
+  assert.equal(guarded.keepAliveTimeout, 3_000);
+  assert.equal(guarded.maxRequestsPerSocket, 25);
+});
+
+test("state service rejects invalid HTTP resource guard configuration", () => {
+  const stores = {
+    telemetry: {},
+    coordination: {},
+    policies: {}
+  };
+
+  assert.throws(
+    () => createStateServiceServer({ stores, requestTimeoutMs: 0 }),
+    /requestTimeoutMs must be >= 1/
+  );
+  assert.throws(
+    () => createStateServiceServer({ stores, headersTimeoutMs: 0 }),
+    /headersTimeoutMs must be >= 1/
+  );
+  assert.throws(
+    () => createStateServiceServer({
+      stores,
+      requestTimeoutMs: 5_000,
+      headersTimeoutMs: 5_001
+    }),
+    /headersTimeoutMs must be <= requestTimeoutMs/
+  );
+  assert.throws(
+    () => createStateServiceServer({ stores, keepAliveTimeoutMs: -1 }),
+    /keepAliveTimeoutMs must be >= 0/
+  );
+  assert.throws(
+    () => createStateServiceServer({ stores, maxRequestsPerSocket: 1.5 }),
+    /maxRequestsPerSocket must be a non-negative integer/
+  );
+});
+
 test("state service exposes public health and protects state APIs", async () => {
   const instance = await startServer();
 

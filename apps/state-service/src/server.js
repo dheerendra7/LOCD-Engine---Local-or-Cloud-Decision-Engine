@@ -72,7 +72,11 @@ export function createStateServiceServer({
   stores,
   apiKey = process.env.LOCD_STATE_SERVICE_API_KEY?.trim() || null,
   maxBodyBytes = Number(process.env.LOCD_STATE_SERVICE_MAX_BODY_BYTES || 1_000_000),
-  logger = createLogger({ level: process.env.LOCD_LOG_LEVEL || "info" })
+  logger = createLogger({ level: process.env.LOCD_LOG_LEVEL || "info" }),
+  requestTimeoutMs = Number(process.env.LOCD_STATE_SERVICE_REQUEST_TIMEOUT_MS || 30_000),
+  headersTimeoutMs = Number(process.env.LOCD_STATE_SERVICE_HEADERS_TIMEOUT_MS || 10_000),
+  keepAliveTimeoutMs = Number(process.env.LOCD_STATE_SERVICE_KEEP_ALIVE_TIMEOUT_MS || 5_000),
+  maxRequestsPerSocket = Number(process.env.LOCD_STATE_SERVICE_MAX_REQUESTS_PER_SOCKET || 0)
 } = {}) {
   if (!stores?.telemetry || !stores?.coordination || !stores?.policies) {
     throw new Error("state service telemetry, coordination and policy stores are required");
@@ -80,8 +84,23 @@ export function createStateServiceServer({
   if (!Number.isFinite(maxBodyBytes) || maxBodyBytes < 1) {
     throw new Error("maxBodyBytes must be >= 1");
   }
+  if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs < 1) {
+    throw new Error("requestTimeoutMs must be >= 1");
+  }
+  if (!Number.isFinite(headersTimeoutMs) || headersTimeoutMs < 1) {
+    throw new Error("headersTimeoutMs must be >= 1");
+  }
+  if (headersTimeoutMs > requestTimeoutMs) {
+    throw new Error("headersTimeoutMs must be <= requestTimeoutMs");
+  }
+  if (!Number.isFinite(keepAliveTimeoutMs) || keepAliveTimeoutMs < 0) {
+    throw new Error("keepAliveTimeoutMs must be >= 0");
+  }
+  if (!Number.isInteger(maxRequestsPerSocket) || maxRequestsPerSocket < 0) {
+    throw new Error("maxRequestsPerSocket must be a non-negative integer");
+  }
 
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     const requestId = createRequestId(req.headers["x-request-id"]);
     res.setHeader("x-request-id", requestId);
 
@@ -318,6 +337,13 @@ export function createStateServiceServer({
       });
     }
   });
+
+  server.requestTimeout = requestTimeoutMs;
+  server.headersTimeout = headersTimeoutMs;
+  server.keepAliveTimeout = keepAliveTimeoutMs;
+  server.maxRequestsPerSocket = maxRequestsPerSocket;
+
+  return server;
 }
 
 export function createGracefulShutdown({
