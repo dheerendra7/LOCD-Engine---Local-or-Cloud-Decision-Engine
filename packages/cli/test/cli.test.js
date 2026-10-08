@@ -19,6 +19,21 @@ test("parseArgs extracts base URL and positional arguments", () => {
   );
 });
 
+test("parseArgs supports backup force mode", () => {
+  assert.deepEqual(
+    parseArgs(["backup", "state.db", "backup.db", "--force"]),
+    {
+      baseUrl: "http://localhost:8787",
+      apiKey: null,
+      idempotencyKey: null,
+      live: false,
+      includeOutputs: false,
+      force: true,
+      positional: ["backup", "state.db", "backup.db"]
+    }
+  );
+});
+
 test("CLI help is available without a network request", async () => {
   const output = [];
   const code = await runCli(["help"], { write: value => output.push(value) });
