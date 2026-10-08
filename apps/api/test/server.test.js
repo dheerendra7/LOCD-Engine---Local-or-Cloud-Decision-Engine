@@ -1,7 +1,7 @@
 import http from "node:http";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createConfiguredExecutionRegistry, createConfiguredProbeScheduler, createConfiguredTargetRegistry, createGracefulShutdown, createServer } from "../src/server.js";
+import { checkReadiness, createConfiguredExecutionRegistry, createConfiguredProbeScheduler, createConfiguredTargetRegistry, createGracefulShutdown, createServer } from "../src/server.js";
 import { createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { createCalibrator } from "../../../packages/calibration/src/index.js";
 import { createPolicyStore } from "../../../packages/policy-store/src/index.js";
@@ -42,6 +42,58 @@ test("health endpoint reports service readiness", async () => {
     service: "locd-api",
     version: "0.1.0"
   });
+});
+
+test("readiness probe reports dependency health", async () => {
+  const healthy = await checkReadiness({
+    decisionStore: { summary: async () => ({}) },
+    targetRegistry: {
+      forTenant: () => ({ list: async () => [] })
+    },
+    policyStore: { list: async () => [] },
+    coordinationStore: { get: async () => null }
+  });
+
+  assert.equal(healthy.ready, true);
+  assert.deepEqual(healthy.checks, {
+    telemetry: "ok",
+    targets: "ok",
+    policies: "ok",
+    coordination: "ok"
+  });
+
+  const degraded = await checkReadiness({
+    decisionStore: { summary: async () => { throw new Error("db unavailable"); } },
+    targetRegistry: {
+      forTenant: () => ({ list: async () => [] })
+    },
+    policyStore: { list: async () => [] }
+  });
+
+  assert.equal(degraded.ready, false);
+  assert.equal(degraded.checks.telemetry, "failed");
+  assert.equal(degraded.checks.targets, "ok");
+  assert.equal(degraded.checks.policies, "ok");
+  assert.equal(degraded.checks.coordination, "not_configured");
+});
+
+test("ready endpoint returns 503 when a dependency is unavailable", async () => {
+  const degradedServer = createServer({
+    decisionStore: {
+      summary: async () => { throw new Error("telemetry unavailable"); }
+    }
+  });
+
+  await new Promise(resolve => degradedServer.listen(0, "127.0.0.1", resolve));
+  const address = degradedServer.address();
+  const response = await fetch("http://127.0.0.1:" + address.port + "/ready");
+
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.equal(body.status, "not_ready");
+  assert.equal(body.checks.telemetry, "failed");
+
+  await new Promise(resolve => degradedServer.close(resolve));
 });
 
 test("decision endpoint returns an explainable route", async () => {
