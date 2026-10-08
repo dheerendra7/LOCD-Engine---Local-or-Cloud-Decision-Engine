@@ -50,6 +50,41 @@ test("sqlite online backup creates a restorable database", async () => {
   }
 });
 
+test("sqlite online backup verifies integrity before publish", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-backup-integrity-"));
+  const source = path.join(dir, "state.db");
+  const destination = path.join(dir, "backup.db");
+
+  try {
+    const stores = createSQLiteStateStores({ filePath: source });
+    stores.telemetry.record({
+      id: "integrity-check",
+      route: "local",
+      workloadType: "integrity-test"
+    });
+    stores.close();
+
+    const result = await backupSQLiteDatabase({
+      sourcePath: source,
+      destinationPath: destination
+    });
+
+    assert.ok(result.pages > 0);
+    const backup = new DatabaseSync(destination);
+    assert.equal(
+      backup.prepare("PRAGMA integrity_check").get().integrity_check,
+      "ok"
+    );
+    assert.deepEqual(
+      backup.prepare("PRAGMA foreign_key_check").all(),
+      []
+    );
+    backup.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("sqlite backup refuses accidental destination overwrite", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-backup-guard-"));
   const source = path.join(dir, "state.db");
