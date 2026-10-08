@@ -2490,6 +2490,108 @@ test("network State Service can provide shared telemetry across API instances", 
   }
 });
 
+test("shared state service policies are visible across API instances and tenant-isolated", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-shared-policy-api-"));
+  const stateFile = path.join(dir, "state.db");
+  const stateStores = createSQLiteStateStores({ filePath: stateFile });
+  const stateServer = createStateServiceServer({
+    stores: stateStores,
+    apiKey: "state-secret"
+  });
+  await new Promise(resolve => stateServer.listen(0, "127.0.0.1", resolve));
+  const stateUrl = "http://127.0.0.1:" + stateServer.address().port;
+
+  const authorizer = createScopedAuthorizer({
+    keys: [
+      { id: "acme-admin", secret: "acme-admin-secret", tenantId: "acme", scopes: ["admin"] },
+      { id: "beta-admin", secret: "beta-admin-secret", tenantId: "beta", scopes: ["admin"] }
+    ]
+  });
+  const stateA = createHTTPStateStores({
+    baseUrl: stateUrl,
+    apiKey: "state-secret"
+  });
+  const stateB = createHTTPStateStores({
+    baseUrl: stateUrl,
+    apiKey: "state-secret"
+  });
+  const serverA = createServer({
+    authorizer,
+    policyStore: stateA.policies
+  });
+  const serverB = createServer({
+    authorizer,
+    policyStore: stateB.policies
+  });
+
+  await Promise.all([
+    new Promise(resolve => serverA.listen(0, "127.0.0.1", resolve)),
+    new Promise(resolve => serverB.listen(0, "127.0.0.1", resolve))
+  ]);
+  const urlA = "http://127.0.0.1:" + serverA.address().port;
+  const urlB = "http://127.0.0.1:" + serverB.address().port;
+
+  try {
+    const headers = {
+      authorization: "Bearer acme-admin-secret",
+      "content-type": "application/json"
+    };
+    const policy = {
+      id: "shared-latency",
+      name: "Shared Latency",
+      baseProfile: "latencyFirst",
+      allowedModes: ["local"]
+    };
+
+    const created = await fetch(urlA + "/v1/policies", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(policy)
+    });
+    assert.equal(created.status, 201);
+    assert.equal((await created.json()).version, 1);
+
+    const visible = await fetch(urlB + "/v1/policies/shared-latency", {
+      headers
+    });
+    assert.equal(visible.status, 200);
+    assert.equal((await visible.json()).version, 1);
+
+    const isolated = await fetch(urlB + "/v1/policies/shared-latency", {
+      headers: { authorization: "Bearer beta-admin-secret" }
+    });
+    assert.equal(isolated.status, 404);
+
+    const updated = await fetch(urlB + "/v1/policies", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        ...policy,
+        allowedModes: ["cloud"]
+      })
+    });
+    assert.equal((await updated.json()).version, 2);
+
+    const rolledBack = await fetch(urlA + "/v1/policies/shared-latency/rollback", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ version: 1 })
+    });
+    assert.equal(rolledBack.status, 200);
+    const rollbackBody = await rolledBack.json();
+    assert.equal(rollbackBody.version, 3);
+    assert.equal(rollbackBody.rolledBackFromVersion, 1);
+  } finally {
+    await Promise.all([
+      new Promise(resolve => serverA.close(resolve)),
+      new Promise(resolve => serverB.close(resolve)),
+      new Promise(resolve => stateServer.close(resolve))
+    ]);
+    stateStores.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("decision feedback records target utilization for calibration", async () => {
   const response = await fetch(baseUrl + "/v1/decide", {
     method: "POST",
