@@ -8,7 +8,7 @@ Every HTTP response includes an `X-Request-ID`. Callers may supply a request ID 
 
 ## Error handling
 
-Malformed client input returns a stable 4xx response. Unexpected server or dependency failures return 500 with an `internal_server_error` code and the request ID. The internal error message is logged as a structured server-side event and is not returned to the caller. Use the request ID with deployment logs to correlate the failure without exposing internal credentials, storage paths or dependency details.
+Malformed client input returns a stable 4xx response. Unexpected server or dependency failures return 500 with an `internal_server_error` code and the request ID. An internal State Service request timeout is a dependency-availability case and returns HTTP 503 with `state_service_unavailable`. The internal error message is logged as a structured server-side event and is not returned to the caller. Use the request ID with deployment logs to correlate the failure without exposing internal credentials, storage paths or dependency details.
 
 ## Request size limits
 

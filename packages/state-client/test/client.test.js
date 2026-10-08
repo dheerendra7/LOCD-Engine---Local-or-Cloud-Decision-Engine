@@ -1,3 +1,48 @@
+test("HTTP state clients validate and propagate timeout settings", () => {
+  const { fetchImpl, calls } = fakeFetch({ value: null });
+
+  assert.throws(
+    () => createHTTPDecisionStore({
+      baseUrl: "http://state.internal",
+      fetchImpl,
+      timeoutMs: 0
+    }),
+    /timeoutMs must be >= 1/
+  );
+
+  const stores = createHTTPStateStores({
+    baseUrl: "http://state.internal",
+    fetchImpl,
+    timeoutMs: 1234
+  });
+
+  return stores.coordination.get("probe").then(() => {
+    assert.ok(calls[0].options.signal instanceof AbortSignal);
+    assert.equal(calls[0].options.signal.aborted, false);
+  });
+});
+
+test("HTTP state client maps request timeouts to a stable dependency error", async () => {
+  const fetchImpl = async () => {
+    const error = new DOMException("timed out", "TimeoutError");
+    throw error;
+  };
+  const store = createHTTPDecisionStore({
+    baseUrl: "http://state.internal",
+    fetchImpl,
+    timeoutMs: 5
+  });
+
+  await assert.rejects(
+    () => store.summary(),
+    error => (
+      error.code === "STATE_SERVICE_TIMEOUT" &&
+      error.status === 504 &&
+      error.message === "state_service_timeout"
+    )
+  );
+});
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import {

@@ -2,6 +2,20 @@ function joinUrl(baseUrl, pathname) {
   return String(baseUrl).replace(/\/$/, "") + pathname;
 }
 
+function validateTimeout(timeoutMs) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 1) {
+    throw new Error("timeoutMs must be >= 1");
+  }
+  return timeoutMs;
+}
+
+function timeoutError() {
+  const error = new Error("state_service_timeout");
+  error.code = "STATE_SERVICE_TIMEOUT";
+  error.status = 504;
+  return error;
+}
+
 function headers(apiKey, tenantId, extra = {}) {
   return {
     accept: "application/json",
@@ -11,17 +25,37 @@ function headers(apiKey, tenantId, extra = {}) {
   };
 }
 
-async function request(fetchImpl, baseUrl, apiKey, pathname, options = {}, tenantId = null) {
-  const response = await fetchImpl(joinUrl(baseUrl, pathname), {
-    ...options,
-    headers: headers(apiKey, tenantId, options.headers)
-  });
+async function request(
+  fetchImpl,
+  baseUrl,
+  apiKey,
+  pathname,
+  options = {},
+  tenantId = null,
+  timeoutMs = 5_000
+) {
+  const signal = AbortSignal.timeout(validateTimeout(timeoutMs));
+  let response;
+
+  try {
+    response = await fetchImpl(joinUrl(baseUrl, pathname), {
+      ...options,
+      signal,
+      headers: headers(apiKey, tenantId, options.headers)
+    });
+  } catch (error) {
+    if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+      throw timeoutError();
+    }
+    throw error;
+  }
+
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(body.error || "state service request failed");
-    error.status = response.status;
-    error.body = body;
-    throw error;
+    const requestError = new Error(body.error || "state service request failed");
+    requestError.status = response.status;
+    requestError.body = body;
+    throw requestError;
   }
   return body;
 }
@@ -34,10 +68,12 @@ export function createHTTPDecisionStore({
   baseUrl,
   apiKey = null,
   fetchImpl = globalThis.fetch,
-  maxEntries = 5000
+  maxEntries = 5000,
+  timeoutMs = Number(process.env.LOCD_STATE_CLIENT_TIMEOUT_MS || 5_000)
 } = {}) {
   if (!baseUrl) throw new Error("baseUrl is required");
   if (typeof fetchImpl !== "function") throw new Error("fetch implementation is required");
+  validateTimeout(timeoutMs);
 
   const store = {
     capabilities: Object.freeze({
@@ -52,7 +88,7 @@ export function createHTTPDecisionStore({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(event)
-      }, event?.tenantId ?? null);
+      }, event?.tenantId ?? null, timeoutMs);
     },
 
     async recordOutcome(id, patch, { tenantId = null } = {}) {
@@ -60,7 +96,7 @@ export function createHTTPDecisionStore({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(patch)
-      }, tenantId);
+      }, tenantId, timeoutMs);
     },
 
     async list({ limit = 50, tenantId = null } = {}) {
@@ -71,19 +107,20 @@ export function createHTTPDecisionStore({
         apiKey,
         "/v1/state/decisions?limit=" + safeLimit,
         {},
-        tenantId
+        tenantId,
+        timeoutMs
       );
       return response.decisions || [];
     },
 
     async summary({ tenantId = null } = {}) {
-      return request(fetchImpl, baseUrl, apiKey, "/v1/state/metrics", {}, tenantId);
+      return request(fetchImpl, baseUrl, apiKey, "/v1/state/metrics", {}, tenantId, timeoutMs);
     },
 
     clear({ tenantId = null } = {}) {
       return request(fetchImpl, baseUrl, apiKey, "/v1/state/telemetry/clear", {
         method: "POST"
-      }, tenantId);
+      }, tenantId, timeoutMs);
     }
   };
 
@@ -93,10 +130,12 @@ export function createHTTPDecisionStore({
 export function createHTTPPolicyStore({
   baseUrl,
   apiKey = null,
-  fetchImpl = globalThis.fetch
+  fetchImpl = globalThis.fetch,
+  timeoutMs = Number(process.env.LOCD_STATE_CLIENT_TIMEOUT_MS || 5_000)
 } = {}) {
   if (!baseUrl) throw new Error("baseUrl is required");
   if (typeof fetchImpl !== "function") throw new Error("fetch implementation is required");
+  validateTimeout(timeoutMs);
 
   const policyPath = id => "/v1/state/policies/" + encodeKey(id);
 
@@ -110,7 +149,7 @@ export function createHTTPPolicyStore({
 
     async list(tenantId) {
       const response = await request(
-        fetchImpl, baseUrl, apiKey, "/v1/state/policies", {}, tenantId
+        fetchImpl, baseUrl, apiKey, "/v1/state/policies", {}, tenantId, timeoutMs
       );
       return response.policies || [];
     },
@@ -118,7 +157,7 @@ export function createHTTPPolicyStore({
     async get(tenantId, id) {
       try {
         return await request(
-          fetchImpl, baseUrl, apiKey, policyPath(id), {}, tenantId
+          fetchImpl, baseUrl, apiKey, policyPath(id), {}, tenantId, timeoutMs
         );
       } catch (error) {
         if (error.status === 404) return null;
@@ -129,7 +168,7 @@ export function createHTTPPolicyStore({
     async history(tenantId, id) {
       try {
         return await request(
-          fetchImpl, baseUrl, apiKey, policyPath(id) + "/history", {}, tenantId
+          fetchImpl, baseUrl, apiKey, policyPath(id) + "/history", {}, tenantId, timeoutMs
         );
       } catch (error) {
         if (error.status === 404) return null;
@@ -152,7 +191,8 @@ export function createHTTPPolicyStore({
           headers: { "content-type": "application/json" },
           body: JSON.stringify(body)
         },
-        tenantId
+        tenantId,
+        timeoutMs
       );
       return response;
     },
@@ -172,7 +212,8 @@ export function createHTTPPolicyStore({
               updatedBy: metadata.updatedBy ?? null
             })
           },
-          tenantId
+          tenantId,
+          timeoutMs
         );
       } catch (error) {
         if (error.status === 404) return null;
@@ -188,7 +229,8 @@ export function createHTTPPolicyStore({
           apiKey,
           policyPath(id),
           { method: "DELETE" },
-          tenantId
+          tenantId,
+          timeoutMs
         );
         return true;
       } catch (error) {
@@ -202,10 +244,12 @@ export function createHTTPPolicyStore({
 export function createHTTPCoordinationStore({
   baseUrl,
   apiKey = null,
-  fetchImpl = globalThis.fetch
+  fetchImpl = globalThis.fetch,
+  timeoutMs = Number(process.env.LOCD_STATE_CLIENT_TIMEOUT_MS || 5_000)
 } = {}) {
   if (!baseUrl) throw new Error("baseUrl is required");
   if (typeof fetchImpl !== "function") throw new Error("fetch implementation is required");
+  validateTimeout(timeoutMs);
 
   return {
     capabilities: Object.freeze({
@@ -220,7 +264,9 @@ export function createHTTPCoordinationStore({
         fetchImpl,
         baseUrl,
         apiKey,
-        "/v1/state/kv/" + encodeKey(key)
+        "/v1/state/kv/" + encodeKey(key),
+        null,
+        timeoutMs
       );
       return response.value ?? null;
     },
@@ -235,7 +281,9 @@ export function createHTTPCoordinationStore({
           method: "PUT",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ value, ttlMs })
-        }
+        },
+        null,
+        timeoutMs
       ).then(() => true);
     },
 
@@ -249,7 +297,9 @@ export function createHTTPCoordinationStore({
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ value, ttlMs })
-        }
+        },
+        null,
+        timeoutMs
       );
       return response.claimed === true;
     },
@@ -260,7 +310,9 @@ export function createHTTPCoordinationStore({
         baseUrl,
         apiKey,
         "/v1/state/kv/" + encodeKey(key),
-        { method: "DELETE" }
+        { method: "DELETE" },
+        null,
+        timeoutMs
       );
       return response.deleted === true;
     },
@@ -275,7 +327,9 @@ export function createHTTPCoordinationStore({
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ ttlMs })
-        }
+        },
+        null,
+        timeoutMs
       );
       return Number(response.value);
     },
@@ -283,7 +337,7 @@ export function createHTTPCoordinationStore({
     async clear() {
       return request(fetchImpl, baseUrl, apiKey, "/v1/state/coordination/clear", {
         method: "POST"
-      });
+      }, null, timeoutMs);
     }
   };
 }
@@ -292,11 +346,13 @@ export function createHTTPStateStores({
   baseUrl,
   apiKey = null,
   fetchImpl = globalThis.fetch,
-  maxEntries = 5000
+  maxEntries = 5000,
+  timeoutMs = Number(process.env.LOCD_STATE_CLIENT_TIMEOUT_MS || 5_000)
 } = {}) {
+  validateTimeout(timeoutMs);
   return {
-    telemetry: createHTTPDecisionStore({ baseUrl, apiKey, fetchImpl, maxEntries }),
-    coordination: createHTTPCoordinationStore({ baseUrl, apiKey, fetchImpl }),
-    policies: createHTTPPolicyStore({ baseUrl, apiKey, fetchImpl })
+    telemetry: createHTTPDecisionStore({ baseUrl, apiKey, fetchImpl, maxEntries, timeoutMs }),
+    coordination: createHTTPCoordinationStore({ baseUrl, apiKey, fetchImpl, timeoutMs }),
+    policies: createHTTPPolicyStore({ baseUrl, apiKey, fetchImpl, timeoutMs })
   };
 }

@@ -1357,6 +1357,10 @@ export function createServer({
         sendJson(res, 413, { error: message });
         return;
       }
+      if (error && typeof error === "object" && error.code === "STATE_SERVICE_TIMEOUT") {
+        sendJson(res, 503, { error: "state_service_unavailable", requestId });
+        return;
+      }
       if (message === "unsupported_media_type") {
         sendJson(res, 415, { error: message });
         return;
