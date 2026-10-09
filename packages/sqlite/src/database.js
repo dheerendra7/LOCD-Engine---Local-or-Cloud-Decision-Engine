@@ -594,6 +594,15 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
       return result.changes === 1;
     },
 
+    async deleteIfValue(key, expectedValue) {
+      purgeExpired(db);
+      const serialized = JSON.stringify(expectedValue);
+      if (serialized === undefined) return false;
+      const result = db.prepare("DELETE FROM coordination_kv WHERE key = ? AND value = ?")
+        .run(String(key), serialized);
+      return result.changes === 1;
+    },
+
     async incr(key, { ttlMs = null } = {}) {
       validateTtl(ttlMs);
       db.exec("BEGIN IMMEDIATE");

@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 export function createInMemoryCoordinationStore() {
   const values = new Map();
   const expiries = new Map();
@@ -56,6 +58,14 @@ export function createInMemoryCoordinationStore() {
     async delete(key) {
       purge();
       const normalized = String(key);
+      expiries.delete(normalized);
+      return values.delete(normalized);
+    },
+
+    async deleteIfValue(key, expectedValue) {
+      purge();
+      const normalized = String(key);
+      if (!values.has(normalized) || !isDeepStrictEqual(values.get(normalized), expectedValue)) return false;
       expiries.delete(normalized);
       return values.delete(normalized);
     },

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { fingerprint } from "../../../packages/runtime/src/idempotency.js";
 import { assertCoordinationStore } from "./store.js";
 
@@ -89,10 +90,10 @@ export function createCoordinatedIdempotencyStore({
       throw new Error("idempotency_key_reused");
     }
 
-    return {
+    return structuredClone({
       ...existing.response,
       replayed: true
-    };
+    });
   }
 
   async function remember(scope, key, body, response) {
@@ -100,7 +101,7 @@ export function createCoordinatedIdempotencyStore({
 
     await store.set(storageKey(scope, key), {
       fingerprint: fingerprint(body),
-      response: { ...response, replayed: false },
+      response: structuredClone({ ...response, replayed: false }),
       storedAt: new Date().toISOString()
     }, { ttlMs });
   }
@@ -111,6 +112,7 @@ export function createCoordinatedIdempotencyStore({
     const storedKey = storageKey(scope, key);
     const value = {
       fingerprint: fingerprint(body),
+      claimToken: randomUUID(),
       response: null,
       processing: true,
       storedAt: new Date().toISOString()
@@ -120,7 +122,7 @@ export function createCoordinatedIdempotencyStore({
       ttlMs: lockTtlMs
     });
 
-    if (claimed) return { claimed: true };
+    if (claimed) return { claimed: true, claimToken: value.claimToken };
 
     const existing = await store.get(storedKey);
     if (existing?.fingerprint !== value.fingerprint) {
@@ -131,12 +133,21 @@ export function createCoordinatedIdempotencyStore({
       return { claimed: false, reason: "in_progress" };
     }
 
-    return { claimed: false, reason: "completed", response: existing.response };
+    return {
+      claimed: false,
+      reason: "completed",
+      response: structuredClone(existing.response)
+    };
   }
 
-  return {
-    lookup,
-    remember,
-    claim
-  };
+  async function release(scope, key, body, claimToken) {
+    if (!key || !claimToken || typeof store.deleteIfValue !== "function") return false;
+    const storedKey = storageKey(scope, key);
+    const existing = await store.get(storedKey);
+    if (!existing || !existing.processing || existing.claimToken !== claimToken ||
+        existing.fingerprint !== fingerprint(body)) return false;
+    return store.deleteIfValue(storedKey, existing);
+  }
+
+  return { lookup, remember, claim, release };
 }

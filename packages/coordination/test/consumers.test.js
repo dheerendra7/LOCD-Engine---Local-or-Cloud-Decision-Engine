@@ -72,10 +72,9 @@ test("coordinated idempotency can claim a key and identify in-progress retries",
   const one = createCoordinatedIdempotencyStore({ store, namespace: "claim-test" });
   const two = createCoordinatedIdempotencyStore({ store, namespace: "claim-test" });
 
-  assert.deepEqual(
-    await one.claim("scope", "key", { payload: 1 }),
-    { claimed: true }
-  );
+  const initialClaim = await one.claim("scope", "key", { payload: 1 });
+  assert.equal(initialClaim.claimed, true);
+  assert.equal(typeof initialClaim.claimToken, "string");
 
   assert.deepEqual(
     await two.claim("scope", "key", { payload: 1 }),
@@ -93,4 +92,22 @@ test("coordinated consumer validates backend configuration", () => {
     () => createCoordinatedFixedWindowRateLimiter({ store: {}, maxRequests: 1 }),
     /must implement get/
   );
+});
+
+
+test("coordinated idempotency releases claims only for their owner", async () => {
+  const store = createInMemoryCoordinationStore();
+  const one = createCoordinatedIdempotencyStore({ store, namespace: "release-test" });
+  const two = createCoordinatedIdempotencyStore({ store, namespace: "release-test" });
+  const body = { payload: "same" };
+  const claim = await one.claim("scope", "key", body);
+  assert.equal(claim.claimed, true);
+  assert.equal(typeof claim.claimToken, "string");
+  assert.equal(await two.release("scope", "key", body, claim.claimToken + "-wrong"), false);
+  assert.equal((await two.claim("scope", "key", body)).reason, "in_progress");
+  assert.equal(await one.release("scope", "key", body, claim.claimToken), true);
+  const replacement = await two.claim("scope", "key", body);
+  assert.equal(replacement.claimed, true);
+  assert.equal(await one.release("scope", "key", body, claim.claimToken), false);
+  assert.equal((await one.claim("scope", "key", body)).reason, "in_progress");
 });
