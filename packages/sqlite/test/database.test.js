@@ -414,3 +414,28 @@ test("sqlite coordination atomically deletes only the expected value", async () 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+
+test("sqlite coordination atomically replaces only the expected value", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-set-if-value-"));
+  const file = path.join(dir, "state.db");
+  const one = createSQLiteCoordinationStore({ filePath: file });
+  const two = createSQLiteCoordinationStore({ filePath: file });
+  try {
+    await one.set("claim", { processing: true, token: "one" }, { ttlMs: 10_000 });
+    assert.equal(
+      await two.setIfValue("claim", { processing: true, token: "stale" }, { response: "wrong" }, { ttlMs: 10_000 }),
+      false
+    );
+    assert.deepEqual(await one.get("claim"), { processing: true, token: "one" });
+    assert.equal(
+      await two.setIfValue("claim", { processing: true, token: "one" }, { response: "right" }, { ttlMs: 10_000 }),
+      true
+    );
+    assert.deepEqual(await one.get("claim"), { response: "right" });
+  } finally {
+    one.close();
+    two.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

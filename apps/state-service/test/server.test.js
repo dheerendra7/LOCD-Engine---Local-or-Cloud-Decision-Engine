@@ -630,3 +630,47 @@ test("state service conditionally deletes only the matching coordination value",
     await instance.cleanup();
   }
 });
+
+
+test("state service atomically replaces only the matching coordination value", async () => {
+  const instance = await startServer();
+  const headers = {
+    authorization: "Bearer state-secret",
+    "content-type": "application/json"
+  };
+  const keyPath = "/v1/state/kv/claim-for-replace";
+  try {
+    await fetch(instance.url + keyPath, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ value: { processing: true, token: "one" }, ttlMs: 10_000 })
+    });
+
+    const stale = await fetch(instance.url + keyPath + "/set-if-value", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        expectedValue: { processing: true, token: "stale" },
+        value: { response: "wrong" },
+        ttlMs: 10_000
+      })
+    });
+    assert.deepEqual(await stale.json(), { updated: false });
+
+    const current = await fetch(instance.url + keyPath + "/set-if-value", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        expectedValue: { processing: true, token: "one" },
+        value: { response: "right" },
+        ttlMs: 10_000
+      })
+    });
+    assert.deepEqual(await current.json(), { updated: true });
+
+    const remaining = await fetch(instance.url + keyPath, { headers });
+    assert.deepEqual(await remaining.json(), { value: { response: "right" } });
+  } finally {
+    await instance.cleanup();
+  }
+});

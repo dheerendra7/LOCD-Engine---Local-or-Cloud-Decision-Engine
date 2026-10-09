@@ -134,6 +134,5 @@ test("a stale coordinated request cannot complete a replacement claim", async ()
     await two.remember("scope", "key", body, { status: 200, body: { owner: "new" } }, newClaim.claimToken),
     true
   );
-  assert.equal((await one.lookup("scope", "key", body)).body.owner, undefined);
-  assert.equal((await one.lookup("scope", "key", body)).body.body?.owner, "new");
+  assert.equal((await one.lookup("scope", "key", body)).body.owner, "new");
 });

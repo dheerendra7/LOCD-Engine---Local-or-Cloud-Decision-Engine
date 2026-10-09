@@ -603,6 +603,19 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
       return result.changes === 1;
     },
 
+    async setIfValue(key, expectedValue, value, { ttlMs = null } = {}) {
+      validateTtl(ttlMs);
+      purgeExpired(db);
+      const expected = JSON.stringify(expectedValue);
+      const next = JSON.stringify(value);
+      if (expected === undefined || next === undefined) return false;
+      const expiresAt = ttlMs == null ? null : Date.now() + ttlMs;
+      const result = db.prepare(
+        "UPDATE coordination_kv SET value = ?, expires_at = ? WHERE key = ? AND value = ?"
+      ).run(next, expiresAt, String(key), expected);
+      return result.changes === 1;
+    },
+
     async incr(key, { ttlMs = null } = {}) {
       validateTtl(ttlMs);
       db.exec("BEGIN IMMEDIATE");
