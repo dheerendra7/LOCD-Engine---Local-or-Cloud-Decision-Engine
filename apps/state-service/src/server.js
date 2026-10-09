@@ -350,6 +350,22 @@ export function createStateServiceServer({
         return;
       }
 
+      if (req.method === "POST" && pathname.startsWith("/v1/state/kv/") && pathname.endsWith("/delete-if-value")) {
+        const key = decodeKey(pathname, "/v1/state/kv/", "/delete-if-value");
+        const body = await readJsonBody(req, maxBodyBytes);
+        if (!Object.hasOwn(body, "expectedValue")) {
+          sendJson(res, 400, { error: "expected_value_required" });
+          return;
+        }
+        if (typeof stores.coordination.deleteIfValue !== "function") {
+          sendJson(res, 501, { error: "conditional_delete_not_supported" });
+          return;
+        }
+        const deleted = await stores.coordination.deleteIfValue(key, body.expectedValue);
+        sendJson(res, 200, { deleted });
+        return;
+      }
+
       if (req.method === "POST" && pathname.startsWith("/v1/state/kv/") && pathname.endsWith("/incr")) {
         const key = decodeKey(pathname, "/v1/state/kv/", "/incr");
         const body = await readJsonBody(req, maxBodyBytes);

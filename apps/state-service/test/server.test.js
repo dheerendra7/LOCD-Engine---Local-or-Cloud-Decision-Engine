@@ -594,3 +594,39 @@ test("state service isolates telemetry by trusted tenant header", async () => {
     await instance.cleanup();
   }
 });
+
+
+test("state service conditionally deletes only the matching coordination value", async () => {
+  const instance = await startServer();
+  const headers = {
+    authorization: "Bearer state-secret",
+    "content-type": "application/json"
+  };
+  const keyPath = "/v1/state/kv/claim-for-delete";
+  try {
+    await fetch(instance.url + keyPath, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ value: { owner: "first", token: "one" }, ttlMs: 10_000 })
+    });
+
+    const stale = await fetch(instance.url + keyPath + "/delete-if-value", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ expectedValue: { owner: "first", token: "stale" } })
+    });
+    assert.deepEqual(await stale.json(), { deleted: false });
+
+    const current = await fetch(instance.url + keyPath + "/delete-if-value", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ expectedValue: { owner: "first", token: "one" } })
+    });
+    assert.deepEqual(await current.json(), { deleted: true });
+
+    const remaining = await fetch(instance.url + keyPath, { headers });
+    assert.deepEqual(await remaining.json(), { value: null });
+  } finally {
+    await instance.cleanup();
+  }
+});
