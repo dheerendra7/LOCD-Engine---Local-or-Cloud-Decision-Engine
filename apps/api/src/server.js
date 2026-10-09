@@ -666,11 +666,17 @@ export function createServer({
       };
       const rememberResponse = async (body, status, responseBody) => {
         if (!idempotencyKey) return;
+        const scope = scopeKey(tenantId, req.method + " " + pathname);
+        const activeClaim = idempotencyClaim?.scope === scope &&
+          idempotencyClaim.key === idempotencyKey
+          ? idempotencyClaim
+          : null;
         await effectiveIdempotencyStore.remember(
-          scopeKey(tenantId, req.method + " " + pathname),
+          scope,
           idempotencyKey,
-          body,
-          { status, body: responseBody }
+          activeClaim?.body ?? body,
+          { status, body: responseBody },
+          activeClaim?.claimToken ?? null
         );
         idempotencyClaim = null;
       };
