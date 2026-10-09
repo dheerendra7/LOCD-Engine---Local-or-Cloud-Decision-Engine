@@ -67,6 +67,15 @@ export function createCoordinatedIdempotencyStore({
   namespace = "locd:idempotency"
 } = {}) {
   assertCoordinationStore(store);
+  const missingClaimOperations = ["deleteIfValue", "setIfValue"]
+    .filter(method => typeof store[method] !== "function");
+  if (missingClaimOperations.length) {
+    throw new Error(
+      "coordination store must implement " +
+      missingClaimOperations.map(method => method + "()").join(" and ") +
+      " for safe idempotency claims"
+    );
+  }
 
   if (!Number.isFinite(ttlMs) || ttlMs < 1) {
     throw new Error("ttlMs must be >= 1");

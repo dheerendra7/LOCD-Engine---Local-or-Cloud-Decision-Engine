@@ -240,3 +240,28 @@ test("HTTP telemetry propagates tenant context to the state service", async () =
   assert.equal(calls[2].options.headers["x-locd-tenant-id"], "acme");
   assert.equal(calls[3].options.headers["x-locd-tenant-id"], "acme");
 });
+
+
+test("HTTP coordination exposes atomic compare-delete and compare-set", async () => {
+  const { fetchImpl, calls } = fakeFetch({ deleted: true, updated: true });
+  const store = createHTTPCoordinationStore({
+    baseUrl: "http://state.internal:8890",
+    apiKey: "service-secret",
+    fetchImpl
+  });
+
+  assert.equal(await store.deleteIfValue("lease/a", { token: "old" }), true);
+  assert.equal(calls[0].url, "http://state.internal:8890/v1/state/kv/lease%2Fa/delete-if-value");
+  assert.deepEqual(JSON.parse(calls[0].options.body), { expectedValue: { token: "old" } });
+
+  assert.equal(
+    await store.setIfValue("lease/a", { token: "old" }, { token: "done" }, { ttlMs: 5000 }),
+    true
+  );
+  assert.equal(calls[1].url, "http://state.internal:8890/v1/state/kv/lease%2Fa/set-if-value");
+  assert.deepEqual(JSON.parse(calls[1].options.body), {
+    expectedValue: { token: "old" },
+    value: { token: "done" },
+    ttlMs: 5000
+  });
+});

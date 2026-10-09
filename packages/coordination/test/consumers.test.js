@@ -136,3 +136,19 @@ test("a stale coordinated request cannot complete a replacement claim", async ()
   );
   assert.equal((await one.lookup("scope", "key", body)).body.owner, "new");
 });
+
+
+test("coordinated idempotency fails fast when the backend lacks atomic claim fencing", () => {
+  const base = createInMemoryCoordinationStore();
+  const legacy = {
+    get: base.get,
+    set: base.set,
+    setIfAbsent: base.setIfAbsent,
+    delete: base.delete,
+    incr: base.incr
+  };
+  assert.throws(
+    () => createCoordinatedIdempotencyStore({ store: legacy }),
+    /must implement deleteIfValue\(\) and setIfValue\(\) for safe idempotency claims/
+  );
+});

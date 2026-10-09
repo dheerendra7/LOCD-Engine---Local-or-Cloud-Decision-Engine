@@ -23,6 +23,10 @@ A coordination store must implement:
 - `setIfAbsent(key, value, options)`
 - `delete(key)`
 - `incr(key, options)`
+- `deleteIfValue(key, expectedValue)` — optional for general coordination, required for coordinated idempotency claim release
+- `setIfValue(key, expectedValue, value, options)` — optional for general coordination, required for safe idempotency completion
+
+The two compare operations must be implemented as a single atomic backend operation. A read followed by a write/delete is not equivalent, because another request can replace the claim between those steps.
 
 The coordination abstraction is intentionally key-oriented. LOCD creates tenant-scoped namespaces before coordination keys reach the backend.
 

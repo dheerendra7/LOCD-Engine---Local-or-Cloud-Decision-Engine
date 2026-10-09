@@ -58,10 +58,12 @@ Authenticated state endpoints:
     GET    /v1/state/kv/:key
     PUT    /v1/state/kv/:key
     POST   /v1/state/kv/:key/set-if-absent
+    POST   /v1/state/kv/:key/delete-if-value
+    POST   /v1/state/kv/:key/set-if-value
     POST   /v1/state/kv/:key/incr
     DELETE /v1/state/kv/:key
 
-The coordination endpoints expose only primitive shared-state operations. Product routing policy remains in the LOCD API/core engine.
+The coordination endpoints expose only primitive shared-state operations. The compare endpoints mutate a key only when its stored JSON value matches the expected value; they fence a claim owner and prevent stale writers from deleting or overwriting a replacement claim. Product routing policy remains in the LOCD API/core engine.
 The two clear operations are intentionally separate so telemetry cleanup cannot reset coordination state and vice versa.
 
 

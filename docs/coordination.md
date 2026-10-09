@@ -11,6 +11,10 @@ For a multi-instance deployment, inject a coordination store that implements:
 - setIfAbsent(key, value, options)
 - delete(key)
 - incr(key, options)
+- deleteIfValue(key, expectedValue) — atomic compare-and-delete
+- setIfValue(key, expectedValue, value, options) — atomic compare-and-set
+
+All backends used for coordinated idempotency must implement the two compare operations. The idempotency store fails at construction if either operation is missing; it never silently falls back to an unsafe read-then-write sequence. Rate limiting alone still uses the base contract.
 
 The contract is asynchronous so the backing system can be Redis, a database-backed service, or another atomic shared-state implementation.
 
@@ -22,7 +26,7 @@ The fixed-window limiter uses an atomic increment per client/bucket. The API pre
 
 Completed POST responses can be stored in shared state and replayed by another instance. The API prefixes idempotency scopes with the authenticated tenant so an idempotency key is never replayed across tenants.
 
-The coordination package also exposes claim() using setIfAbsent(). A future execution gateway can use this primitive to prevent concurrent duplicate work before a response exists.
+A claim carries an opaque owner token. The API releases that claim when the request fails or exits without a cached result, and only commits a completed response if the same claim still owns the key. This fences stale requests whose lease expired while they were running. In-memory, SQLite and HTTP State Service implementations provide the atomic compare operations; custom distributed backends must implement them with native CAS/transactions rather than a separate GET followed by SET or DELETE.
 
 ## Important boundary
 
