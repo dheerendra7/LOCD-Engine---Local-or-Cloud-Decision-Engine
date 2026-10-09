@@ -54,8 +54,9 @@ function timeoutSignal(timeoutMs) {
 }
 
 function number(value, fallback = null, min = 0) {
+  if (value == null || (typeof value === "string" && value.trim() === "")) return fallback;
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.max(min, parsed) : fallback;
+  return Number.isFinite(parsed) && parsed >= min ? parsed : fallback;
 }
 
 function normalizeSnapshot(snapshot) {

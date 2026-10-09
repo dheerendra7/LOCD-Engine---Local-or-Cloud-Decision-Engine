@@ -76,6 +76,86 @@ test("missing pricing returns unknown rather than inventing a number", () => {
   assert.equal(result.source, "unknown");
 });
 
+test("token pricing returns unknown when input token usage is missing", () => {
+  const result = estimateWorkloadCost({
+    workload: { outputTokens: 500 },
+    target: {
+      pricing: {
+        unit: "per-1k-tokens",
+        inputUsdPer1kTokens: 0.003,
+        outputUsdPer1kTokens: 0.012
+      }
+    }
+  });
+
+  assert.deepEqual(result, {
+    costUsd: null,
+    source: "unknown",
+    reason: "token_usage_missing"
+  });
+});
+
+test("token pricing returns unknown when output token usage is missing", () => {
+  const result = estimateWorkloadCost({
+    workload: { inputTokens: 1000 },
+    target: {
+      pricing: {
+        unit: "per-1k-tokens",
+        inputUsdPer1kTokens: 0.003,
+        outputUsdPer1kTokens: 0.012
+      }
+    }
+  });
+
+  assert.deepEqual(result, {
+    costUsd: null,
+    source: "unknown",
+    reason: "token_usage_missing"
+  });
+});
+
+test("explicit zero input and output tokens produce a valid zero cost", () => {
+  const result = estimateWorkloadCost({
+    workload: { inputTokens: 0, outputTokens: 0 },
+    target: {
+      pricing: {
+        unit: "per-1k-tokens",
+        inputUsdPer1kTokens: 0.003,
+        outputUsdPer1kTokens: 0.012
+      }
+    }
+  });
+
+  assert.equal(result.costUsd, 0);
+  assert.equal(result.source, "pricing");
+  assert.equal(result.reason, "token_pricing");
+});
+
+test("unit pricing rejects missing rate fields instead of silently estimating zero", () => {
+  assert.throws(
+    () => estimateWorkloadCost({ target: { pricing: { unit: "flat" } } }),
+    /target\.pricing\.flatUsd is required/
+  );
+  assert.throws(
+    () => estimateWorkloadCost({ target: { pricing: { unit: "per-request" } } }),
+    /target\.pricing\.requestUsd is required/
+  );
+  assert.throws(
+    () => estimateWorkloadCost({
+      workload: { inputTokens: 1000, outputTokens: 1000 },
+      target: { pricing: { unit: "per-1k-tokens", outputUsdPer1kTokens: 0.01 } }
+    }),
+    /target\.pricing\.inputUsdPer1kTokens is required/
+  );
+  assert.throws(
+    () => estimateWorkloadCost({
+      workload: { inputTokens: 1000, outputTokens: 1000 },
+      target: { pricing: { unit: "per-1k-tokens", inputUsdPer1kTokens: 0.01 } }
+    }),
+    /target\.pricing\.outputUsdPer1kTokens is required/
+  );
+});
+
 test("cost estimator rejects invalid pricing and usage", () => {
   assert.throws(
     () => estimateWorkloadCost({
@@ -90,6 +170,14 @@ test("cost estimator rejects invalid pricing and usage", () => {
       target: { pricing: { unit: "flat", flatUsd: 0.01 } }
     }),
     /inputTokens must be a non-negative integer/
+  );
+
+  assert.throws(
+    () => estimateWorkloadCost({
+      workload: { outputTokens: -1 },
+      target: { pricing: { unit: "per-request", requestUsd: 0.01 } }
+    }),
+    /outputTokens must be a non-negative integer/
   );
 });
 
@@ -136,4 +224,51 @@ test("explicit zero requests produce zero per-request cost", () => {
   });
 
   assert.equal(result.costUsd, 0);
+});
+
+
+test("blank token usage stays unknown and blank pricing or request values are rejected", () => {
+  const unknown = estimateWorkloadCost({
+    workload: { inputTokens: "   ", outputTokens: 10 },
+    target: {
+      pricing: {
+        unit: "per-1k-tokens",
+        inputUsdPer1kTokens: 0.1,
+        outputUsdPer1kTokens: 0.2
+      }
+    }
+  });
+  assert.equal(unknown.costUsd, null);
+  assert.equal(unknown.reason, "token_usage_missing");
+
+  assert.throws(
+    () => estimateWorkloadCost({ target: { pricing: { unit: "flat", flatUsd: " " } } }),
+    /flatUsd is required/
+  );
+  assert.throws(
+    () => estimateWorkloadCost({
+      workload: { requests: "  " },
+      target: { pricing: { unit: "per-request", requestUsd: 1 } }
+    }),
+    /requests must be a non-negative integer/
+  );
+});
+
+
+test("applyCostEstimates replaces blank or invalid explicit costs when pricing can estimate them", () => {
+  const targets = applyCostEstimates([
+    {
+      id: "blank",
+      estimatedCostUsd: " ",
+      pricing: { unit: "flat", flatUsd: 0.25 }
+    },
+    {
+      id: "negative",
+      estimatedCostUsd: -1,
+      pricing: { unit: "flat", flatUsd: 0.5 }
+    }
+  ]);
+
+  assert.equal(targets[0].estimatedCostUsd, 0.25);
+  assert.equal(targets[1].estimatedCostUsd, 0.5);
 });

@@ -12,10 +12,26 @@ function clamp(value, min = 0, max = 1) {
   return Math.min(max, Math.max(min, number));
 }
 
+function missingValue(value) {
+  return value == null || (typeof value === "string" && value.trim() === "");
+}
+
 function finiteOrNull(value) {
-  if (value == null || value === "") return null;
+  if (missingValue(value)) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function nonNegativeNumberOrNull(value, field) {
+  if (value == null) return null;
+  if (typeof value === "string" && value.trim() === "") {
+    throw new Error(field + " must be >= 0");
+  }
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) {
+    throw new Error(field + " must be >= 0");
+  }
+  return number;
 }
 
 function unique(values) {
@@ -23,6 +39,9 @@ function unique(values) {
 }
 
 function nonNegativeInteger(value, field) {
+  if (typeof value === "string" && value.trim() === "") {
+    throw new Error(field + " must be a non-negative integer");
+  }
   const number = Number(value ?? 0);
   if (!Number.isInteger(number) || number < 0) {
     throw new Error(field + " must be a non-negative integer");
@@ -49,7 +68,7 @@ function normalizePolicy(policy = {}, workload = {}) {
       capacity: clamp(resolved.weights?.capacity ?? 0.10),
       reliability: clamp(resolved.weights?.reliability ?? 0.15)
     },
-    maxHeartbeatAgeMs: finiteOrNull(resolved.maxHeartbeatAgeMs),
+    maxHeartbeatAgeMs: nonNegativeNumberOrNull(resolved.maxHeartbeatAgeMs, "policy.maxHeartbeatAgeMs"),
     matchedRules: Array.isArray(resolved.matchedRules) ? [...resolved.matchedRules] : []
   };
 }
@@ -67,14 +86,14 @@ function normalizeRequest(input) {
   }
 
   const constraints = {
-    latencyBudgetMs: finiteOrNull(input.constraints?.latencyBudgetMs),
-    maxCostUsd: finiteOrNull(input.constraints?.maxCostUsd),
+    latencyBudgetMs: nonNegativeNumberOrNull(input.constraints?.latencyBudgetMs, "constraints.latencyBudgetMs"),
+    maxCostUsd: nonNegativeNumberOrNull(input.constraints?.maxCostUsd, "constraints.maxCostUsd"),
     strictLatency: Boolean(input.constraints?.strictLatency),
     strictCost: Boolean(input.constraints?.strictCost)
   };
 
-  const requiredMemoryGb = finiteOrNull(input.workload.requiredMemoryGb);
-  const requiredContextTokens = finiteOrNull(input.workload.requiredContextTokens);
+  const requiredMemoryGb = nonNegativeNumberOrNull(input.workload.requiredMemoryGb, "workload.requiredMemoryGb");
+  const requiredContextTokens = nonNegativeNumberOrNull(input.workload.requiredContextTokens, "workload.requiredContextTokens");
 
   if (constraints.latencyBudgetMs !== null && constraints.latencyBudgetMs < 0) {
     throw new Error("constraints.latencyBudgetMs must be >= 0");
@@ -101,8 +120,12 @@ function normalizeRequest(input) {
       requiredCapabilities: unique(input.workload.requiredCapabilities),
       requiredMemoryGb,
       requiredContextTokens,
-      inputTokens: nonNegativeInteger(input.workload.inputTokens, "workload.inputTokens"),
-      outputTokens: nonNegativeInteger(input.workload.outputTokens, "workload.outputTokens"),
+      inputTokens: missingValue(input.workload.inputTokens)
+        ? null
+        : nonNegativeInteger(input.workload.inputTokens, "workload.inputTokens"),
+      outputTokens: missingValue(input.workload.outputTokens)
+        ? null
+        : nonNegativeInteger(input.workload.outputTokens, "workload.outputTokens"),
       requests: nonNegativeInteger(input.workload.requests ?? 1, "workload.requests")
     },
     constraints,
@@ -148,6 +171,41 @@ function residencyCheck(allowedRegions, target) {
     : { eligible: false, reason: "data_residency_mismatch" };
 }
 
+function weightedScore(factors, weights) {
+  return clamp(
+    factors.privacy * weights.privacy +
+    factors.latency * weights.latency +
+    factors.cost * weights.cost +
+    factors.capacity * weights.capacity +
+    factors.reliability * weights.reliability
+  );
+}
+
+function applyRelativeCostScoring(candidates, request) {
+  // An explicit budget already gives cost a meaningful absolute reference.
+  if (request.constraints.maxCostUsd !== null) return;
+
+  const priced = candidates.filter(candidate =>
+    Number.isFinite(candidate.costEstimate?.usd) &&
+    candidate.costEstimate.usd >= 0
+  );
+  if (priced.length < 2) return;
+
+  const costs = priced.map(candidate => candidate.costEstimate.usd);
+  const minimum = Math.min(...costs);
+  const maximum = Math.max(...costs);
+  if (maximum <= minimum) return;
+
+  // Without a budget, compare known prices only against other eligible,
+  // priced candidates. Unknown estimates never distort the scale.
+  for (const candidate of priced) {
+    candidate.factors.cost = clamp(
+      (maximum - candidate.costEstimate.usd) / (maximum - minimum)
+    );
+    candidate.score = weightedScore(candidate.factors, request.policy.weights);
+  }
+}
+
 function evaluateCandidate(request, target) {
   const rejected = [];
   const { constraints, workload, policy } = request;
@@ -171,14 +229,21 @@ function evaluateCandidate(request, target) {
   const privacy = privacyFit(workload.sensitivity, target, policy);
   if (!privacy.eligible) rejected.push(privacy.reason);
 
-  const estimatedLatencyMs = finiteOrNull(target.estimatedLatencyMs);
+  const rawEstimatedLatencyMs = finiteOrNull(target.estimatedLatencyMs);
+  const estimatedLatencyMs = rawEstimatedLatencyMs != null && rawEstimatedLatencyMs < 0
+    ? null
+    : rawEstimatedLatencyMs;
   const costEstimate = estimateWorkloadCost({
     workload,
     target
   });
   const estimatedCostUsd = costEstimate.costUsd;
-  const health = clamp(target.health ?? 0);
-  const capacity = clamp(target.capacity ?? 1);
+  const rawCapacity = finiteOrNull(target.capacity);
+  const health = clamp(missingValue(target.health) ? 0 : target.health);
+  const capacity = rawCapacity === null ? 1 : clamp(rawCapacity);
+  if (rawCapacity !== null && rawCapacity < 0) {
+    rejected.push("invalid_capacity_telemetry");
+  }
   const availableMemoryGb = finiteOrNull(target.availableMemoryGb);
   const heartbeatAt = target.lastHeartbeatAt ? new Date(target.lastHeartbeatAt).getTime() : null;
 
@@ -246,25 +311,22 @@ function evaluateCandidate(request, target) {
 
   const headroom = clamp(1 - capacity);
 
-  const score =
-    privacy.score * policy.weights.privacy +
-    latency * policy.weights.latency +
-    cost * policy.weights.cost +
-    headroom * policy.weights.capacity +
-    health * policy.weights.reliability;
+  const factors = {
+    privacy: privacy.score,
+    latency,
+    cost,
+    capacity: headroom,
+    reliability: health
+  };
+  const score = weightedScore(factors, policy.weights);
 
   return {
     eligible: true,
     targetId: target.id,
     target,
-    score: clamp(score),
-    factors: {
-      privacy: privacy.score,
-      latency,
-      cost,
-      capacity: headroom,
-      reliability: health
-    },
+    score,
+    estimatedLatencyMs,
+    factors,
     costEstimate: {
       usd: estimatedCostUsd,
       source: costEstimate.source,
@@ -295,9 +357,9 @@ export function decide(input) {
   }
 
   const evaluations = request.targets.map(target => evaluateCandidate(request, target));
-  const eligible = evaluations
-    .filter(item => item.eligible)
-    .sort((a, b) => b.score - a.score || String(a.targetId).localeCompare(String(b.targetId)));
+  const eligible = evaluations.filter(item => item.eligible);
+  applyRelativeCostScoring(eligible, request);
+  eligible.sort((a, b) => b.score - a.score || String(a.targetId).localeCompare(String(b.targetId)));
 
   if (!eligible.length) {
     return {
@@ -340,11 +402,8 @@ export function decide(input) {
     confidence: Number(makeConfidence(eligible).toFixed(6)),
     score: Number(winner.score.toFixed(6)),
     estimated: {
-      latencyMs: finiteOrNull(winner.target.estimatedLatencyMs),
-      costUsd: finiteOrNull(winner.target.estimatedCostUsd) ?? estimateWorkloadCost({
-        workload: request.workload,
-        target: winner.target
-      }).costUsd
+      latencyMs: winner.estimatedLatencyMs,
+      costUsd: winner.costEstimate.usd
     },
     reasons,
     policyRulesApplied: request.policy.matchedRules,

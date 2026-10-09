@@ -82,10 +82,9 @@ export async function backupSQLiteDatabase({
       verification.close();
     }
 
-    if (overwrite) {
-      await rm(destination, { force: true });
-    }
-
+    // Publish the verified backup with rename so a failed publish cannot first
+    // delete the user's last known-good destination backup. On filesystems that
+    // support replacement, rename also keeps publication atomic.
     await rename(temporary, destination);
     return {
       destination,

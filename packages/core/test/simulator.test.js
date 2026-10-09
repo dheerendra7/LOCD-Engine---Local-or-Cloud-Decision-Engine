@@ -59,3 +59,24 @@ test("simulation validates target input and is deterministic", () => {
   });
   assert.deepEqual(first, second);
 });
+
+
+test("policy simulation preserves blank estimates as unknown", () => {
+  const blankTargets = [
+    { id: "local-blank", mode: "local", available: true, health: 1, capacity: 1, privacy: 1, estimatedLatencyMs: " ", estimatedCostUsd: " " },
+    { id: "cloud-blank", mode: "cloud", available: true, health: 1, capacity: 1, privacy: 0.5, estimatedLatencyMs: " ", estimatedCostUsd: " " }
+  ];
+  const result = simulatePolicy({
+    workload: { type: "simulation", sensitivity: "low" },
+    targets: blankTargets,
+    currentPolicy: { allowedModes: ["local"] },
+    candidatePolicy: { allowedModes: ["cloud"] }
+  });
+
+  assert.equal(result.current.estimated.latencyMs, null);
+  assert.equal(result.current.estimated.costUsd, null);
+  assert.equal(result.candidate.estimated.latencyMs, null);
+  assert.equal(result.candidate.estimated.costUsd, null);
+  assert.equal(result.impact.latencyDeltaMs, null);
+  assert.equal(result.impact.costDeltaUsd, null);
+});

@@ -137,3 +137,75 @@ test("target pricing metadata is normalized and preserved", async () => {
     outputUsdPer1kTokens: 0.004
   });
 });
+
+
+test("unknown optional telemetry remains null through adapters and registry snapshot collection", async () => {
+  const adapter = createStaticTargetAdapter({
+    id: "unpriced-cloud",
+    mode: "cloud",
+    estimatedLatencyMs: null,
+    estimatedCostUsd: null,
+    availableMemoryGb: null,
+    maxContextTokens: null,
+    pricing: {
+      unit: "per-1k-tokens",
+      currency: "USD",
+      inputUsdPer1kTokens: 0.003,
+      outputUsdPer1kTokens: 0.012
+    }
+  });
+
+  const direct = await adapter.getSnapshot();
+  assert.equal(direct.estimatedLatencyMs, null);
+  assert.equal(direct.estimatedCostUsd, null);
+  assert.equal(direct.availableMemoryGb, null);
+  assert.equal(direct.maxContextTokens, null);
+
+  const [collected] = await collectTargetSnapshots([adapter]);
+  assert.equal(collected.estimatedLatencyMs, null);
+  assert.equal(collected.estimatedCostUsd, null);
+  assert.equal(collected.availableMemoryGb, null);
+  assert.equal(collected.maxContextTokens, null);
+  assert.equal(collected.pricing.inputUsdPer1kTokens, 0.003);
+});
+
+
+test("blank optional telemetry stays unknown in static target adapters", async () => {
+  const adapter = createStaticTargetAdapter({
+    id: "blank-metrics",
+    mode: "cloud",
+    estimatedLatencyMs: " ",
+    estimatedCostUsd: " ",
+    availableMemoryGb: " ",
+    maxContextTokens: " "
+  });
+  const snapshot = await adapter.getSnapshot();
+  assert.equal(snapshot.estimatedLatencyMs, null);
+  assert.equal(snapshot.estimatedCostUsd, null);
+  assert.equal(snapshot.availableMemoryGb, null);
+  assert.equal(snapshot.maxContextTokens, null);
+});
+
+
+test("negative optional telemetry stays unknown and negative capacity gets a safe fallback", async () => {
+  const adapter = createStaticTargetAdapter({
+    id: "negative-telemetry",
+    mode: "cloud",
+    health: -1,
+    capacity: -1,
+    privacy: -1,
+    estimatedLatencyMs: -10,
+    estimatedCostUsd: -0.1,
+    availableMemoryGb: -2,
+    maxContextTokens: -100
+  });
+
+  const snapshot = await adapter.getSnapshot();
+  assert.equal(snapshot.health, 0);
+  assert.equal(snapshot.capacity, 1);
+  assert.equal(snapshot.privacy, 0);
+  assert.equal(snapshot.estimatedLatencyMs, null);
+  assert.equal(snapshot.estimatedCostUsd, null);
+  assert.equal(snapshot.availableMemoryGb, null);
+  assert.equal(snapshot.maxContextTokens, null);
+});

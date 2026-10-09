@@ -171,7 +171,7 @@ Keep migrations backward-compatible and additive where possible. A failed migrat
 
 ## SQLite backup and recovery
 
-Use `npm run state:backup -- <source.db> <destination.db>` or the equivalent CLI command to create a native online SQLite backup. The backup refuses to overwrite an existing destination unless `--force` is supplied, and writes through a temporary file before the final rename. Native SQLite online backup support requires Node.js 22.16+; the application itself remains compatible with Node.js 22+.
+Use `npm run state:backup -- <source.db> <destination.db>` or the equivalent CLI command to create a native online SQLite backup. The backup refuses to overwrite an existing destination unless `--force` is supplied, and writes through a temporary file before the final rename. The application declares Node.js >=22.16.0 <25.0.0. CI tests Node.js 22 and 24. Native SQLite online backup support requires Node.js 22.16+.
 
 ## State Service client timeout
 

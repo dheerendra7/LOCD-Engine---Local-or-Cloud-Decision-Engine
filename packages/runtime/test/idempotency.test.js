@@ -145,3 +145,43 @@ test("completed responses keep the normal retention TTL", () => {
   now = 1100;
   assert.equal(store.lookup("scope", "key", { x: 1 }), null);
 });
+
+
+test("fingerprints preserve JSON own properties named __proto__", () => {
+  const reader = JSON.parse('{"role":"reader","__proto__":{"admin":false}}');
+  const admin = JSON.parse('{"role":"reader","__proto__":{"admin":true}}');
+  assert.notEqual(fingerprint(reader), fingerprint(admin));
+  assert.equal(
+    fingerprint(reader),
+    fingerprint(JSON.parse('{"__proto__":{"admin":false},"role":"reader"}'))
+  );
+});
+
+test("idempotency rejects a different payload hidden behind __proto__", () => {
+  const store = createIdempotencyStore();
+  const reader = JSON.parse('{"role":"reader","__proto__":{"admin":false}}');
+  const admin = JSON.parse('{"role":"reader","__proto__":{"admin":true}}');
+  store.remember("POST /v1/execute", "proto-key", reader, { status: 200, body: { ok: true } });
+  assert.throws(
+    () => store.lookup("POST /v1/execute", "proto-key", admin),
+    /idempotency_key_reused/
+  );
+});
+
+
+test("cached idempotency responses cannot be mutated through caller-owned objects", () => {
+  const store = createIdempotencyStore();
+  const response = {
+    status: 200,
+    body: { result: { targetId: "safe" } }
+  };
+  store.remember("POST /v1/decide", "immutable-response", { x: 1 }, response);
+
+  response.body.result.targetId = "mutated-before-replay";
+  const firstReplay = store.lookup("POST /v1/decide", "immutable-response", { x: 1 });
+  assert.equal(firstReplay.body.result.targetId, "safe");
+
+  firstReplay.body.result.targetId = "mutated-after-replay";
+  const secondReplay = store.claim("POST /v1/decide", "immutable-response", { x: 1 });
+  assert.equal(secondReplay.response.body.result.targetId, "safe");
+});

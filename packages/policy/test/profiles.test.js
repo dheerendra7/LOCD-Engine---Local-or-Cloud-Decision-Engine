@@ -93,6 +93,35 @@ test("invalid policy rule shapes fail before decision evaluation", () => {
     }, { workload: { type: "x" } }),
     /priority must be an integer/
   );
+
+  assert.throws(
+    () => resolvePolicy({
+      rules: [{ id: "blank-priority", priority: " ", set: { sensitiveDataMode: "balanced" } }]
+    }, { workload: { type: "x" } }),
+    /priority must be an integer/
+  );
+
+  assert.throws(
+    () => resolvePolicy({
+      rules: [{ id: "blank-freshness", priority: 1, set: { maxHeartbeatAgeMs: " " } }]
+    }, { workload: { type: "x" } }),
+    /policy rule maxHeartbeatAgeMs must be >= 0/
+  );
+
+  assert.throws(
+    () => resolvePolicy({ weights: { cost: null } }, { workload: { type: "x" } }),
+    /policy weight must be between 0 and 1: cost/
+  );
+  assert.throws(
+    () => resolvePolicy({ weights: { latency: " " } }, { workload: { type: "x" } }),
+    /policy weight must be between 0 and 1: latency/
+  );
+  assert.throws(
+    () => resolvePolicy({
+      rules: [{ id: "blank-weight", priority: 1, set: { weights: { cost: " " } } }]
+    }, { workload: { type: "x" } }),
+    /policy weight must be between 0 and 1: cost/
+  );
 });
 
 test("rule capability matching requires all declared capabilities", () => {

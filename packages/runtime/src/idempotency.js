@@ -8,7 +8,7 @@ function sortValue(value) {
       .reduce((out, key) => {
         out[key] = sortValue(value[key]);
         return out;
-      }, {});
+      }, Object.create(null));
   }
   return value;
 }
@@ -61,7 +61,7 @@ export function createIdempotencyStore({
         throw new Error("idempotency_key_reused");
       }
 
-      return { ...existing.response, replayed: true };
+      return structuredClone({ ...existing.response, replayed: true });
     },
 
     remember(scope, key, body, response) {
@@ -77,7 +77,7 @@ export function createIdempotencyStore({
       const composite = String(scope) + ":" + normalizedKey;
       entries.set(composite, {
         fingerprint: fingerprint(body),
-        response: { ...response, replayed: false },
+        response: structuredClone({ ...response, replayed: false }),
         createdAt: now,
         expiresAt: now + ttlMs
       });
@@ -112,7 +112,7 @@ export function createIdempotencyStore({
         return {
           claimed: false,
           reason: "completed",
-          response: { ...existing.response, replayed: true }
+          response: structuredClone({ ...existing.response, replayed: true })
         };
       }
 

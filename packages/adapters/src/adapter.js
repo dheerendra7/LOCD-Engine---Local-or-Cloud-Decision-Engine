@@ -7,8 +7,20 @@ function assertMode(mode) {
 }
 
 function finiteNumber(value, fallback = null) {
+  if (value == null || (typeof value === "string" && value.trim() === "")) return fallback;
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function boundedRatio(value, fallback) {
+  const number = finiteNumber(value, fallback);
+  if (number < 0) return fallback;
+  return Math.min(1, number);
+}
+
+function optionalNonNegativeNumber(value) {
+  const number = finiteNumber(value);
+  return number == null || number < 0 ? null : number;
 }
 
 function normalizeSnapshot(snapshot) {
@@ -22,16 +34,16 @@ function normalizeSnapshot(snapshot) {
     id: String(snapshot.id),
     mode: snapshot.mode,
     available: snapshot.available !== false,
-    health: Math.min(1, Math.max(0, finiteNumber(snapshot.health, 0))),
-    capacity: Math.min(1, Math.max(0, finiteNumber(snapshot.capacity, 1))),
-    privacy: Math.min(1, Math.max(0, finiteNumber(snapshot.privacy, 0))),
-    estimatedLatencyMs: finiteNumber(snapshot.estimatedLatencyMs),
-    estimatedCostUsd: finiteNumber(snapshot.estimatedCostUsd),
+    health: boundedRatio(snapshot.health, 0),
+    capacity: boundedRatio(snapshot.capacity, 1),
+    privacy: boundedRatio(snapshot.privacy, 0),
+    estimatedLatencyMs: optionalNonNegativeNumber(snapshot.estimatedLatencyMs),
+    estimatedCostUsd: optionalNonNegativeNumber(snapshot.estimatedCostUsd),
     pricing: snapshot.pricing && typeof snapshot.pricing === "object"
       ? structuredClone(snapshot.pricing)
       : null,
-    availableMemoryGb: finiteNumber(snapshot.availableMemoryGb),
-    maxContextTokens: finiteNumber(snapshot.maxContextTokens),
+    availableMemoryGb: optionalNonNegativeNumber(snapshot.availableMemoryGb),
+    maxContextTokens: optionalNonNegativeNumber(snapshot.maxContextTokens),
     lastHeartbeatAt: snapshot.lastHeartbeatAt ? new Date(snapshot.lastHeartbeatAt).toISOString() : null,
     regions: [...new Set(Array.isArray(snapshot.regions) ? snapshot.regions.map(String) : [])],
     capabilities: [...new Set(Array.isArray(snapshot.capabilities) ? snapshot.capabilities.map(String) : [])]

@@ -139,7 +139,7 @@ Optional query parameter:
 
 ## GET /v1/metrics
 
-Returns in-memory aggregate decision metrics:
+Returns in-memory aggregate decision metrics. `estimatedCostUsd` is the subtotal of known estimates only; use `estimatedCostKnownCount` and `estimatedCostUnknownCount` to determine whether that subtotal covers every decision. An unknown estimate is not counted as zero.
 
     {
       "totalDecisions": 42,
@@ -150,6 +150,8 @@ Returns in-memory aggregate decision metrics:
         "none": 2
       },
       "estimatedCostUsd": 0.43,
+      "estimatedCostKnownCount": 38,
+      "estimatedCostUnknownCount": 4,
       "averageEstimatedLatencyMs": 318.5,
       "averageConfidence": 0.84
     }

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createOpenAICompatibleAdapter } from "../src/index.js";
+import { createTargetRegistry } from "../../registry/src/index.js";
 
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -177,4 +178,110 @@ test("OpenAI-compatible provider preserves configured pricing", async () => {
   const snapshot = await adapter.getSnapshot();
   assert.equal(snapshot.pricing.inputUsdPer1kTokens, 0.003);
   assert.equal(snapshot.pricing.outputUsdPer1kTokens, 0.012);
+});
+
+
+test("OpenAI-compatible provider keeps unspecified cost and capacity telemetry unknown", async () => {
+  const adapter = createOpenAICompatibleAdapter({
+    id: "unknown-metrics",
+    targetId: "unknown-metrics",
+    baseUrl: "https://inference.example.com",
+    pricing: {
+      unit: "per-1k-tokens",
+      inputUsdPer1kTokens: 0.003,
+      outputUsdPer1kTokens: 0.012
+    }
+  });
+
+  const snapshot = await adapter.getSnapshot();
+  assert.equal(snapshot.estimatedCostUsd, null);
+  assert.equal(snapshot.estimatedLatencyMs, null);
+  assert.equal(snapshot.availableMemoryGb, null);
+  assert.equal(snapshot.maxContextTokens, null);
+  assert.equal(snapshot.pricing.inputUsdPer1kTokens, 0.003);
+});
+
+
+test("registry does not turn unknown provider cost into a free target", async () => {
+  const adapter = createOpenAICompatibleAdapter({
+    id: "unpriced-provider",
+    targetId: "unpriced-provider",
+    baseUrl: "https://inference.example.com",
+    pricing: {
+      unit: "per-1k-tokens",
+      inputUsdPer1kTokens: 0.003,
+      outputUsdPer1kTokens: 0.012
+    }
+  });
+  const registry = createTargetRegistry([adapter]);
+  const [target] = await registry.list();
+
+  assert.equal(target.estimatedCostUsd, null);
+  assert.equal(target.estimatedLatencyMs, null);
+  assert.equal(target.pricing.unit, "per-1k-tokens");
+  assert.equal(target.pricing.inputUsdPer1kTokens, 0.003);
+});
+
+
+test("blank cost and telemetry values do not become numeric zero", async () => {
+  const adapter = createOpenAICompatibleAdapter({
+    id: "blank-metrics",
+    targetId: "blank-metrics",
+    baseUrl: "https://inference.example.com",
+    estimatedCostUsd: " ",
+    initial: {
+      health: " ",
+      capacity: " ",
+      privacy: " ",
+      estimatedLatencyMs: " ",
+      availableMemoryGb: " ",
+      maxContextTokens: " "
+    },
+    pricing: {
+      unit: "per-1k-tokens",
+      inputUsdPer1kTokens: 0.003,
+      outputUsdPer1kTokens: 0.012
+    }
+  });
+  const snapshot = await adapter.getSnapshot();
+
+  assert.equal(snapshot.estimatedCostUsd, null);
+  assert.equal(snapshot.estimatedLatencyMs, null);
+  assert.equal(snapshot.availableMemoryGb, null);
+  assert.equal(snapshot.maxContextTokens, null);
+  assert.equal(snapshot.health, 0);
+  assert.equal(snapshot.capacity, 1);
+  assert.equal(snapshot.privacy, 0);
+});
+
+
+test("negative estimates and capacity telemetry remain unknown or use safe defaults", async () => {
+  const adapter = createOpenAICompatibleAdapter({
+    id: "negative-metrics",
+    targetId: "negative-metrics",
+    baseUrl: "https://inference.example.com",
+    estimatedCostUsd: -1,
+    initial: {
+      health: -1,
+      capacity: -1,
+      privacy: -1,
+      estimatedLatencyMs: -1,
+      availableMemoryGb: -1,
+      maxContextTokens: -1
+    },
+    pricing: {
+      unit: "per-1k-tokens",
+      inputUsdPer1kTokens: 0.003,
+      outputUsdPer1kTokens: 0.012
+    }
+  });
+  const snapshot = await adapter.getSnapshot();
+
+  assert.equal(snapshot.estimatedCostUsd, null);
+  assert.equal(snapshot.estimatedLatencyMs, null);
+  assert.equal(snapshot.availableMemoryGb, null);
+  assert.equal(snapshot.maxContextTokens, null);
+  assert.equal(snapshot.health, 0);
+  assert.equal(snapshot.capacity, 1);
+  assert.equal(snapshot.privacy, 0);
 });
