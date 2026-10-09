@@ -216,3 +216,28 @@ test("a stale local request cannot complete a replacement claim", () => {
   );
   assert.equal(store.lookup("scope", "key", body).body.owner, "new");
 });
+
+
+test("expired local claim caches its result only when no replacement owner exists", () => {
+  let now = 1_000;
+  const store = createIdempotencyStore({ ttlMs: 1_000, clock: () => now });
+  const body = { payload: "slow but successful" };
+  const expired = store.claim("scope", "expired", body, 100);
+
+  now = 1_101;
+  assert.equal(
+    store.remember("scope", "expired", body, { status: 200, body: { result: "ok" } }, expired.claimToken),
+    true
+  );
+  assert.equal(store.lookup("scope", "expired", body).body.result, "ok");
+
+  const oldClaim = store.claim("scope", "replacement", body, 100);
+  now += 101;
+  const newClaim = store.claim("scope", "replacement", body, 100);
+  assert.equal(newClaim.claimed, true);
+  assert.equal(
+    store.remember("scope", "replacement", body, { status: 200, body: { result: "stale" } }, oldClaim.claimToken),
+    false
+  );
+  assert.equal(store.claim("scope", "replacement", body).reason, "in_progress");
+});

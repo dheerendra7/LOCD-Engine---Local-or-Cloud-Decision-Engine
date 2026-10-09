@@ -152,3 +152,29 @@ test("coordinated idempotency fails fast when the backend lacks atomic claim fen
     /must implement deleteIfValue\(\) and setIfValue\(\) for safe idempotency claims/
   );
 });
+
+
+test("a missing shared lease can cache a late result without overwriting a new claim", async () => {
+  const store = createInMemoryCoordinationStore();
+  const one = createCoordinatedIdempotencyStore({ store, namespace: "late-result" });
+  const body = { payload: "slow but successful" };
+
+  const expired = await one.claim("scope", "empty-key", body, 5);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(
+    await one.remember("scope", "empty-key", body, { status: 200, body: { owner: "late" } }, expired.claimToken),
+    true
+  );
+  assert.equal((await one.lookup("scope", "empty-key", body)).body.owner, "late");
+
+  const oldClaim = await one.claim("scope", "replacement-key", body);
+  assert.equal(await one.release("scope", "replacement-key", body, oldClaim.claimToken), true);
+  const replacement = await one.claim("scope", "replacement-key", body);
+  assert.equal(replacement.claimed, true);
+  assert.notEqual(replacement.claimToken, oldClaim.claimToken);
+  assert.equal(
+    await one.remember("scope", "replacement-key", body, { status: 200, body: { owner: "stale" } }, oldClaim.claimToken),
+    false
+  );
+  assert.equal((await one.claim("scope", "replacement-key", body)).reason, "in_progress");
+});

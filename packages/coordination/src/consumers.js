@@ -119,7 +119,12 @@ export function createCoordinatedIdempotencyStore({
     if (claimToken) {
       if (typeof store.setIfValue !== "function") return false;
       const existing = await store.get(storedKey);
-      if (!existing || !existing.processing || existing.claimToken !== claimToken ||
+      if (!existing) {
+        // The lease expired without a replacement claim; setIfAbsent fences
+        // a new owner racing this late response.
+        return store.setIfAbsent(storedKey, completed, { ttlMs });
+      }
+      if (!existing.processing || existing.claimToken !== claimToken ||
           existing.fingerprint !== currentFingerprint) return false;
       return store.setIfValue(storedKey, existing, completed, { ttlMs });
     }

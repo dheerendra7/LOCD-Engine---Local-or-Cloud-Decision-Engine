@@ -76,18 +76,22 @@ export function createIdempotencyStore({
       const now = clock();
       const composite = String(scope) + ":" + normalizedKey;
       const currentFingerprint = fingerprint(body);
-      if (claimToken) {
-        const existing = entries.get(composite);
-        if (!existing || !existing.processing || existing.claimToken !== claimToken ||
-            existing.fingerprint !== currentFingerprint) return false;
-      }
-
-      entries.set(composite, {
+      const completed = {
         fingerprint: currentFingerprint,
         response: structuredClone({ ...response, replayed: false }),
         createdAt: now,
         expiresAt: now + ttlMs
-      });
+      };
+
+      if (claimToken) {
+        const existing = entries.get(composite);
+        if (existing && (!existing.processing || existing.claimToken !== claimToken ||
+            existing.fingerprint !== currentFingerprint)) return false;
+        // If the lease expired and no replacement claim exists, this synchronous
+        // insertion is safe: no other in-process request can interleave here.
+      }
+
+      entries.set(composite, completed);
       purge();
       return true;
     },
