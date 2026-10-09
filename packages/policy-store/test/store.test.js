@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createFilePolicyStore, createPolicyStore } from "../src/index.js";
@@ -288,4 +288,37 @@ test("special object property names are safe tenant and policy IDs", () => {
   assert.equal(store.list("constructor").length, 1);
   assert.equal(store.remove("constructor", "constructor"), true);
   assert.equal(store.get("constructor", "constructor"), null);
+});
+
+
+test("null policy snapshot is rejected without erasing live policy state", () => {
+  const store = createPolicyStore();
+  const existing = store.upsert("existing", policy);
+
+  assert.throws(
+    () => store.importState(null),
+    /policy file must contain version 1 tenants/
+  );
+  assert.throws(
+    () => store.importState(false),
+    /policy file must contain version 1 tenants/
+  );
+  assert.equal(store.get("existing", "acme-fast").version, existing.version);
+  assert.equal(store.get("existing", "acme-fast").policy.description, policy.description);
+});
+
+test("file policy store refuses a valid-JSON null state without overwriting it", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-policy-store-null-state-"));
+  const file = path.join(dir, "policies.json");
+
+  try {
+    await writeFile(file, "null", "utf8");
+    await assert.rejects(
+      () => createFilePolicyStore({ filePath: file }),
+      /policy file must contain version 1 tenants/
+    );
+    assert.equal(await readFile(file, "utf8"), "null");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

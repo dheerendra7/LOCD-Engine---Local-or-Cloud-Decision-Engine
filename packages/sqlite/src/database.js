@@ -1,4 +1,5 @@
 import * as sqlite from "node:sqlite";
+import { randomUUID } from "node:crypto";
 
 const { DatabaseSync } = sqlite;
 const nativeBackup = sqlite.backup;
@@ -61,7 +62,8 @@ export async function backupSQLiteDatabase({
     }
   }
 
-  const temporary = destination + ".tmp-" + process.pid + "-" + Date.now();
+  // Independent backups may run concurrently; timestamps alone can collide.
+  const temporary = destination + ".tmp-" + process.pid + "-" + randomUUID();
   if (typeof nativeBackup !== "function") {
     throw new Error("SQLite online backup requires Node.js 22.16 or newer");
   }

@@ -132,8 +132,8 @@ function clonePolicy(record) {
 }
 
 function normalizeState(parsed) {
-  if (!parsed) return { version: FILE_VERSION, tenants: {} };
   if (
+    parsed &&
     parsed.version === FILE_VERSION &&
     parsed.tenants &&
     typeof parsed.tenants === "object" &&
