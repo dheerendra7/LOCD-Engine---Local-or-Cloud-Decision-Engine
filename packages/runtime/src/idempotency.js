@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 function sortValue(value) {
   if (Array.isArray(value)) return value.map(sortValue);
@@ -117,15 +117,29 @@ export function createIdempotencyStore({
       }
 
       const now = clock();
+      const claimToken = randomUUID();
       entries.set(composite, {
         fingerprint: currentFingerprint,
+        claimToken,
         processing: true,
         response: null,
         createdAt: now,
         expiresAt: now + lockTtlMs
       });
 
-      return { claimed: true };
+      return { claimed: true, claimToken };
+    },
+
+    release(scope, key, body, claimToken) {
+      if (!key || !claimToken) return false;
+      purge();
+      const normalizedKey = String(key).trim();
+      if (!normalizedKey || normalizedKey.length > 256) throw new Error("idempotency_key_invalid");
+      const composite = String(scope) + ":" + normalizedKey;
+      const existing = entries.get(composite);
+      if (!existing || !existing.processing || existing.claimToken !== claimToken ||
+          existing.fingerprint !== fingerprint(body)) return false;
+      return entries.delete(composite);
     },
 
     size() {

@@ -61,10 +61,9 @@ test("history is bounded", () => {
 test("local idempotency claims prevent concurrent duplicate work", () => {
   const store = createIdempotencyStore();
 
-  assert.deepEqual(
-    store.claim("POST /v1/execute", "same-key", { x: 1 }),
-    { claimed: true }
-  );
+  const firstClaim = store.claim("POST /v1/execute", "same-key", { x: 1 });
+  assert.equal(firstClaim.claimed, true);
+  assert.equal(typeof firstClaim.claimToken, "string");
 
   assert.deepEqual(
     store.claim("POST /v1/execute", "same-key", { x: 1 }),
@@ -112,10 +111,7 @@ test("processing claims expire using their own lock TTL", () => {
     clock: () => now
   });
 
-  assert.deepEqual(
-    store.claim("scope", "key", { x: 1 }, 100),
-    { claimed: true }
-  );
+  assert.equal(store.claim("scope", "key", { x: 1 }, 100).claimed, true);
 
   now = 1050;
   assert.deepEqual(
@@ -124,10 +120,7 @@ test("processing claims expire using their own lock TTL", () => {
   );
 
   now = 1100;
-  assert.deepEqual(
-    store.claim("scope", "key", { x: 1 }, 100),
-    { claimed: true }
-  );
+  assert.equal(store.claim("scope", "key", { x: 1 }, 100).claimed, true);
 });
 
 test("completed responses keep the normal retention TTL", () => {
@@ -184,4 +177,19 @@ test("cached idempotency responses cannot be mutated through caller-owned object
   firstReplay.body.result.targetId = "mutated-after-replay";
   const secondReplay = store.claim("POST /v1/decide", "immutable-response", { x: 1 });
   assert.equal(secondReplay.response.body.result.targetId, "safe");
+});
+
+
+test("local idempotency releases only its own unfinished claim", () => {
+  const store = createIdempotencyStore();
+  const body = { payload: "same" };
+  const claim = store.claim("scope", "key", body);
+  assert.equal(claim.claimed, true);
+  assert.equal(store.release("scope", "key", body, claim.claimToken + "-wrong"), false);
+  assert.equal(store.claim("scope", "key", body).reason, "in_progress");
+  assert.equal(store.release("scope", "key", body, claim.claimToken), true);
+  const replacement = store.claim("scope", "key", body);
+  assert.equal(replacement.claimed, true);
+  assert.equal(store.release("scope", "key", body, claim.claimToken), false);
+  assert.equal(store.claim("scope", "key", body).reason, "in_progress");
 });
