@@ -3261,3 +3261,31 @@ test("invalid idempotency lock TTL fails at server creation", () => {
     /idempotencyLockTtlMs must be >= 1/
   );
 });
+
+
+test("failed idempotent operations release claims for immediate shared-store retry", async () => {
+  const scopedServer = createServer({
+    targetRegistry: createTargetRegistry(),
+    coordinationStore: createInMemoryCoordinationStore()
+  });
+  await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + scopedServer.address().port;
+  const request = () => fetch(url + "/v1/targets/idempotency-missing-target/probe", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": "failed-probe-retry"
+    },
+    body: "{}"
+  });
+
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await request();
+      assert.equal(response.status, 404);
+      assert.deepEqual(await response.json(), { error: "target_not_found" });
+    }
+  } finally {
+    await new Promise(resolve => scopedServer.close(resolve));
+  }
+});

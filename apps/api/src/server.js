@@ -570,6 +570,7 @@ export function createServer({
     const startedAt = process.hrtime.bigint();
     let requestLogWritten = false;
     let pathname = "unknown";
+    let idempotencyClaim = null;
 
     try {
       const url = new URL(req.url || "/", "http://localhost");
@@ -636,7 +637,15 @@ export function createServer({
             idempotencyLockTtlMs
           );
 
-          if (claim.claimed) return null;
+          if (claim.claimed) {
+            idempotencyClaim = {
+              scope,
+              key: idempotencyKey,
+              body: structuredClone(body),
+              claimToken: claim.claimToken
+            };
+            return null;
+          }
 
           if (claim.reason === "in_progress") {
             return {
@@ -663,6 +672,7 @@ export function createServer({
           body,
           { status, body: responseBody }
         );
+        idempotencyClaim = null;
       };
       const sendReplay = replay => sendJson(res, replay.status, replay.body, {
         "idempotency-replayed": "true"
@@ -1384,6 +1394,23 @@ export function createServer({
         error: "internal_server_error",
         requestId
       });
+    } finally {
+      if (idempotencyClaim && typeof effectiveIdempotencyStore.release === "function") {
+        try {
+          await effectiveIdempotencyStore.release(
+            idempotencyClaim.scope,
+            idempotencyClaim.key,
+            idempotencyClaim.body,
+            idempotencyClaim.claimToken
+          );
+        } catch (error) {
+          logger.warn({
+            event: "idempotency_claim_release_failed",
+            requestId,
+            errorClass: error instanceof Error ? error.constructor.name : "unknown_error"
+          });
+        }
+      }
     }
   });
 
