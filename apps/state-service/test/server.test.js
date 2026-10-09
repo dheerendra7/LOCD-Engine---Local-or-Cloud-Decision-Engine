@@ -674,3 +674,37 @@ test("state service atomically replaces only the matching coordination value", a
     await instance.cleanup();
   }
 });
+
+
+test("state service rejects malformed conditional coordination payloads", async () => {
+  const instance = await startServer();
+  const headers = {
+    authorization: "Bearer state-secret",
+    "content-type": "application/json"
+  };
+  try {
+    for (const [suffix, payload, expected] of [
+      ["delete-if-value", "null", { error: "expected_value_required" }],
+      ["delete-if-value", "[]", { error: "expected_value_required" }],
+      ["set-if-value", "null", { error: "expected_value_and_value_required" }],
+      ["set-if-value", "[]", { error: "expected_value_and_value_required" }]
+    ]) {
+      const response = await fetch(instance.url + "/v1/state/kv/malformed/" + suffix, {
+        method: "POST",
+        headers,
+        body: payload
+      });
+      assert.equal(response.status, 400);
+      assert.deepEqual(await response.json(), expected);
+    }
+
+    const methodMismatch = await fetch(
+      instance.url + "/v1/state/kv/malformed/set-if-value",
+      { headers }
+    );
+    assert.equal(methodMismatch.status, 404);
+    assert.deepEqual(await methodMismatch.json(), { error: "not_found" });
+  } finally {
+    await instance.cleanup();
+  }
+});

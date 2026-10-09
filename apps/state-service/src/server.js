@@ -321,7 +321,8 @@ export function createStateServiceServer({
 
       if (req.method === "GET" && pathname.startsWith("/v1/state/kv/")) {
         const key = decodeKey(pathname, "/v1/state/kv/");
-        if (key.endsWith("/set-if-absent")) {
+        if (["/set-if-absent", "/set-if-value", "/delete-if-value", "/incr"]
+          .some(suffix => key.endsWith(suffix))) {
           sendJson(res, 404, { error: "not_found" });
           return;
         }
@@ -353,7 +354,13 @@ export function createStateServiceServer({
       if (req.method === "POST" && pathname.startsWith("/v1/state/kv/") && pathname.endsWith("/set-if-value")) {
         const key = decodeKey(pathname, "/v1/state/kv/", "/set-if-value");
         const body = await readJsonBody(req, maxBodyBytes);
-        if (!Object.hasOwn(body, "expectedValue") || !Object.hasOwn(body, "value")) {
+        if (
+          !body ||
+          typeof body !== "object" ||
+          Array.isArray(body) ||
+          !Object.hasOwn(body, "expectedValue") ||
+          !Object.hasOwn(body, "value")
+        ) {
           sendJson(res, 400, { error: "expected_value_and_value_required" });
           return;
         }
@@ -371,7 +378,12 @@ export function createStateServiceServer({
       if (req.method === "POST" && pathname.startsWith("/v1/state/kv/") && pathname.endsWith("/delete-if-value")) {
         const key = decodeKey(pathname, "/v1/state/kv/", "/delete-if-value");
         const body = await readJsonBody(req, maxBodyBytes);
-        if (!Object.hasOwn(body, "expectedValue")) {
+        if (
+          !body ||
+          typeof body !== "object" ||
+          Array.isArray(body) ||
+          !Object.hasOwn(body, "expectedValue")
+        ) {
           sendJson(res, 400, { error: "expected_value_required" });
           return;
         }
