@@ -64,8 +64,8 @@ export function createIdempotencyStore({
       return structuredClone({ ...existing.response, replayed: true });
     },
 
-    remember(scope, key, body, response) {
-      if (!key) return;
+    remember(scope, key, body, response, claimToken = null) {
+      if (!key) return false;
       purge();
 
       const normalizedKey = String(key).trim();
@@ -75,13 +75,21 @@ export function createIdempotencyStore({
 
       const now = clock();
       const composite = String(scope) + ":" + normalizedKey;
+      const currentFingerprint = fingerprint(body);
+      if (claimToken) {
+        const existing = entries.get(composite);
+        if (!existing || !existing.processing || existing.claimToken !== claimToken ||
+            existing.fingerprint !== currentFingerprint) return false;
+      }
+
       entries.set(composite, {
-        fingerprint: fingerprint(body),
+        fingerprint: currentFingerprint,
         response: structuredClone({ ...response, replayed: false }),
         createdAt: now,
         expiresAt: now + ttlMs
       });
       purge();
+      return true;
     },
 
     claim(scope, key, body, lockTtlMs = 30_000) {

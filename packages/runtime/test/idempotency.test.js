@@ -193,3 +193,26 @@ test("local idempotency releases only its own unfinished claim", () => {
   assert.equal(store.release("scope", "key", body, claim.claimToken), false);
   assert.equal(store.claim("scope", "key", body).reason, "in_progress");
 });
+
+
+test("a stale local request cannot complete a replacement claim", () => {
+  let now = 1_000;
+  const store = createIdempotencyStore({ ttlMs: 1_000, clock: () => now });
+  const body = { payload: "same" };
+  const oldClaim = store.claim("scope", "key", body, 100);
+  now = 1_100;
+  const newClaim = store.claim("scope", "key", body, 100);
+  assert.equal(newClaim.claimed, true);
+  assert.notEqual(newClaim.claimToken, oldClaim.claimToken);
+
+  assert.equal(
+    store.remember("scope", "key", body, { status: 200, body: { owner: "old" } }, oldClaim.claimToken),
+    false
+  );
+  assert.equal(store.claim("scope", "key", body).reason, "in_progress");
+  assert.equal(
+    store.remember("scope", "key", body, { status: 200, body: { owner: "new" } }, newClaim.claimToken),
+    true
+  );
+  assert.equal(store.lookup("scope", "key", body).body.owner, "new");
+});

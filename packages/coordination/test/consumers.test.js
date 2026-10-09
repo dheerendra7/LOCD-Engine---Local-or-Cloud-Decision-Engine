@@ -111,3 +111,29 @@ test("coordinated idempotency releases claims only for their owner", async () =>
   assert.equal(await one.release("scope", "key", body, claim.claimToken), false);
   assert.equal((await one.claim("scope", "key", body)).reason, "in_progress");
 });
+
+
+test("a stale coordinated request cannot complete a replacement claim", async () => {
+  const store = createInMemoryCoordinationStore();
+  const one = createCoordinatedIdempotencyStore({ store, namespace: "completion-fence" });
+  const two = createCoordinatedIdempotencyStore({ store, namespace: "completion-fence" });
+  const body = { payload: "same" };
+  const oldClaim = await one.claim("scope", "key", body);
+
+  assert.equal(await one.release("scope", "key", body, oldClaim.claimToken), true);
+  const newClaim = await two.claim("scope", "key", body);
+  assert.equal(newClaim.claimed, true);
+  assert.notEqual(newClaim.claimToken, oldClaim.claimToken);
+
+  assert.equal(
+    await one.remember("scope", "key", body, { status: 200, body: { owner: "old" } }, oldClaim.claimToken),
+    false
+  );
+  assert.equal((await one.claim("scope", "key", body)).reason, "in_progress");
+  assert.equal(
+    await two.remember("scope", "key", body, { status: 200, body: { owner: "new" } }, newClaim.claimToken),
+    true
+  );
+  assert.equal((await one.lookup("scope", "key", body)).body.owner, undefined);
+  assert.equal((await one.lookup("scope", "key", body)).body.body?.owner, "new");
+});

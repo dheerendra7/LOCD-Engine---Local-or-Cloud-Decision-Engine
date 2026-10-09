@@ -41,17 +41,26 @@ export function createInMemoryCoordinationStore() {
     },
 
     async setIfAbsent(key, value, { ttlMs = null } = {}) {
+      if (ttlMs != null && (!Number.isFinite(ttlMs) || ttlMs < 1)) throw new Error("ttlMs must be >= 1");
       purge();
       const normalized = String(key);
       if (values.has(normalized)) return false;
 
       values.set(normalized, structuredClone(value));
-      if (ttlMs == null) {
-        expiries.delete(normalized);
-      } else {
-        if (!Number.isFinite(ttlMs) || ttlMs < 1) throw new Error("ttlMs must be >= 1");
-        expiries.set(normalized, Date.now() + ttlMs);
-      }
+      if (ttlMs == null) expiries.delete(normalized);
+      else expiries.set(normalized, Date.now() + ttlMs);
+      return true;
+    },
+
+    async setIfValue(key, expectedValue, value, { ttlMs = null } = {}) {
+      if (ttlMs != null && (!Number.isFinite(ttlMs) || ttlMs < 1)) throw new Error("ttlMs must be >= 1");
+      purge();
+      const normalized = String(key);
+      if (!values.has(normalized) || !isDeepStrictEqual(values.get(normalized), expectedValue)) return false;
+
+      values.set(normalized, structuredClone(value));
+      if (ttlMs == null) expiries.delete(normalized);
+      else expiries.set(normalized, Date.now() + ttlMs);
       return true;
     },
 

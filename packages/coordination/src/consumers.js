@@ -96,14 +96,27 @@ export function createCoordinatedIdempotencyStore({
     });
   }
 
-  async function remember(scope, key, body, response) {
-    if (!key) return;
+  async function remember(scope, key, body, response, claimToken = null) {
+    if (!key) return false;
 
-    await store.set(storageKey(scope, key), {
-      fingerprint: fingerprint(body),
+    const storedKey = storageKey(scope, key);
+    const currentFingerprint = fingerprint(body);
+    const completed = {
+      fingerprint: currentFingerprint,
       response: structuredClone({ ...response, replayed: false }),
       storedAt: new Date().toISOString()
-    }, { ttlMs });
+    };
+
+    if (claimToken) {
+      if (typeof store.setIfValue !== "function") return false;
+      const existing = await store.get(storedKey);
+      if (!existing || !existing.processing || existing.claimToken !== claimToken ||
+          existing.fingerprint !== currentFingerprint) return false;
+      return store.setIfValue(storedKey, existing, completed, { ttlMs });
+    }
+
+    await store.set(storedKey, completed, { ttlMs });
+    return true;
   }
 
   async function claim(scope, key, body, lockTtlMs = 30_000) {
