@@ -219,3 +219,16 @@ test("dashboard scope guidance matches the API's actual authorizer contract", as
     assert.match(html, new RegExp("<code>" + scope + "</code>"));
   }
 });
+
+test("the dashboard has one implementation per named function and one API transport path", async () => {
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  const names = [...script.matchAll(/(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/g)].map(match => match[1]);
+  const duplicates = Object.entries(names.reduce((counts, name) => {
+    counts[name] = (counts[name] || 0) + 1;
+    return counts;
+  }, {})).filter(([, count]) => count > 1);
+  assert.deepEqual(duplicates, []);
+  assert.match(script, /async function portalFetch\(/);
+  assert.match(script, /const result = await portalFetch\("\/v1\/policies\/simulate", portalJsonOptions\(body\)\)/);
+  assert.doesNotMatch(script, /fetch\(["'`]\/v1\//);
+});
