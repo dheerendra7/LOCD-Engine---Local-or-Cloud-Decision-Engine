@@ -1381,7 +1381,7 @@ document.querySelector("#clearApiKey")?.addEventListener("click", async () => {
 document.querySelector("#apiKey")?.addEventListener("keydown", event => {
   if (event.key === "Enter") document.querySelector("#applyApiKey")?.click();
 });
-document.querySelector("#refreshAll")?.addEventListener("click", refreshAll);
+// Refresh listener is registered above; avoid duplicate refreshes.
 
 document.querySelectorAll("[data-nav]").forEach(link => {
   link.addEventListener("click", () => {
