@@ -46,10 +46,32 @@ test("coordination store contract is validated", () => {
   );
 });
 
-test("invalid TTL configuration fails clearly", async () => {
+test("invalid TTL configuration fails before mutating coordination state", async () => {
   const store = createInMemoryCoordinationStore();
+
   await assert.rejects(
-    () => store.set("key", "value", { ttlMs: 0 }),
+    () => store.set("new-key", "value", { ttlMs: 0 }),
     /ttlMs must be >= 1/
   );
+  assert.equal(await store.get("new-key"), null);
+
+  await store.set("existing-key", "original");
+  await assert.rejects(
+    () => store.set("existing-key", "replacement", { ttlMs: -1 }),
+    /ttlMs must be >= 1/
+  );
+  assert.equal(await store.get("existing-key"), "original");
+
+  await assert.rejects(
+    () => store.incr("new-counter", { ttlMs: 0 }),
+    /ttlMs must be >= 1/
+  );
+  assert.equal(await store.get("new-counter"), null);
+
+  assert.equal(await store.incr("existing-counter", { ttlMs: 1000 }), 1);
+  await assert.rejects(
+    () => store.incr("existing-counter", { ttlMs: 0 }),
+    /ttlMs must be >= 1/
+  );
+  assert.equal(await store.get("existing-counter"), 1);
 });
