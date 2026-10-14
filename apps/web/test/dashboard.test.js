@@ -256,3 +256,18 @@ test("using a policy preserves the current what-if baseline and selects a distin
   assert.doesNotMatch(handler, /simulationCurrentPolicy/);
   assert.match(handler, /The current baseline is unchanged/);
 });
+
+test("policy simulation renders missing deltas as unknown, not zero", async () => {
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  const match = script.match(/function formatDelta\(value, unit = "", digits = 3\) \{[\s\S]*?\n\}/);
+  assert.ok(match, "simulation delta formatter should exist");
+  const formatDelta = new Function(match[0] + "; return formatDelta;")();
+  assert.equal(formatDelta(null), "—");
+  assert.equal(formatDelta(undefined), "—");
+  assert.equal(formatDelta(""), "—");
+  assert.equal(formatDelta("   "), "—");
+  assert.equal(formatDelta(Infinity), "—");
+  assert.equal(formatDelta(0), "0.000");
+  assert.equal(formatDelta(1.25, " ms", 2), "+1.25 ms");
+  assert.equal(formatDelta(-1.25, " USD", 3), "-1.250 USD");
+});
