@@ -79,6 +79,21 @@ test("non-matching policy rules do not mutate resolved policy", () => {
   assert.deepEqual(resolved.matchedRules, []);
 });
 
+test("resolvePolicy rejects invalid root policy controls", () => {
+  assert.throws(
+    () => resolvePolicy({ sensitiveDataMode: "cloud-only" }),
+    /policy.sensitiveDataMode must be one of/
+  );
+  assert.throws(
+    () => resolvePolicy({ maxHeartbeatAgeMs: -1 }),
+    /policy.maxHeartbeatAgeMs must be >= 0/
+  );
+  assert.throws(
+    () => resolvePolicy({ maxHeartbeatAgeMs: " " }),
+    /policy.maxHeartbeatAgeMs must be >= 0/
+  );
+});
+
 test("invalid policy rule shapes fail before decision evaluation", () => {
   assert.throws(
     () => resolvePolicy({
