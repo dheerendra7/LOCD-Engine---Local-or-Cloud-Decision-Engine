@@ -1,6 +1,7 @@
 let activeApiKey = "";
 let apiAccessRevision = 0;
 let policyHistoryRequestRevision = 0;
+let policyCatalogRequestRevision = 0;
 
 function apiHeaders() {
   return activeApiKey ? { authorization: "Bearer " + activeApiKey } : {};
@@ -11,6 +12,7 @@ function resetTenantScopedView() {
   lastPolicyCatalogFingerprint = null;
   activeHistoryPolicy = null;
   policyHistoryRequestRevision += 1;
+  policyCatalogRequestRevision += 1;
   invalidateHybridPlan();
   renderTargets([]);
 
@@ -721,10 +723,11 @@ async function refreshTargets() {
 
 async function refreshPolicies() {
   const accessRevision = apiAccessRevision;
+  const catalogRevision = ++policyCatalogRequestRevision;
   const status = document.querySelector("#policyManagerStatus");
   try {
     const data = await portalFetch("/v1/policies");
-    if (accessRevision !== apiAccessRevision) return;
+    if (accessRevision !== apiAccessRevision || catalogRevision !== policyCatalogRequestRevision) return;
     const policies = Array.isArray(data.policies) ? data.policies : [];
     const fingerprint = JSON.stringify(policies);
     if (lastPolicyCatalogFingerprint !== null && fingerprint !== lastPolicyCatalogFingerprint) {
@@ -739,7 +742,7 @@ async function refreshPolicies() {
       value: item.id, label: item.name || item.id
     })), formBase.value || "balanced");
   } catch (error) {
-    if (accessRevision !== apiAccessRevision) return;
+    if (accessRevision !== apiAccessRevision || catalogRevision !== policyCatalogRequestRevision) return;
     if (lastPolicyCatalogFingerprint !== null) {
       lastPolicyCatalogFingerprint = null;
       invalidateHybridPlan();
