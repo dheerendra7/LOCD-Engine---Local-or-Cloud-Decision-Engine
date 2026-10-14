@@ -169,6 +169,38 @@ test("unavailable target rejects the step", () => {
   assert.match(result.rejected.flatMap(item => item.reasons).join(","), /target_unavailable/);
 });
 
+test("invalid per-step sensitivity is rejected instead of bypassing privacy policy", () => {
+  const base = {
+    workload: { type: "llm-inference", sensitivity: "low" },
+    policy: { sensitiveDataMode: "local-only" },
+    steps: [
+      { id: "preprocess", targetId: "local-pre" },
+      { id: "infer", targetId: "cloud", dataSensitivity: "ultra-sensitive" }
+    ],
+    targets
+  };
+
+  assert.throws(
+    () => planHybridExecution(base),
+    /steps\[1\]\.dataSensitivity must be one of: low, medium, high/
+  );
+});
+
+test("duplicate target identifiers are rejected instead of silently selecting the last entry", () => {
+  const duplicateTargets = [
+    { id: "shared", mode: "local", available: true, estimatedLatencyMs: 10, estimatedCostUsd: 0 },
+    { id: "shared", mode: "cloud", available: true, estimatedLatencyMs: 10, estimatedCostUsd: 0 }
+  ];
+  assert.throws(
+    () => planHybridExecution({
+      workload: { type: "batch", sensitivity: "low" },
+      steps: [{ id: "a", targetId: "shared" }, { id: "b", targetId: "local-pre" }],
+      targets: [...duplicateTargets, targets[0]]
+    }),
+    /target ids must be unique/
+  );
+});
+
 test("duplicate steps are rejected", () => {
   const result = planHybridExecution({
     workload: { type: "batch" },
