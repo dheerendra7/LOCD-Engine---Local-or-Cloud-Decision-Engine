@@ -678,7 +678,11 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
             "INSERT INTO coordination_kv(key, value, expires_at) VALUES (?, ?, ?)"
           ).run(normalized, JSON.stringify(next), expiresAt);
         } else {
-          next = Number(row.value) + 1;
+          const current = JSON.parse(row.value);
+          if (!Number.isSafeInteger(current) || current < 0) {
+            throw new Error("coordination counter must be a non-negative safe integer");
+          }
+          next = current + 1;
           if (!Number.isSafeInteger(next)) throw new Error("coordination counter overflow");
           db.prepare("UPDATE coordination_kv SET value = ? WHERE key = ?").run(JSON.stringify(next), normalized);
         }
