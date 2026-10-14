@@ -254,7 +254,8 @@ test("using a policy preserves the current what-if baseline and selects a distin
   const handler = script.slice(start, end);
   assert.match(handler, /\["policyProfile", "simulationCandidatePolicy", "hybridPolicyProfile"\]/);
   assert.doesNotMatch(handler, /simulationCurrentPolicy/);
-  assert.match(handler, /The current baseline is unchanged/);
+  assert.doesNotMatch(handler, /newPolicyId/);
+  assert.match(handler, /The current baseline and new-policy form are unchanged/);
 });
 
 test("policy simulation renders missing deltas as unknown, not zero", async () => {
