@@ -309,6 +309,34 @@ test("sqlite coordination is shared across separate connections", async () => {
   }
 });
 
+test("sqlite coordination compares structured values independent of property insertion order", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-coord-compare-"));
+  const file = path.join(dir, "state.db");
+
+  try {
+    const one = createSQLiteCoordinationStore({ filePath: file });
+    const two = createSQLiteCoordinationStore({ filePath: file });
+    const original = { outer: { z: 3, a: 1 }, top: true };
+    const reordered = { top: true, outer: { a: 1, z: 3 } };
+
+    await one.set("conditional", original);
+    assert.equal(await two.setIfValue("conditional", reordered, { updated: true }), true);
+    assert.deepEqual(await one.get("conditional"), { updated: true });
+
+    assert.equal(await one.deleteIfValue("conditional", { updated: true }), true);
+    assert.equal(await two.get("conditional"), null);
+
+    await one.set("conditional", original);
+    assert.equal(await two.deleteIfValue("conditional", { outer: { a: 1, z: 999 }, top: true }), false);
+    assert.deepEqual(await one.get("conditional"), original);
+
+    one.close();
+    two.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("sqlite coordination expires state", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-expiry-"));
   const file = path.join(dir, "state.db");
