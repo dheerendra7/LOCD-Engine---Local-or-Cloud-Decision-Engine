@@ -327,6 +327,10 @@ test("sqlite coordination compares structured values independent of property ins
     assert.equal(await two.get("conditional"), null);
 
     await one.set("conditional", original);
+    assert.equal(await two.deleteIfValue("conditional", reordered), true);
+    assert.equal(await one.get("conditional"), null);
+
+    await one.set("conditional", original);
     assert.equal(await two.deleteIfValue("conditional", { outer: { a: 1, z: 999 }, top: true }), false);
     assert.deepEqual(await one.get("conditional"), original);
 
