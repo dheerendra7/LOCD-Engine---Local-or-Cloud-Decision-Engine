@@ -467,6 +467,7 @@ export function createServer({
   rateLimitMaxRequests = Number(process.env.LOCD_RATE_LIMIT_RPM || 0),
   rateLimitWindowMs = 60_000,
   trustProxy = process.env.LOCD_TRUST_PROXY === "true",
+  trustedProxyHops = Number(process.env.LOCD_TRUST_PROXY_HOPS || 1),
   idempotencyLockTtlMs = Number(process.env.LOCD_IDEMPOTENCY_LOCK_TTL_MS || 30_000),
   logger = createLogger({
     level: process.env.LOCD_LOG_LEVEL || "info"
@@ -489,6 +490,9 @@ export function createServer({
 } = {}) {
   if (!Number.isFinite(maxBodyBytes) || maxBodyBytes < 1) {
     throw new Error("maxBodyBytes must be >= 1");
+  }
+  if (trustProxy && (!Number.isSafeInteger(trustedProxyHops) || trustedProxyHops < 1)) {
+    throw new Error("trustedProxyHops must be a positive safe integer when trustProxy is enabled");
   }
   if (!Number.isFinite(idempotencyLockTtlMs) || idempotencyLockTtlMs < 1) {
     throw new Error("idempotencyLockTtlMs must be >= 1");
@@ -690,7 +694,7 @@ export function createServer({
 
       if (pathname.startsWith("/v1/")) {
         const rate = await effectiveRateLimiter.consume(
-          scopeKey(tenantId, getClientKey(req, { trustProxy }))
+          scopeKey(tenantId, getClientKey(req, { trustProxy, trustedProxyHops }))
         );
         if (effectiveRateLimiter.enabled) {
           res.setHeader("x-ratelimit-limit", String(rate.limit));

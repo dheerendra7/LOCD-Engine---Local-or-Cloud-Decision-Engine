@@ -36,13 +36,28 @@ test("different keys have independent budgets", () => {
   assert.equal(limiter.consume("b", 2).allowed, true);
 });
 
-test("trusted proxy mode uses first forwarded address", () => {
-  const req = {
-    headers: { "x-forwarded-for": "198.51.100.10, 10.0.0.1" },
+test("trusted proxy mode resolves the client from the configured right-side hop", () => {
+  const oneProxy = {
+    headers: { "x-forwarded-for": "203.0.113.99, 198.51.100.10" },
     socket: { remoteAddress: "10.0.0.2" }
   };
-  assert.equal(getClientKey(req, { trustProxy: true }), "198.51.100.10");
-  assert.equal(getClientKey(req), "10.0.0.2");
+  assert.equal(getClientKey(oneProxy, { trustProxy: true }), "198.51.100.10");
+  assert.equal(getClientKey(oneProxy), "10.0.0.2");
+
+  const twoProxies = {
+    headers: { "x-forwarded-for": "203.0.113.99, 198.51.100.10, 10.0.0.1" },
+    socket: { remoteAddress: "10.0.0.2" }
+  };
+  assert.equal(getClientKey(twoProxies, { trustProxy: true, trustedProxyHops: 2 }), "198.51.100.10");
+});
+
+test("trusted proxy mode falls back to the socket for malformed or short chains", () => {
+  const malformed = {
+    headers: { "x-forwarded-for": "not-an-ip" },
+    socket: { remoteAddress: "10.0.0.2" }
+  };
+  assert.equal(getClientKey(malformed, { trustProxy: true }), "10.0.0.2");
+  assert.equal(getClientKey(malformed, { trustProxy: true, trustedProxyHops: 2 }), "10.0.0.2");
 });
 
 test("invalid limiter configuration fails clearly", () => {

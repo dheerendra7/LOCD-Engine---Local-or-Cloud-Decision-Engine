@@ -107,6 +107,14 @@ test("graceful shutdown rejects an invalid timeout", () => {
 
 test("HTTP server rejects invalid resource guard configuration", () => {
   assert.throws(
+    () => createServer({ trustProxy: true, trustedProxyHops: 0 }),
+    /trustedProxyHops must be a positive safe integer when trustProxy is enabled/
+  );
+  assert.throws(
+    () => createServer({ trustProxy: true, trustedProxyHops: 1.5 }),
+    /trustedProxyHops must be a positive safe integer when trustProxy is enabled/
+  );
+  assert.throws(
     () => createServer({ requestTimeoutMs: 0 }),
     /requestTimeoutMs must be >= 1/
   );

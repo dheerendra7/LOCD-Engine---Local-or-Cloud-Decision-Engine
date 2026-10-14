@@ -69,14 +69,24 @@ export function createRateLimiter({ maxRequests = 0, windowMs = 60_000 } = {}) {
   };
 }
 
-export function getClientKey(req, { trustProxy = false } = {}) {
+import { isIP } from "node:net";
+
+export function getClientKey(req, { trustProxy = false, trustedProxyHops = 1 } = {}) {
   if (trustProxy) {
-    const forwarded = String(req.headers["x-forwarded-for"] || "")
+    if (!Number.isSafeInteger(trustedProxyHops) || trustedProxyHops < 1) {
+      throw new Error("trustedProxyHops must be a positive safe integer");
+    }
+
+    const forwarded = String(req.headers?.["x-forwarded-for"] || "")
       .split(",")
       .map(value => value.trim())
-      .filter(Boolean)[0];
+      .filter(Boolean);
+    const clientIndex = forwarded.length - trustedProxyHops;
+    const candidate = clientIndex >= 0 ? forwarded[clientIndex] : null;
 
-    if (forwarded) return forwarded;
+    // Only trust an address supplied through a complete, configured proxy chain.
+    // Malformed or shorter-than-configured chains fall back to the socket peer.
+    if (candidate && isIP(candidate)) return candidate;
   }
 
   return req.socket?.remoteAddress || "unknown";
