@@ -54,7 +54,7 @@ test("control-plane navigation exposes real operational workflows", async () => 
 });
 
 test("light control plane allows same-origin stylesheet loading under CSP", async () => {
-  const server = await readFile(new URL("../../api/src/server.js", webRoot), "utf8");
+  const server = await readFile(new URL("../api/src/server.js", webRoot), "utf8");
   assert.match(server, /style-src 'self' 'unsafe-inline'/);
   assert.match(server, /connect-src 'self'/);
 });
