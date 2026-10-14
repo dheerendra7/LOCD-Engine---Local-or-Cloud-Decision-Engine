@@ -91,7 +91,7 @@ function matchesRule(rule, context) {
 }
 
 function validateRule(rule, index) {
-  if (!rule || typeof rule !== "object") {
+  if (!rule || typeof rule !== "object" || Array.isArray(rule)) {
     throw new Error("policy rule at index " + index + " must be an object");
   }
 
@@ -106,11 +106,12 @@ function validateRule(rule, index) {
     throw new Error("policy rule priority must be an integer: " + id);
   }
 
-  if (rule.when != null && typeof rule.when !== "object") {
+  if (rule.when != null &&
+      (typeof rule.when !== "object" || Array.isArray(rule.when))) {
     throw new Error("policy rule when must be an object: " + id);
   }
 
-  if (!rule.set || typeof rule.set !== "object") {
+  if (!rule.set || typeof rule.set !== "object" || Array.isArray(rule.set)) {
     throw new Error("policy rule set must be an object: " + id);
   }
 
