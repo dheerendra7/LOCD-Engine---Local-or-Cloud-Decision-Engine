@@ -408,7 +408,10 @@ document.querySelector("#registerTarget").addEventListener("click", async event 
     const raw = document.querySelector("#" + id).value.trim();
     const value = Number(raw);
     if (raw === "" || !Number.isFinite(value) || value < min || value > max) {
-      throw new Error(label + " must be a finite number between " + min + " and " + max + ".");
+      const bounds = Number.isFinite(max)
+        ? "between " + min + " and " + max
+        : "greater than or equal to " + min;
+      throw new Error(label + " must be a finite number " + bounds + ".");
     }
     return value;
   };
