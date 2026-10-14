@@ -46,6 +46,26 @@ test("coordination store contract is validated", () => {
   );
 });
 
+test("increment rejects invalid or overflowing counters without mutation", async () => {
+  const store = createInMemoryCoordinationStore();
+
+  for (const value of ["3", "not-a-counter", -1, 1.5, null]) {
+    await store.set("invalid-counter", value);
+    await assert.rejects(
+      () => store.incr("invalid-counter"),
+      /coordination counter must be a non-negative safe integer/
+    );
+    assert.equal(await store.get("invalid-counter"), value);
+  }
+
+  await store.set("max-counter", Number.MAX_SAFE_INTEGER);
+  await assert.rejects(
+    () => store.incr("max-counter"),
+    /coordination counter overflow/
+  );
+  assert.equal(await store.get("max-counter"), Number.MAX_SAFE_INTEGER);
+});
+
 test("invalid TTL configuration fails before mutating coordination state", async () => {
   const store = createInMemoryCoordinationStore();
 
