@@ -528,6 +528,7 @@ document.querySelector("#simulatePolicy").addEventListener("click", async event 
 // Enhanced light-console behaviour. All displayed operational data is read from the LOCD API.
 let lastHybridPlan = null;
 let hybridInputRevision = 0;
+let lastPolicyCatalogFingerprint = null;
 let hybridStepSequence = 0;
 let activeHistoryPolicy = null;
 
@@ -677,8 +678,15 @@ function invalidateHybridPlan() {
   const executeButton = document.querySelector("#executeDryRun");
   if (executeButton) executeButton.disabled = true;
   if (hadValidatedPlan) {
-    setText("hybridStatus", "Plan inputs or targets changed. Revalidate before dry-run.");
-    setText("executionOutput", "The previously validated plan is stale. Validate the current inputs before dry-run.");
+    setText("hybridStatus", "Plan inputs, targets, or policy catalog changed. Revalidate before dry-run.");
+    const planOutput = document.querySelector("#hybridOutput");
+    if (planOutput) {
+      planOutput.innerHTML = emptyState(
+        "Plan requires revalidation",
+        "Planner inputs, registered targets, or policy definitions changed. Validate the current configuration before dry-run."
+      );
+    }
+    setText("executionOutput", "The previously validated plan is stale. Validate the current configuration before dry-run.");
   }
 }
 
@@ -924,6 +932,11 @@ async function refreshPolicies() {
   try {
     const data = await portalFetch("/v1/policies");
     const policies = Array.isArray(data.policies) ? data.policies : [];
+    const fingerprint = JSON.stringify(policies);
+    if (lastPolicyCatalogFingerprint !== null && fingerprint !== lastPolicyCatalogFingerprint) {
+      invalidateHybridPlan();
+    }
+    lastPolicyCatalogFingerprint = fingerprint;
     setPolicySelectors(policies);
     renderPolicyCards(policies);
     if (status) status.textContent = policies.length + " profiles available";
@@ -932,6 +945,10 @@ async function refreshPolicies() {
       value: item.id, label: item.name || item.id
     })), formBase.value || "balanced");
   } catch (error) {
+    if (lastPolicyCatalogFingerprint !== null) {
+      lastPolicyCatalogFingerprint = null;
+      invalidateHybridPlan();
+    }
     if (status) status.textContent = niceError(error);
     renderPolicyCards([]);
     const readable = niceError(error);
@@ -1385,6 +1402,16 @@ document.querySelector("#planHybrid")?.addEventListener("click", async event => 
       targets: registeredTargets
     };
     if (!body.workload.type) throw new Error("Workload type is required.");
+    const stageIds = body.steps.map(step => step.id);
+    if (stageIds.some(id => !id)) throw new Error("Every stage needs a non-empty stage ID.");
+    if (new Set(stageIds).size !== stageIds.length) throw new Error("Stage IDs must be unique.");
+    const registeredTargetIds = new Set(registeredTargets.map(target => String(target.id)));
+    if (body.steps.some(step => !step.targetId || !registeredTargetIds.has(String(step.targetId)))) {
+      throw new Error("Choose a registered target for every stage.");
+    }
+    if (new Set(body.steps.map(step => String(step.targetId))).size < 2) {
+      throw new Error("Choose at least two distinct registered targets across the stages.");
+    }
     if (!Number.isFinite(body.constraints.maxLatencyMs) || body.constraints.maxLatencyMs < 0) throw new Error("Latency budget must be zero or greater.");
     if (!Number.isFinite(body.constraints.maxCostUsd) || body.constraints.maxCostUsd < 0) throw new Error("Cost budget must be zero or greater.");
     const requestRevision = hybridInputRevision;
