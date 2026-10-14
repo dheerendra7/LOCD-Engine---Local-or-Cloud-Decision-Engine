@@ -23,7 +23,7 @@ const ALLOWED_FIELDS = new Set([
   "rules"
 ]);
 const WEIGHT_KEYS = new Set(["privacy", "latency", "cost", "capacity", "reliability"]);
-const BUILTIN_POLICY_IDS = new Set(listPolicyProfiles().map(profile => profile.id));
+const BUILTIN_POLICY_IDS = new Set(listPolicyProfiles().map(profile => profile.id.toLowerCase()));
 
 export function createPersistenceQueue(persist) {
   if (typeof persist !== "function") {
