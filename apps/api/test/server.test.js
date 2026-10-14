@@ -3255,6 +3255,63 @@ test("concurrent identical idempotency keys reject the in-progress duplicate", a
   }
 });
 
+test("cache-write failure preserves an idempotency claim after the operation mutates state", async () => {
+  const targetRegistry = createTargetRegistry();
+  const originalRegister = targetRegistry.register.bind(targetRegistry);
+  let registerCalls = 0;
+  targetRegistry.register = (...args) => {
+    registerCalls++;
+    return originalRegister(...args);
+  };
+
+  let claimed = false;
+  let releaseCalls = 0;
+  const idempotencyStore = {
+    async claim() {
+      if (claimed) return { claimed: false, reason: "in_progress" };
+      claimed = true;
+      return { claimed: true, claimToken: "claim-token" };
+    },
+    async remember() {
+      throw new Error("simulated idempotency cache write failure");
+    },
+    async release() {
+      releaseCalls++;
+      claimed = false;
+      return true;
+    }
+  };
+  const scopedServer = createServer({ targetRegistry, idempotencyStore });
+  await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + scopedServer.address().port;
+  const request = () => fetch(url + "/v1/targets", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": "target-create-cache-failure"
+    },
+    body: JSON.stringify({
+      id: "cache-failure-target",
+      mode: "local",
+      available: true,
+      capabilities: ["text-generation"],
+      regions: ["local"]
+    })
+  });
+
+  try {
+    const first = await request();
+    assert.equal(first.status, 500);
+    const second = await request();
+    assert.equal(second.status, 409);
+    assert.deepEqual(await second.json(), { error: "idempotency_request_in_progress" });
+    assert.equal(registerCalls, 1);
+    assert.equal(releaseCalls, 0);
+  } finally {
+    await new Promise(resolve => scopedServer.close(resolve));
+  }
+});
+
 test("invalid idempotency lock TTL fails at server creation", () => {
   assert.throws(
     () => createServer({ idempotencyLockTtlMs: 0 }),
