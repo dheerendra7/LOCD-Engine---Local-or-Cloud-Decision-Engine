@@ -178,3 +178,37 @@ test("a missing shared lease can cache a late result without overwriting a new c
   );
   assert.equal((await one.claim("scope", "replacement-key", body)).reason, "in_progress");
 });
+
+
+test("coordinated idempotency retries when a claim disappears between set-if-absent and read", async () => {
+  const base = createInMemoryCoordinationStore();
+  let setIfAbsentCalls = 0;
+  let getCalls = 0;
+  const flakyStore = {
+    get: async key => {
+      getCalls++;
+      if (getCalls === 1) return null;
+      return base.get(key);
+    },
+    set: (...args) => base.set(...args),
+    setIfAbsent: async (...args) => {
+      setIfAbsentCalls++;
+      if (setIfAbsentCalls === 1) return false;
+      return base.setIfAbsent(...args);
+    },
+    delete: (...args) => base.delete(...args),
+    incr: (...args) => base.incr(...args),
+    setIfValue: (...args) => base.setIfValue(...args),
+    deleteIfValue: (...args) => base.deleteIfValue(...args)
+  };
+  const idempotency = createCoordinatedIdempotencyStore({
+    store: flakyStore,
+    namespace: "claim-disappeared"
+  });
+
+  const claim = await idempotency.claim("scope", "key", { payload: 1 });
+  assert.equal(claim.claimed, true);
+  assert.equal(typeof claim.claimToken, "string");
+  assert.equal(setIfAbsentCalls, 2);
+  assert.equal((await idempotency.claim("scope", "key", { payload: 1 })).reason, "in_progress");
+});

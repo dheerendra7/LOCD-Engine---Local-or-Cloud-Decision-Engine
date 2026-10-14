@@ -135,6 +135,9 @@ export function createCoordinatedIdempotencyStore({
 
   async function claim(scope, key, body, lockTtlMs = 30_000) {
     if (!key) return { claimed: false, reason: "no_key" };
+    if (!Number.isFinite(lockTtlMs) || lockTtlMs < 1) {
+      throw new Error("idempotency_lock_ttl_invalid");
+    }
 
     const storedKey = storageKey(scope, key);
     const value = {
@@ -145,26 +148,36 @@ export function createCoordinatedIdempotencyStore({
       storedAt: new Date().toISOString()
     };
 
-    const claimed = await store.setIfAbsent(storedKey, value, {
-      ttlMs: lockTtlMs
-    });
+    // A competing request may expire/delete the value after setIfAbsent
+    // returns false but before get() reads it. Retry atomically rather than
+    // misreporting that harmless race as a reused key with a different body.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const claimed = await store.setIfAbsent(storedKey, value, {
+        ttlMs: lockTtlMs
+      });
+      if (claimed) return { claimed: true, claimToken: value.claimToken };
 
-    if (claimed) return { claimed: true, claimToken: value.claimToken };
+      const existing = await store.get(storedKey);
+      if (!existing) continue;
 
-    const existing = await store.get(storedKey);
-    if (existing?.fingerprint !== value.fingerprint) {
-      throw new Error("idempotency_key_reused");
+      if (existing.fingerprint !== value.fingerprint) {
+        throw new Error("idempotency_key_reused");
+      }
+
+      if (existing.processing) {
+        return { claimed: false, reason: "in_progress" };
+      }
+
+      return {
+        claimed: false,
+        reason: "completed",
+        response: structuredClone(existing.response)
+      };
     }
 
-    if (existing?.processing) {
-      return { claimed: false, reason: "in_progress" };
-    }
-
-    return {
-      claimed: false,
-      reason: "completed",
-      response: structuredClone(existing.response)
-    };
+    // Fail closed: a continuously disappearing claim must never be treated
+    // as permission to execute the operation without an idempotency claim.
+    return { claimed: false, reason: "in_progress" };
   }
 
   async function release(scope, key, body, claimToken) {
