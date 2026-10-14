@@ -181,12 +181,16 @@ export function resolvePolicy(policy = {}, context = {}) {
     throw new Error("policy.maxHeartbeatAgeMs must be >= 0");
   }
   const profile = policy.profile ? getPolicyProfile(policy.profile) : getPolicyProfile("balanced");
+  const overrides = { ...policy };
+  for (const key of ["sensitiveDataMode", "maxHeartbeatAgeMs", "allowedModes", "blockedModes", "allowedRegions"]) {
+    if (overrides[key] == null) delete overrides[key];
+  }
   const merged = {
     ...profile,
-    ...policy,
+    ...overrides,
     weights: {
       ...profile.weights,
-      ...(policy.weights || {})
+      ...(overrides.weights || {})
     }
   };
 
