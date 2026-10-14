@@ -162,11 +162,10 @@ export function listPolicyProfiles() {
 }
 
 export function getPolicyProfile(id = "balanced") {
-  const profile = PRESETS[id];
-  if (!profile) {
+  if (!Object.hasOwn(PRESETS, id)) {
     throw new Error("unknown policy profile: " + id);
   }
-  return structuredClone({ id, ...profile });
+  return structuredClone({ id, ...PRESETS[id] });
 }
 
 export function resolvePolicy(policy = {}, context = {}) {
