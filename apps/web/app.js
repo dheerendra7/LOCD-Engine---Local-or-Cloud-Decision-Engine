@@ -486,8 +486,8 @@ document.querySelector("#simulatePolicy").addEventListener("click", async event 
         requiredCapabilities: ["text-generation"]
       },
       constraints: {
-        latencyBudgetMs: Number(document.querySelector("#latency").value),
-        maxCostUsd: Number(document.querySelector("#cost").value),
+        latencyBudgetMs: readNonNegativeInput("latency", "Latency budget"),
+        maxCostUsd: readNonNegativeInput("cost", "Maximum cost"),
         strictLatency: true,
         strictCost: true
       },
@@ -578,6 +578,19 @@ function portalJsonOptions(body, extraHeaders = {}) {
     },
     body: JSON.stringify(body)
   };
+}
+
+function parseNonNegativeNumber(rawValue, label) {
+  const raw = String(rawValue ?? "").trim();
+  const value = Number(raw);
+  if (raw === "" || !Number.isFinite(value) || value < 0) {
+    throw new Error(label + " must be a finite number of zero or greater.");
+  }
+  return value;
+}
+
+function readNonNegativeInput(id, label) {
+  return parseNonNegativeNumber(document.querySelector("#" + id)?.value, label);
 }
 
 function niceError(error) {
@@ -1357,8 +1370,8 @@ document.querySelector("#planHybrid")?.addEventListener("click", async event => 
         sensitivity: document.querySelector("#hybridSensitivity").value
       },
       constraints: {
-        maxLatencyMs: Number(document.querySelector("#hybridLatency").value),
-        maxCostUsd: Number(document.querySelector("#hybridCost").value),
+        maxLatencyMs: readNonNegativeInput("hybridLatency", "Hybrid latency budget"),
+        maxCostUsd: readNonNegativeInput("hybridCost", "Hybrid cost budget"),
         strictLatency: true,
         strictCost: true
       },
