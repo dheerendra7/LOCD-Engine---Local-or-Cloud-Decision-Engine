@@ -54,12 +54,18 @@ function normalizePlan(input) {
     },
     constraints,
     policy: resolvePolicy(input.policy || {}),
-    steps: input.steps.map((step, index) => ({
-      id: String(step?.id || ""),
-      purpose: String(step?.purpose || "stage-" + index),
-      targetId: step?.targetId == null ? "" : String(step.targetId),
-      dataSensitivity: step?.dataSensitivity || workloadSensitivity
-    })),
+    steps: input.steps.map((step, index) => {
+      const dataSensitivity = step?.dataSensitivity || workloadSensitivity;
+      if (!SENSITIVITIES.has(dataSensitivity)) {
+        throw new Error("steps[" + index + "].dataSensitivity must be one of: low, medium, high");
+      }
+      return {
+        id: String(step?.id || ""),
+        purpose: String(step?.purpose || "stage-" + index),
+        targetId: step?.targetId == null ? "" : String(step.targetId),
+        dataSensitivity
+      };
+    }),
     targets: input.targets
   };
 }
@@ -111,7 +117,12 @@ export function planHybridExecution(input) {
   let totalCostKnown = true;
 
   for (const target of request.targets) {
-    if (target?.id) targetMap.set(String(target.id), target);
+    if (!target?.id) continue;
+    const targetId = String(target.id);
+    if (targetMap.has(targetId)) {
+      throw new Error("target ids must be unique");
+    }
+    targetMap.set(targetId, target);
   }
 
   for (const step of request.steps) {
