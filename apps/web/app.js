@@ -932,7 +932,6 @@ async function refreshActivity() {
     }).join("");
     body.querySelectorAll("[data-select-decision]").forEach(button => {
       button.addEventListener("click", () => {
-        setText("outcomeDecisionId", ""); // keep input value controlled below
         const input = document.querySelector("#outcomeDecisionId");
         if (input) {
           input.value = button.dataset.selectDecision;
