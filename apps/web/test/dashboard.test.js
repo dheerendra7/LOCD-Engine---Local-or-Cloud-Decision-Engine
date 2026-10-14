@@ -434,6 +434,93 @@ test("policy history requests ignore older responses after selection changes", a
   assert.match(script.slice(closeStart, closeEnd), /policyHistoryRequestRevision \+= 1/);
 });
 
+test("policy history only renders the latest request when responses finish out of order", async () => {
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  const start = script.indexOf("async function showPolicyHistory(policyId) {");
+  const end = script.indexOf('\ndocument.querySelector("#policyCards")?.addEventListener', start);
+  assert.ok(start >= 0 && end > start, "policy history request handler should exist");
+  const handler = script.slice(start, end);
+
+  const pending = new Map();
+  const deferred = () => {
+    let resolve;
+    let reject;
+    const promise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+  const root = { innerHTML: "" };
+  const panel = { classList: { remove() {} } };
+  const elements = new Map([
+    ["#policyHistory", root],
+    ["#policyHistoryPanel", panel]
+  ]);
+  const text = {};
+  const documentMock = { querySelector: selector => elements.get(selector) || null };
+  const portalFetch = path => {
+    const id = decodeURIComponent(path.split("/")[3]);
+    const request = deferred();
+    pending.set(id, request);
+    return request.promise;
+  };
+  const setText = (id, value) => { text[id] = value; };
+  const escapeHtml = value => String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+  const runtimeFactory = new Function(
+    "document", "portalFetch", "setText", "escapeHtml", "formatDate", "emptyState", "niceError",
+    "let activeHistoryPolicy = null;" +
+    "let apiAccessRevision = 0;" +
+    "let policyHistoryRequestRevision = 0;" +
+    handler +
+    "; return { showPolicyHistory, invalidateHistory() { policyHistoryRequestRevision += 1; } };"
+  );
+  const runtime = runtimeFactory(
+    documentMock,
+    portalFetch,
+    setText,
+    escapeHtml,
+    () => "test-date",
+    (title, description) => title + ": " + description,
+    error => String(error?.message || error)
+  );
+
+  const older = runtime.showPolicyHistory("policy-a");
+  const latest = runtime.showPolicyHistory("policy-b");
+  pending.get("policy-b").resolve({
+    versions: [{ version: 2, updatedAt: "2026-10-15", updatedBy: "test", policy: { description: "latest-policy-b" } }]
+  });
+  await latest;
+  const latestMarkup = root.innerHTML;
+  assert.match(latestMarkup, /latest-policy-b/);
+
+  pending.get("policy-a").resolve({
+    versions: [{ version: 1, updatedAt: "2026-10-14", updatedBy: "test", policy: { description: "stale-policy-a" } }]
+  });
+  await older;
+  assert.equal(root.innerHTML, latestMarkup);
+  assert.doesNotMatch(root.innerHTML, /stale-policy-a/);
+  assert.equal(text.policyHistoryTitle, "Version history · policy-b");
+
+  const obsoleteError = runtime.showPolicyHistory("policy-c");
+  const current = runtime.showPolicyHistory("policy-d");
+  pending.get("policy-d").resolve({
+    versions: [{ version: 4, updatedAt: "2026-10-15", updatedBy: "test", policy: { description: "current-policy-d" } }]
+  });
+  await current;
+  const currentMarkup = root.innerHTML;
+  pending.get("policy-c").reject(new Error("stale history request failed"));
+  await obsoleteError;
+  assert.equal(root.innerHTML, currentMarkup);
+  assert.match(root.innerHTML, /current-policy-d/);
+  assert.doesNotMatch(root.innerHTML, /stale history request failed/);
+});
+
 test("readiness diagnostics do not overwrite the API connection status", async () => {
   const html = await readFile(new URL("index.html", webRoot), "utf8");
   const script = await readFile(new URL("app.js", webRoot), "utf8");
