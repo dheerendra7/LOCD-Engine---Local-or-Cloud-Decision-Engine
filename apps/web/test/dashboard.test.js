@@ -347,7 +347,7 @@ test("API keys are applied explicitly and access changes reset tenant-scoped UI 
   assert.match(script, /invalidateHybridPlan\(\)/);
   assert.match(script, /activityBody\.innerHTML = .*Loading decision history/);
   assert.match(script, /setText\("decisionCount", "—"\)/);
-  assert.match(script, /setText\("outcomeDecisionId"/);
+  assert.match(script, /if \(decisionId\) decisionId\.value = ""/);
   assert.match(script, /activeApiKey = nextApiKey/);
   assert.match(script, /apiAccessRevision \+= 1/);
   assert.doesNotMatch(script, /querySelector\("#apiKey"\)\.addEventListener\("change", refreshAll\)/);
