@@ -607,6 +607,20 @@ test("policy catalog only applies the newest refresh response", async () => {
   await previousAccess;
   assert.deepEqual(renderedCatalogs.at(-1), ["policy-current"]);
   assert.equal(status.textContent, currentStatus);
+
+  const previousAccess = runtime.refreshPolicies();
+  runtime.changeAccess();
+  requests[4].resolve({ policies: [{ id: "tenant-a-policy", name: "Old tenant", source: "custom" }] });
+  await previousAccess;
+  assert.deepEqual(renderedCatalogs.at(-1), ["policy-current"]);
+  assert.equal(status.textContent, currentStatus);
+
+  const obsoleteAccessError = runtime.refreshPolicies();
+  runtime.changeAccess();
+  requests[5].reject(new Error("previous tenant catalog failed"));
+  await obsoleteAccessError;
+  assert.deepEqual(renderedCatalogs.at(-1), ["policy-current"]);
+  assert.equal(status.textContent, currentStatus);
 });
 
 test("readiness diagnostics do not overwrite the API connection status", async () => {
