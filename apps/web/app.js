@@ -50,6 +50,14 @@ function resetTenantScopedView() {
   setText("executionOutput", "No validated plan is available for the current API access.");
   const decisionId = document.querySelector("#outcomeDecisionId");
   if (decisionId) decisionId.value = "";
+  for (const id of ["actualLatencyMs", "actualCostUsd", "targetId", "targetRegions"]) {
+    const field = document.querySelector("#" + id);
+    if (field) field.value = "";
+  }
+  const outcomeType = document.querySelector("#outcomeType");
+  if (outcomeType) outcomeType.value = "success";
+  setText("outcomeStatus", "");
+  setText("policyFormStatus", "");
   for (const id of ["newPolicyId", "newPolicyName", "newPolicyDescription"]) {
     const field = document.querySelector("#" + id);
     if (field) field.value = "";
@@ -60,6 +68,16 @@ function resetTenantScopedView() {
   if (rulesInput) rulesInput.value = "[]";
   const baseProfile = document.querySelector("#newPolicyBase");
   if (baseProfile) baseProfile.value = "balanced";
+  setText("policyHistoryTitle", "Policy versions");
+  const hybridRows = document.querySelector("#hybridStepRows");
+  if (hybridRows) {
+    hybridRows.innerHTML = "";
+    hybridStepSequence = 0;
+    addHybridStep({ id: "prepare", purpose: "Pre-process", dataSensitivity: "medium" });
+    addHybridStep({ id: "inference", purpose: "Model inference", dataSensitivity: "medium" });
+  }
+  const hybridOutput = document.querySelector("#hybridOutput");
+  if (hybridOutput) hybridOutput.innerHTML = emptyState("No hybrid plan", "Build and validate a plan using the current tenant's targets and policies.");
   for (const id of ["decide", "registerTarget", "simulatePolicy", "savePolicy", "recordOutcome", "planHybrid", "refreshAll"]) {
     const button = document.querySelector("#" + id);
     if (button) button.disabled = false;
