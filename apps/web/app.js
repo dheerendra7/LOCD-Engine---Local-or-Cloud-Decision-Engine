@@ -1,5 +1,6 @@
 let activeApiKey = "";
 let apiAccessRevision = 0;
+let policyHistoryRequestRevision = 0;
 
 function apiHeaders() {
   return activeApiKey ? { authorization: "Bearer " + activeApiKey } : {};
@@ -9,6 +10,7 @@ function resetTenantScopedView() {
   registeredTargets = [];
   lastPolicyCatalogFingerprint = null;
   activeHistoryPolicy = null;
+  policyHistoryRequestRevision += 1;
   invalidateHybridPlan();
   renderTargets([]);
 
@@ -998,6 +1000,7 @@ function renderSimulation(result) {
 
 async function showPolicyHistory(policyId) {
   const accessRevision = apiAccessRevision;
+  const historyRevision = ++policyHistoryRequestRevision;
   const root = document.querySelector("#policyHistory");
   const panel = document.querySelector("#policyHistoryPanel");
   activeHistoryPolicy = policyId;
@@ -1007,7 +1010,7 @@ async function showPolicyHistory(policyId) {
   root.innerHTML = '<div class="status">Loading versions…</div>';
   try {
     const data = await portalFetch("/v1/policies/" + encodeURIComponent(policyId) + "/history");
-    if (accessRevision !== apiAccessRevision) return;
+    if (accessRevision !== apiAccessRevision || historyRevision !== policyHistoryRequestRevision) return;
     const versions = Array.isArray(data.versions) ? data.versions : [];
     root.innerHTML = versions.length ? versions.slice().reverse().map(item =>
       '<div class="history-row"><div><strong>Version ' + escapeHtml(item.version) + '</strong><span>' +
@@ -1017,7 +1020,7 @@ async function showPolicyHistory(policyId) {
       '" data-version="' + escapeHtml(item.version) + '">Restore as new version</button></div>'
     ).join("") : emptyState("No version history found", "This custom policy has no versions available to restore.");
   } catch (error) {
-    if (accessRevision !== apiAccessRevision) return;
+    if (accessRevision !== apiAccessRevision || historyRevision !== policyHistoryRequestRevision) return;
     root.innerHTML = emptyState("Version history unavailable", niceError(error));
   }
 }
@@ -1123,6 +1126,7 @@ document.querySelector("#policyForm")?.addEventListener("submit", async event =>
 });
 
 document.querySelector("#closePolicyHistory")?.addEventListener("click", () => {
+  policyHistoryRequestRevision += 1;
   document.querySelector("#policyHistoryPanel")?.classList.add("hidden");
   activeHistoryPolicy = null;
 });
