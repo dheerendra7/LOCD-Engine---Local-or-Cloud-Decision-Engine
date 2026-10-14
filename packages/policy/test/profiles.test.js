@@ -112,6 +112,20 @@ test("invalid policy rule shapes fail before decision evaluation", () => {
 
   assert.throws(
     () => resolvePolicy({
+      rules: [{ id: "array-when", when: [], set: { sensitiveDataMode: "balanced" } }]
+    }),
+    /policy rule when must be an object/
+  );
+
+  assert.throws(
+    () => resolvePolicy({
+      rules: [{ id: "array-set", when: {}, set: [] }]
+    }),
+    /policy rule set must be an object/
+  );
+
+  assert.throws(
+    () => resolvePolicy({
       rules: [{ id: "bad-priority", priority: 1.5, set: { sensitiveDataMode: "balanced" } }]
     }, { workload: { type: "x" } }),
     /priority must be an integer/
