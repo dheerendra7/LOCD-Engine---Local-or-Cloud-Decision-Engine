@@ -271,3 +271,58 @@ test("policy simulation renders missing deltas as unknown, not zero", async () =
   assert.equal(formatDelta(1.25, " ms", 2), "+1.25 ms");
   assert.equal(formatDelta(-1.25, " USD", 3), "-1.250 USD");
 });
+
+test("API transport converts authentication, scope, registry, and rate-limit errors into actionable messages", async () => {
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  const match = script.match(/async function portalFetch\(path, options = \{\}\) \{[\s\S]*?\n\}/);
+  assert.ok(match, "the dashboard should centralize API response handling");
+
+  let nextResponse;
+  const mockedFetch = async () => nextResponse;
+  const portalFetch = new Function("fetch", "apiHeaders", match[0] + "; return portalFetch;")(
+    mockedFetch,
+    () => ({})
+  );
+
+  const rejectedResponse = (status, error) => ({
+    ok: false,
+    status,
+    json: async () => ({ error })
+  });
+
+  nextResponse = rejectedResponse(401, "unauthorized");
+  await assert.rejects(
+    () => portalFetch("/v1/status"),
+    /Authentication required\. Add a scoped LOCD API key/
+  );
+
+  nextResponse = rejectedResponse(403, "insufficient_scope");
+  await assert.rejects(
+    () => portalFetch("/v1/execute"),
+    /This API key does not have permission/
+  );
+
+  nextResponse = rejectedResponse(404, "target_not_found");
+  await assert.rejects(
+    () => portalFetch("/v1/targets/missing"),
+    /That target no longer exists/
+  );
+
+  nextResponse = rejectedResponse(503, "no_registered_targets");
+  await assert.rejects(
+    () => portalFetch("/v1/decide"),
+    /No targets are registered for this tenant/
+  );
+
+  nextResponse = rejectedResponse(429, "rate_limit_exceeded");
+  await assert.rejects(
+    () => portalFetch("/v1/decide"),
+    /Rate limit reached/
+  );
+
+  nextResponse = rejectedResponse(400, "workload.type is required");
+  await assert.rejects(
+    () => portalFetch("/v1/decide"),
+    /workload\.type is required/
+  );
+});
