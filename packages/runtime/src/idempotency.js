@@ -18,6 +18,12 @@ export function fingerprint(value) {
   return createHash("sha256").update(normalized).digest("hex");
 }
 
+function scopedEntryKey(scope, key) {
+  // Encode the scope and key as separate tuple members so delimiters inside
+  // either value cannot make distinct scopes collide.
+  return JSON.stringify([String(scope), key]);
+}
+
 export function createIdempotencyStore({
   maxEntries = 1000,
   ttlMs = 300000,
@@ -52,7 +58,7 @@ export function createIdempotencyStore({
         throw new Error("idempotency_key_invalid");
       }
 
-      const composite = String(scope) + ":" + normalizedKey;
+      const composite = scopedEntryKey(scope, normalizedKey);
       const existing = entries.get(composite);
       if (!existing) return null;
 
@@ -74,7 +80,7 @@ export function createIdempotencyStore({
       }
 
       const now = clock();
-      const composite = String(scope) + ":" + normalizedKey;
+      const composite = scopedEntryKey(scope, normalizedKey);
       const currentFingerprint = fingerprint(body);
       const completed = {
         fingerprint: currentFingerprint,
@@ -108,7 +114,7 @@ export function createIdempotencyStore({
         throw new Error("idempotency_key_invalid");
       }
 
-      const composite = String(scope) + ":" + normalizedKey;
+      const composite = scopedEntryKey(scope, normalizedKey);
       const currentFingerprint = fingerprint(body);
       const existing = entries.get(composite);
 
@@ -147,7 +153,7 @@ export function createIdempotencyStore({
       purge();
       const normalizedKey = String(key).trim();
       if (!normalizedKey || normalizedKey.length > 256) throw new Error("idempotency_key_invalid");
-      const composite = String(scope) + ":" + normalizedKey;
+      const composite = scopedEntryKey(scope, normalizedKey);
       const existing = entries.get(composite);
       if (!existing || !existing.processing || existing.claimToken !== claimToken ||
           existing.fingerprint !== fingerprint(body)) return false;
