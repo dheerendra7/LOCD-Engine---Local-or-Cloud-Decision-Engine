@@ -28,15 +28,12 @@ export function createInMemoryCoordinationStore() {
     },
 
     async set(key, value, { ttlMs = null } = {}) {
+      if (ttlMs != null && (!Number.isFinite(ttlMs) || ttlMs < 1)) throw new Error("ttlMs must be >= 1");
       purge();
       const normalized = String(key);
       values.set(normalized, structuredClone(value));
-      if (ttlMs == null) {
-        expiries.delete(normalized);
-      } else {
-        if (!Number.isFinite(ttlMs) || ttlMs < 1) throw new Error("ttlMs must be >= 1");
-        expiries.set(normalized, Date.now() + ttlMs);
-      }
+      if (ttlMs == null) expiries.delete(normalized);
+      else expiries.set(normalized, Date.now() + ttlMs);
       return true;
     },
 
@@ -80,13 +77,13 @@ export function createInMemoryCoordinationStore() {
     },
 
     async incr(key, { ttlMs = null } = {}) {
+      if (ttlMs != null && (!Number.isFinite(ttlMs) || ttlMs < 1)) throw new Error("ttlMs must be >= 1");
       purge();
       const normalized = String(key);
       const current = Number(values.get(normalized) || 0);
       const next = current + 1;
       values.set(normalized, next);
       if (ttlMs != null && !expiries.has(normalized)) {
-        if (!Number.isFinite(ttlMs) || ttlMs < 1) throw new Error("ttlMs must be >= 1");
         expiries.set(normalized, Date.now() + ttlMs);
       }
       return next;
