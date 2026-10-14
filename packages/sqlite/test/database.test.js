@@ -368,6 +368,33 @@ test("sqlite increment rejects invalid or overflowing counters without mutation"
   }
 });
 
+test("sqlite increment applies TTL to an existing key without expiry", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-incr-ttl-"));
+  const file = path.join(dir, "state.db");
+  const store = createSQLiteCoordinationStore({ filePath: file });
+  try {
+    await store.set("persistent-counter", 4);
+    assert.equal(await store.incr("persistent-counter", { ttlMs: 60_000 }), 5);
+    const row = store.database.prepare(
+      "SELECT expires_at FROM coordination_kv WHERE key = ?"
+    ).get("persistent-counter");
+    assert.ok(row.expires_at > Date.now());
+
+    await store.set("already-expiring-counter", 7, { ttlMs: 120_000 });
+    const originalExpiry = store.database.prepare(
+      "SELECT expires_at FROM coordination_kv WHERE key = ?"
+    ).get("already-expiring-counter").expires_at;
+    assert.equal(await store.incr("already-expiring-counter", { ttlMs: 1_000 }), 8);
+    const preservedExpiry = store.database.prepare(
+      "SELECT expires_at FROM coordination_kv WHERE key = ?"
+    ).get("already-expiring-counter").expires_at;
+    assert.equal(preservedExpiry, originalExpiry);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("sqlite coordination expires state", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-expiry-"));
   const file = path.join(dir, "state.db");
