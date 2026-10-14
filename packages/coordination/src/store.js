@@ -80,8 +80,12 @@ export function createInMemoryCoordinationStore() {
       if (ttlMs != null && (!Number.isFinite(ttlMs) || ttlMs < 1)) throw new Error("ttlMs must be >= 1");
       purge();
       const normalized = String(key);
-      const current = Number(values.get(normalized) || 0);
-      const next = current + 1;
+      const currentValue = values.has(normalized) ? values.get(normalized) : 0;
+      if (!Number.isSafeInteger(currentValue) || currentValue < 0) {
+        throw new Error("coordination counter must be a non-negative safe integer");
+      }
+      const next = currentValue + 1;
+      if (!Number.isSafeInteger(next)) throw new Error("coordination counter overflow");
       values.set(normalized, next);
       if (ttlMs != null && !expiries.has(normalized)) {
         expiries.set(normalized, Date.now() + ttlMs);
