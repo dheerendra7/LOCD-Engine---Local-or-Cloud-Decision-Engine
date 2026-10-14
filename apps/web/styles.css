@@ -227,7 +227,7 @@ summary { color: #53627a; cursor: pointer; font-size: 11px; font-weight: 700; }
 .calibration-card { border: 1px solid var(--line); border-radius: 10px; padding: 13px; min-width: 0; }
 .calibration-card strong { display: block; font-size: 12px; }
 .calibration-card span { display: block; color: var(--muted); font-size: 10px; margin-top: 4px; overflow-wrap: anywhere; }
-.hybrid-step { display: grid; grid-template-columns: 1fr 1.2fr 1fr 36px; gap: 9px; align-items: end; padding: 12px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 9px; background: #fbfcfe; }
+.hybrid-step { display: grid; grid-template-columns: .7fr 1fr 1.1fr .9fr 36px; gap: 9px; align-items: end; padding: 12px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 9px; background: #fbfcfe; }
 .hybrid-step label { margin-bottom: 0; }
 .hybrid-step .remove-step { width: 36px; min-height: 36px; padding: 0; align-self: end; }
 .step-number { font-size: 10px; color: var(--muted); font-weight: 750; margin-bottom: 8px; }
