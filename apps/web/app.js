@@ -16,7 +16,7 @@ function escapeHtml(value) {
 }
 
 function formatDelta(value, unit = "", digits = 3) {
-  if (value == null || value === "" || !Number.isFinite(Number(value))) return "—";
+  if (value == null || (typeof value === "string" && value.trim() === "") || !Number.isFinite(Number(value))) return "—";
   const number = Number(value);
   const sign = number > 0 ? "+" : "";
   return sign + number.toFixed(digits) + unit;
