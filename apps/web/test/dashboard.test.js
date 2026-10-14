@@ -245,3 +245,14 @@ test("dashboard HTML escaping protects rendered API text from markup injection",
   assert.equal(escapeHtml(null), "");
   assert.equal(escapeHtml(42), "42");
 });
+
+test("using a policy preserves the current what-if baseline and selects a distinct candidate", async () => {
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  const start = script.indexOf('if (action === "use") {');
+  const end = script.indexOf('\n  if (action === "history")', start);
+  assert.ok(start >= 0 && end > start, "the policy-card use action should be present");
+  const handler = script.slice(start, end);
+  assert.match(handler, /\["policyProfile", "simulationCandidatePolicy", "hybridPolicyProfile"\]/);
+  assert.doesNotMatch(handler, /simulationCurrentPolicy/);
+  assert.match(handler, /The current baseline is unchanged/);
+});
