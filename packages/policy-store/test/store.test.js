@@ -178,6 +178,11 @@ test("invalid policies are rejected before persistence", () => {
     () => store.upsert("acme", { ...policy, maxHeartbeatAgeMs: " " }),
     /policy maxHeartbeatAgeMs must be >= 0/
   );
+  assert.throws(
+    () => store.upsert("acme", { ...policy, sensitiveDataMode: "cloud-only" }),
+    /policy.sensitiveDataMode must be one of/
+  );
+  assert.equal(store.get("acme", "acme-fast"), null);
 });
 
 test("file policy store persists atomically and restores versions", async () => {
