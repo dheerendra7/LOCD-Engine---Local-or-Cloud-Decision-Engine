@@ -1,3 +1,5 @@
+import { isIP } from "node:net";
+
 export function createRateLimiter({ maxRequests = 0, windowMs = 60_000 } = {}) {
   const limit = Number(maxRequests);
   const window = Number(windowMs);
@@ -68,8 +70,6 @@ export function createRateLimiter({ maxRequests = 0, windowMs = 60_000 } = {}) {
     }
   };
 }
-
-import { isIP } from "node:net";
 
 export function getClientKey(req, { trustProxy = false, trustedProxyHops = 1 } = {}) {
   if (trustProxy) {
