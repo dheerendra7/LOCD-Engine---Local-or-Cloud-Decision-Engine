@@ -144,12 +144,14 @@ test("tenant policies are isolated", () => {
   assert.equal(store.list("beta").length, 1);
 });
 
-test("built-in policy IDs are read-only", () => {
+test("built-in policy IDs are read-only after case normalization", () => {
   const store = createPolicyStore();
-  assert.throws(
-    () => store.upsert("acme", { ...policy, id: "balanced" }),
-    /built-in policy IDs are read-only/
-  );
+  for (const id of ["balanced", "localFirst", "privacyFirst", "latencyFirst", "costFirst", "strictLocalSensitive"]) {
+    assert.throws(
+      () => store.upsert("acme", { ...policy, id }),
+      /built-in policy IDs are read-only/
+    );
+  }
 });
 
 test("invalid policies are rejected before persistence", () => {
