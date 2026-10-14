@@ -564,6 +564,7 @@ test("policy catalog only applies the newest refresh response", async () => {
     "let policyCatalogRequestRevision = 0;" +
     "let lastPolicyCatalogFingerprint = null;" +
     "let invalidationCount = 0;" +
+    "function invalidateHybridPlan() { invalidationCount += 1; }" +
     handler +
     "; return { refreshPolicies, state() { return { invalidationCount, lastPolicyCatalogFingerprint }; } };"
   );
