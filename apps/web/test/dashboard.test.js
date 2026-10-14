@@ -521,6 +521,86 @@ test("policy history only renders the latest request when responses finish out o
   assert.doesNotMatch(root.innerHTML, /stale history request failed/);
 });
 
+test("policy catalog only applies the newest refresh response", async () => {
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  const start = script.indexOf("async function refreshPolicies() {");
+  const end = script.indexOf("\nasync function refreshMetrics()", start);
+  assert.ok(start >= 0 && end > start, "policy refresh handler should exist");
+  const handler = script.slice(start, end);
+
+  const requests = [];
+  const deferred = () => {
+    let resolve;
+    let reject;
+    const promise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+  const status = { textContent: "" };
+  const baseProfile = { value: "balanced" };
+  const elements = new Map([
+    ["#policyManagerStatus", status],
+    ["#newPolicyBase", baseProfile],
+    ["#policyProfile", { innerHTML: "" }],
+    ["#simulationCurrentPolicy", { innerHTML: "" }],
+    ["#simulationCandidatePolicy", { innerHTML: "" }],
+    ["#hybridPolicyProfile", { innerHTML: "" }]
+  ]);
+  const documentMock = { querySelector: selector => elements.get(selector) || null };
+  const portalFetch = () => {
+    const request = deferred();
+    requests.push(request);
+    return request.promise;
+  };
+  const renderedCatalogs = [];
+  const setOptions = (select, options) => {
+    select.options = options;
+  };
+  const runtimeFactory = new Function(
+    "document", "portalFetch", "setPolicySelectors", "renderPolicyCards", "setOptions", "niceError",
+    "let apiAccessRevision = 0;" +
+    "let policyCatalogRequestRevision = 0;" +
+    "let lastPolicyCatalogFingerprint = null;" +
+    "let invalidationCount = 0;" +
+    handler +
+    "; return { refreshPolicies, state() { return { invalidationCount, lastPolicyCatalogFingerprint }; } };"
+  );
+  const runtime = runtimeFactory(
+    documentMock,
+    portalFetch,
+    policies => {},
+    policies => renderedCatalogs.push(policies.map(policy => policy.id)),
+    setOptions,
+    error => String(error?.message || error)
+  );
+
+  const older = runtime.refreshPolicies();
+  const latest = runtime.refreshPolicies();
+  requests[1].resolve({ policies: [{ id: "policy-new", name: "Latest", source: "built-in" }] });
+  await latest;
+  assert.deepEqual(renderedCatalogs.at(-1), ["policy-new"]);
+  const latestStatus = status.textContent;
+  const latestFingerprint = runtime.state().lastPolicyCatalogFingerprint;
+
+  requests[0].resolve({ policies: [{ id: "policy-old", name: "Stale", source: "built-in" }] });
+  await older;
+  assert.deepEqual(renderedCatalogs.at(-1), ["policy-new"]);
+  assert.equal(status.textContent, latestStatus);
+  assert.equal(runtime.state().lastPolicyCatalogFingerprint, latestFingerprint);
+
+  const obsoleteError = runtime.refreshPolicies();
+  const current = runtime.refreshPolicies();
+  requests[3].resolve({ policies: [{ id: "policy-current", name: "Current", source: "built-in" }] });
+  await current;
+  const currentStatus = status.textContent;
+  requests[2].reject(new Error("obsolete catalog request failed"));
+  await obsoleteError;
+  assert.deepEqual(renderedCatalogs.at(-1), ["policy-current"]);
+  assert.equal(status.textContent, currentStatus);
+});
+
 test("readiness diagnostics do not overwrite the API connection status", async () => {
   const html = await readFile(new URL("index.html", webRoot), "utf8");
   const script = await readFile(new URL("app.js", webRoot), "utf8");
