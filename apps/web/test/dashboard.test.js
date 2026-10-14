@@ -390,3 +390,21 @@ test("in-flight API refreshes and mutations ignore responses from a previous acc
     assert.match(block, /accessRevision !== apiAccessRevision/);
   }
 });
+
+test("target and policy operations ignore stale responses after the API access changes", async () => {
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+
+  const targetStart = script.indexOf('root.querySelectorAll("button[data-action]")');
+  const targetEnd = script.indexOf("\n  syncHybridTargets();", targetStart);
+  assert.ok(targetStart >= 0 && targetEnd > targetStart, "target operations should be wired in the registry renderer");
+  const targetActions = script.slice(targetStart, targetEnd);
+  assert.match(targetActions, /const accessRevision = apiAccessRevision/);
+  assert.match(targetActions, /await portalFetch\("\/v1\/targets\/" \+ encodeURIComponent\(id\), \{ method: "DELETE" \}\);[\s\S]*?if \(accessRevision !== apiAccessRevision\) return/);
+  assert.match(targetActions, /\/probe[\s\S]*?if \(accessRevision !== apiAccessRevision\) return/);
+  assert.match(targetActions, /catch \(error\) \{[\s\S]*?if \(accessRevision !== apiAccessRevision\) return/);
+
+  assert.match(script, /async function showPolicyHistory\(policyId\) \{[\s\S]*?const accessRevision = apiAccessRevision;[\s\S]*?if \(accessRevision !== apiAccessRevision\) return/);
+  assert.match(script, /document\.querySelector\("#policyCards"\)\?\.addEventListener\("click", async event => \{[\s\S]*?const accessRevision = apiAccessRevision;[\s\S]*?if \(accessRevision !== apiAccessRevision\) return/);
+  assert.match(script, /document\.querySelector\("#policyHistory"\)\?\.addEventListener\("click", async event => \{[\s\S]*?const accessRevision = apiAccessRevision;[\s\S]*?if \(accessRevision !== apiAccessRevision\) return/);
+  assert.match(script, /document\.querySelector\("#policyForm"\)\?\.addEventListener\("submit", async event => \{[\s\S]*?const accessRevision = apiAccessRevision;[\s\S]*?if \(accessRevision !== apiAccessRevision\) return/);
+});
