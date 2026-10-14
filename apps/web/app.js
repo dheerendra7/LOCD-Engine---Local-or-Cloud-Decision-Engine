@@ -1009,9 +1009,7 @@ document.querySelector("#policyCards")?.addEventListener("click", async event =>
       const select = document.querySelector("#" + key);
       if (select && [...select.options].some(option => option.value === id)) select.value = id;
     });
-    const policyId = document.querySelector("#newPolicyId");
-    if (policyId && !["balanced", "localFirst", "privacyFirst", "latencyFirst", "costFirst", "strictLocalSensitive"].includes(id)) policyId.value = id;
-    toast("Selected " + id + " for the decision and hybrid labs and as the simulation candidate. The current baseline is unchanged.");
+    toast("Selected " + id + " for the decision and hybrid labs and as the simulation candidate. The current baseline and new-policy form are unchanged.");
     return;
   }
   if (action === "history") {
