@@ -285,3 +285,18 @@ test("negative estimates and capacity telemetry remain unknown or use safe defau
   assert.equal(snapshot.capacity, 1);
   assert.equal(snapshot.privacy, 0);
 });
+
+
+test("OpenAI-compatible adapter rejects disabled or malformed request timeouts", () => {
+  for (const timeoutMs of [0, -1, NaN, Infinity, "5000", null]) {
+    assert.throws(
+      () => createOpenAICompatibleAdapter({
+        id: "bad-timeout",
+        targetId: "bad-timeout",
+        baseUrl: "https://provider.example.com",
+        timeoutMs
+      }),
+      /timeoutMs must be a positive finite number/
+    );
+  }
+});

@@ -188,3 +188,17 @@ test("negative Ollama estimates stay unknown and negative capacity uses safe def
   assert.equal(snapshot.capacity, 1);
   assert.equal(snapshot.privacy, 1);
 });
+
+
+test("Ollama adapter rejects disabled or malformed request timeouts", () => {
+  for (const timeoutMs of [0, -1, NaN, Infinity, "5000", null]) {
+    assert.throws(
+      () => createOllamaAdapter({
+        id: "bad-timeout",
+        targetId: "bad-timeout",
+        timeoutMs
+      }),
+      /timeoutMs must be a positive finite number/
+    );
+  }
+});

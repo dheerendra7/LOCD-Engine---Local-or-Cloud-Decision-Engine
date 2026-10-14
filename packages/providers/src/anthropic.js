@@ -120,6 +120,9 @@ export function createAnthropicAdapter({
     throw new Error("maxTokens must be a positive integer");
   }
   if (typeof fetchImpl !== "function") throw new Error("fetch implementation is required");
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("timeoutMs must be a positive finite number");
+  }
 
   const url = assertSafeBaseUrl(baseUrl, { allowInsecureHttp });
 

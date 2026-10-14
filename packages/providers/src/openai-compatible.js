@@ -97,6 +97,9 @@ export function createOpenAICompatibleAdapter({
   if (!targetId) throw new Error("targetId is required");
   if (!MODES.has(mode)) throw new Error("mode must be local, private, cloud or hybrid");
   if (typeof fetchImpl !== "function") throw new Error("fetch implementation is required");
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("timeoutMs must be a positive finite number");
+  }
 
   const url = assertSafeBaseUrl(baseUrl, { allowInsecureHttp });
   let snapshot = normalizeSnapshot({
