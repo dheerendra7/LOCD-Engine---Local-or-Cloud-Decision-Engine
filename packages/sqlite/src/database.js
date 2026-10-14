@@ -1,9 +1,10 @@
+import { randomUUID } from "node:crypto";
 import * as sqlite from "node:sqlite";
 
 const { DatabaseSync } = sqlite;
 const nativeBackup = sqlite.backup;
 import path from "node:path";
-import { access, mkdir, rename, rm } from "node:fs/promises";
+import { access, link, mkdir, rename, rm } from "node:fs/promises";
 import { mkdirSync } from "node:fs";
 import { createDecisionStore, normalizeDecisionEvent } from "../../../packages/telemetry/src/store.js";
 import { createPolicyStore } from "../../../packages/policy-store/src/index.js";
@@ -61,7 +62,7 @@ export async function backupSQLiteDatabase({
     }
   }
 
-  const temporary = destination + ".tmp-" + process.pid + "-" + Date.now();
+  const temporary = destination + ".tmp-" + process.pid + "-" + randomUUID();
   if (typeof nativeBackup !== "function") {
     throw new Error("SQLite online backup requires Node.js 22.16 or newer");
   }
@@ -83,10 +84,25 @@ export async function backupSQLiteDatabase({
     }
 
     if (overwrite) {
-      await rm(destination, { force: true });
+      // Replace the previous backup only after the new file has been verified.
+      // Do not remove the existing destination first: a failed publish must not
+      // destroy the last known-good backup.
+      await rename(temporary, destination);
+    } else {
+      // A hard link publishes the verified file atomically without clobbering
+      // a destination another process may have created in the meantime.
+      try {
+        await link(temporary, destination);
+      } catch (error) {
+        if (error?.code === "EEXIST") {
+          throw new Error("backup destination already exists", { cause: error });
+        }
+        throw error;
+      }
+      // The destination is already published. Temp cleanup is best-effort so
+      // a cleanup failure cannot make a successful backup look unsuccessful.
+      await rm(temporary, { force: true }).catch(() => {});
     }
-
-    await rename(temporary, destination);
     return {
       destination,
       pages
