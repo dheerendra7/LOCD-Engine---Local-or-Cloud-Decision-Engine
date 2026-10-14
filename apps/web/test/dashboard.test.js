@@ -566,7 +566,7 @@ test("policy catalog only applies the newest refresh response", async () => {
     "let invalidationCount = 0;" +
     "function invalidateHybridPlan() { invalidationCount += 1; }" +
     handler +
-    "; return { refreshPolicies, state() { return { invalidationCount, lastPolicyCatalogFingerprint }; } };"
+    "; return { refreshPolicies, changeAccess() { apiAccessRevision += 1; }, state() { return { invalidationCount, lastPolicyCatalogFingerprint }; } };"
   );
   const runtime = runtimeFactory(
     documentMock,
@@ -598,6 +598,13 @@ test("policy catalog only applies the newest refresh response", async () => {
   const currentStatus = status.textContent;
   requests[2].reject(new Error("obsolete catalog request failed"));
   await obsoleteError;
+  assert.deepEqual(renderedCatalogs.at(-1), ["policy-current"]);
+  assert.equal(status.textContent, currentStatus);
+
+  const previousAccess = runtime.refreshPolicies();
+  runtime.changeAccess();
+  requests[4].resolve({ policies: [{ id: "tenant-a-policy", name: "Old tenant", source: "custom" }] });
+  await previousAccess;
   assert.deepEqual(renderedCatalogs.at(-1), ["policy-current"]);
   assert.equal(status.textContent, currentStatus);
 });
