@@ -1,5 +1,6 @@
 import * as sqlite from "node:sqlite";
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 const { DatabaseSync } = sqlite;
 const nativeBackup = sqlite.backup;
@@ -610,25 +611,53 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
     },
 
     async deleteIfValue(key, expectedValue) {
-      purgeExpired(db);
-      const serialized = JSON.stringify(expectedValue);
-      if (serialized === undefined) return false;
-      const result = db.prepare("DELETE FROM coordination_kv WHERE key = ? AND value = ?")
-        .run(String(key), serialized);
-      return result.changes === 1;
+      if (expectedValue === undefined) return false;
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        purgeExpired(db);
+        const normalized = String(key);
+        const row = db.prepare("SELECT value FROM coordination_kv WHERE key = ?").get(normalized);
+        if (!row || !isDeepStrictEqual(JSON.parse(row.value), expectedValue)) {
+          db.exec("COMMIT");
+          return false;
+        }
+
+        const result = db.prepare("DELETE FROM coordination_kv WHERE key = ? AND value = ?")
+          .run(normalized, row.value);
+        db.exec("COMMIT");
+        return result.changes === 1;
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
     },
 
     async setIfValue(key, expectedValue, value, { ttlMs = null } = {}) {
       validateTtl(ttlMs);
-      purgeExpired(db);
-      const expected = JSON.stringify(expectedValue);
+      if (expectedValue === undefined) return false;
       const next = JSON.stringify(value);
-      if (expected === undefined || next === undefined) return false;
-      const expiresAt = ttlMs == null ? null : Date.now() + ttlMs;
-      const result = db.prepare(
-        "UPDATE coordination_kv SET value = ?, expires_at = ? WHERE key = ? AND value = ?"
-      ).run(next, expiresAt, String(key), expected);
-      return result.changes === 1;
+      if (next === undefined) return false;
+
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        purgeExpired(db);
+        const normalized = String(key);
+        const row = db.prepare("SELECT value FROM coordination_kv WHERE key = ?").get(normalized);
+        if (!row || !isDeepStrictEqual(JSON.parse(row.value), expectedValue)) {
+          db.exec("COMMIT");
+          return false;
+        }
+
+        const expiresAt = ttlMs == null ? null : Date.now() + ttlMs;
+        const result = db.prepare(
+          "UPDATE coordination_kv SET value = ?, expires_at = ? WHERE key = ? AND value = ?"
+        ).run(next, expiresAt, normalized, row.value);
+        db.exec("COMMIT");
+        return result.changes === 1;
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
     },
 
     async incr(key, { ttlMs = null } = {}) {
