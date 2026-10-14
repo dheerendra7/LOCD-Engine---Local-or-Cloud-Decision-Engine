@@ -1,6 +1,7 @@
+let activeApiKey = "";
+
 function apiHeaders() {
-  const apiKey = document.querySelector("#apiKey")?.value.trim();
-  return apiKey ? { authorization: "Bearer " + apiKey } : {};
+  return activeApiKey ? { authorization: "Bearer " + activeApiKey } : {};
 }
 
 const output = document.querySelector("#output");
@@ -120,7 +121,6 @@ document.querySelector("#registerTarget").addEventListener("click", async event 
   }
 });
 
-document.querySelector("#apiKey").addEventListener("change", refreshAll);
 document.querySelector("#refreshAll").addEventListener("click", refreshAll);
 
 
@@ -1156,10 +1156,12 @@ document.querySelector("#executeDryRun")?.addEventListener("click", async event 
 });
 
 document.querySelector("#applyApiKey")?.addEventListener("click", async () => {
-  setText("accessStatus", document.querySelector("#apiKey").value.trim() ? "Key applied to this page's memory." : "No key entered; requests will be unauthenticated.");
+  activeApiKey = document.querySelector("#apiKey").value.trim();
+  setText("accessStatus", activeApiKey ? "Key applied to this page's memory." : "No key entered; requests will be unauthenticated.");
   await refreshAll();
 });
 document.querySelector("#clearApiKey")?.addEventListener("click", async () => {
+  activeApiKey = "";
   document.querySelector("#apiKey").value = "";
   setText("accessStatus", "Key cleared from this page's memory.");
   await refreshAll();
