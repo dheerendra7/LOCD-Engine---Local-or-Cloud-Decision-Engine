@@ -66,6 +66,7 @@ export function createIdempotencyStore({
       if (existing.fingerprint !== currentFingerprint) {
         throw new Error("idempotency_key_reused");
       }
+      if (existing.processing) return null;
 
       return structuredClone({ ...existing.response, replayed: true });
     },

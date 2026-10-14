@@ -212,3 +212,23 @@ test("coordinated idempotency retries when a claim disappears between set-if-abs
   assert.equal(setIfAbsentCalls, 2);
   assert.equal((await idempotency.claim("scope", "key", { payload: 1 })).reason, "in_progress");
 });
+
+
+test("coordinated lookup does not fake a response while a claim is processing", async () => {
+  const store = createInMemoryCoordinationStore();
+  const idempotency = createCoordinatedIdempotencyStore({ store, namespace: "lookup-in-progress" });
+  const body = { operation: "write" };
+  const claim = await idempotency.claim("POST /resource", "key", body);
+
+  assert.equal(claim.claimed, true);
+  assert.equal(await idempotency.lookup("POST /resource", "key", body), null);
+
+  assert.equal(
+    await idempotency.remember("POST /resource", "key", body, { status: 201, body: { id: "created" } }, claim.claimToken),
+    true
+  );
+  assert.deepEqual(
+    await idempotency.lookup("POST /resource", "key", body),
+    { status: 201, body: { id: "created" }, replayed: true }
+  );
+});

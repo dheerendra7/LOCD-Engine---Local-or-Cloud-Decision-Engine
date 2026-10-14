@@ -260,3 +260,21 @@ test("expired local claim caches its result only when no replacement owner exist
   );
   assert.equal(store.claim("scope", "replacement", body).reason, "in_progress");
 });
+
+
+test("lookup does not return a replay before the claimed request completes", () => {
+  const store = createIdempotencyStore();
+  const body = { operation: "write" };
+  const claim = store.claim("POST /resource", "key-processing", body);
+  assert.equal(claim.claimed, true);
+  assert.equal(store.lookup("POST /resource", "key-processing", body), null);
+
+  assert.equal(
+    store.remember("POST /resource", "key-processing", body, { status: 201, body: { id: "created" } }, claim.claimToken),
+    true
+  );
+  assert.deepEqual(
+    store.lookup("POST /resource", "key-processing", body),
+    { status: 201, body: { id: "created" }, replayed: true }
+  );
+});

@@ -98,6 +98,7 @@ export function createCoordinatedIdempotencyStore({
     if (existing.fingerprint !== current) {
       throw new Error("idempotency_key_reused");
     }
+    if (existing.processing) return null;
 
     return structuredClone({
       ...existing.response,
