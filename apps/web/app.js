@@ -725,7 +725,7 @@ function renderTargets(targets) {
         stateBadge(state.label, state.style) + "</div>" +
       '<div class="target-meta">' +
         '<div class="target-metric"><span>Health</span><strong>' + escapeHtml(health) + "</strong></div>" +
-        '<div class="target-metric"><span>Capacity used / score</span><strong>' + escapeHtml(capacity) + "</strong></div>" +
+        '<div class="target-metric"><span>Capacity score</span><strong>' + escapeHtml(capacity) + "</strong></div>" +
         '<div class="target-metric"><span>Privacy score</span><strong>' + escapeHtml(privacy) + "</strong></div>" +
         '<div class="target-metric"><span>Est. latency</span><strong>' + escapeHtml(target.estimatedLatencyMs == null ? "Unknown" : formatNumber(target.estimatedLatencyMs) + " ms") + "</strong></div>" +
         '<div class="target-metric"><span>Est. cost</span><strong>' + escapeHtml(formatCost(target.estimatedCostUsd)) + "</strong></div>" +
