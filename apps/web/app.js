@@ -53,6 +53,18 @@ function resetTenantScopedView() {
     const field = document.querySelector("#" + id);
     if (field) field.value = "";
   }
+  const weightsInput = document.querySelector("#newPolicyWeights");
+  if (weightsInput) weightsInput.value = "{}";
+  const rulesInput = document.querySelector("#newPolicyRules");
+  if (rulesInput) rulesInput.value = "[]";
+  const baseProfile = document.querySelector("#newPolicyBase");
+  if (baseProfile) baseProfile.value = "balanced";
+  for (const id of ["decide", "registerTarget", "simulatePolicy", "savePolicy", "recordOutcome", "planHybrid", "refreshAll"]) {
+    const button = document.querySelector("#" + id);
+    if (button) if (accessRevision === apiAccessRevision) button.disabled = false;
+  }
+  const dryRunButton = document.querySelector("#executeDryRun");
+  if (dryRunButton) dryRunButton.disabled = true;
   setText("accessStatus", "API access changed in page memory.");
 }
 
@@ -121,7 +133,7 @@ document.querySelector("#decide").addEventListener("click", async event => {
     if (accessRevision !== apiAccessRevision) return;
     output.textContent = niceError(error);
   } finally {
-    button.disabled = false;
+    if (accessRevision === apiAccessRevision) button.disabled = false;
   }
 });
 
@@ -175,7 +187,7 @@ document.querySelector("#registerTarget").addEventListener("click", async event 
     if (status) status.textContent = niceError(error);
     toast(niceError(error), true);
   } finally {
-    button.disabled = false;
+    if (accessRevision === apiAccessRevision) button.disabled = false;
   }
 });
 
@@ -234,7 +246,7 @@ document.querySelector("#simulatePolicy").addEventListener("click", async event 
     status.textContent = "Simulation failed";
     simulationOutput.textContent = niceError(error);
   } finally {
-    button.disabled = false;
+    if (accessRevision === apiAccessRevision) button.disabled = false;
   }
 });
 
@@ -572,7 +584,7 @@ function renderTargets(targets) {
         toast(niceError(error), true);
         setText("targetStatus", niceError(error));
       } finally {
-        button.disabled = false;
+        if (accessRevision === apiAccessRevision) button.disabled = false;
       }
     });
   });
@@ -927,7 +939,7 @@ async function refreshAll() {
     refreshActivity(), refreshCalibration(), refreshHealth(), refreshReadiness()
   ];
   await Promise.allSettled(tasks);
-  if (accessRevision === apiAccessRevision && button) button.disabled = false;
+  if (accessRevision === apiAccessRevision && button) if (accessRevision === apiAccessRevision) button.disabled = false;
 }
 
 function renderSimulation(result) {
@@ -1019,7 +1031,7 @@ document.querySelector("#policyCards")?.addEventListener("click", async event =>
       if (accessRevision !== apiAccessRevision) return;
       toast(niceError(error), true);
     } finally {
-      button.disabled = false;
+      if (accessRevision === apiAccessRevision) button.disabled = false;
     }
   }
 });
@@ -1042,7 +1054,7 @@ document.querySelector("#policyHistory")?.addEventListener("click", async event 
     if (accessRevision !== apiAccessRevision) return;
     toast(niceError(error), true);
   } finally {
-    button.disabled = false;
+    if (accessRevision === apiAccessRevision) button.disabled = false;
   }
 });
 
@@ -1084,7 +1096,7 @@ document.querySelector("#policyForm")?.addEventListener("submit", async event =>
     if (status) status.textContent = niceError(error);
     toast(niceError(error), true);
   } finally {
-    if (button) button.disabled = false;
+    if (button) if (accessRevision === apiAccessRevision) button.disabled = false;
   }
 });
 
@@ -1122,7 +1134,7 @@ document.querySelector("#outcomeForm")?.addEventListener("submit", async event =
     if (status) status.textContent = niceError(error);
     toast(niceError(error), true);
   } finally {
-    if (button) button.disabled = false;
+    if (button) if (accessRevision === apiAccessRevision) button.disabled = false;
   }
 });
 
@@ -1227,12 +1239,13 @@ document.querySelector("#planHybrid")?.addEventListener("click", async event => 
     if (outputRoot) outputRoot.innerHTML = emptyState("Plan validation failed", niceError(error));
     toast(niceError(error), true);
   } finally {
-    button.disabled = false;
+    if (accessRevision === apiAccessRevision) button.disabled = false;
   }
 });
 
 document.querySelector("#executeDryRun")?.addEventListener("click", async event => {
   const accessRevision = apiAccessRevision;
+  const planRevision = hybridInputRevision;
   const button = event.currentTarget;
   if (!lastHybridPlan || lastHybridPlan.valid !== true) {
     toast("Validate a plan successfully before dry-run.", true);
@@ -1245,7 +1258,7 @@ document.querySelector("#executeDryRun")?.addEventListener("click", async event 
       plan: lastHybridPlan,
       mode: "dry-run"
     }));
-    if (accessRevision !== apiAccessRevision) return;
+    if (accessRevision !== apiAccessRevision || planRevision !== hybridInputRevision) return;
     const receipts = (result.receipts || []).map(item => "<tr><td>" + escapeHtml(item.stepId) + "</td><td>" +
       escapeHtml(item.targetId) + "</td><td>" + escapeHtml(item.adapterId || "No adapter") + "</td><td>" +
       stateBadge(item.status, item.status === "completed" ? "good" : "bad") + "</td><td>" +
@@ -1259,11 +1272,13 @@ document.querySelector("#executeDryRun")?.addEventListener("click", async event 
       '<details><summary>View dry-run response JSON</summary><pre>' + escapeHtml(JSON.stringify(result, null, 2)) + "</pre></details>";
     toast("Dry-run request completed.");
   } catch (error) {
-    if (accessRevision !== apiAccessRevision) return;
+    if (accessRevision !== apiAccessRevision || planRevision !== hybridInputRevision) return;
     setText("executionOutput", niceError(error));
     toast(niceError(error), true);
   } finally {
-    button.disabled = false;
+    if (accessRevision === apiAccessRevision) {
+      button.disabled = planRevision !== hybridInputRevision || !lastHybridPlan || lastHybridPlan.valid !== true;
+    }
   }
 });
 
