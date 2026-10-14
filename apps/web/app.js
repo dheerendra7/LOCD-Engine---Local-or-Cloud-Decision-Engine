@@ -211,6 +211,14 @@ async function portalFetch(path, options = {}) {
   }
   if (!response.ok) {
     const descriptions = {
+      unauthorized: "Authentication required. Add a scoped LOCD API key in System & access.",
+      insufficient_scope: "This API key does not have permission for this operation.",
+      no_registered_targets: "No targets are registered for this tenant yet.",
+      target_not_found: "That target no longer exists in the registry.",
+      target_does_not_support_probe: "This target does not provide a probe operation.",
+      policy_not_found: "The requested policy was not found.",
+      policy_version_not_found: "That policy version is no longer available.",
+      unsupported_media_type: "The API rejected this request's content type.",
       401: "Authentication required. Add a scoped LOCD API key in System & access.",
       403: "This API key does not have permission for this operation.",
       404: "The requested resource was not found.",
@@ -218,7 +226,11 @@ async function portalFetch(path, options = {}) {
       429: "Rate limit reached. Retry after the server's suggested wait.",
       503: "The service or one of its required dependencies is unavailable."
     };
-    throw new Error(payload.error || descriptions[response.status] || ("Request failed (" + response.status + ")"));
+    const errorCode = typeof payload.error === "string" ? payload.error : null;
+    const message = response.status === 429
+      ? descriptions[429]
+      : descriptions[errorCode] || errorCode || descriptions[response.status] || ("Request failed (" + response.status + ")");
+    throw new Error(message);
   }
   return payload;
 }
