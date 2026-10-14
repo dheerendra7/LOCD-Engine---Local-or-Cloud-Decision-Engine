@@ -97,3 +97,13 @@ test("target registry labels capacity as a score, not observed utilization", asy
   assert.match(script, /Capacity score/);
   assert.doesNotMatch(script, /Capacity used \/ score/);
 });
+
+
+test("decision and target actions guard duplicate submissions and validate numeric input", async () => {
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  assert.match(script, /querySelector\("#decide"\)[\s\S]*?button\.disabled = true/);
+  assert.match(script, /querySelector\("#registerTarget"\)[\s\S]*?button\.disabled = true/);
+  assert.match(script, /portalFetch\("\/v1\/decide", portalJsonOptions\(body\)\)/);
+  assert.match(script, /portalFetch\("\/v1\/targets", portalJsonOptions\(payload\)\)/);
+  assert.match(script, /readNumber\("targetCapacity", "Capacity score", \{ min: 0, max: 1 \}\)/);
+});
