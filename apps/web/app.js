@@ -594,6 +594,31 @@ function readNonNegativeInput(id, label) {
   return parseNonNegativeNumber(document.querySelector("#" + id)?.value, label);
 }
 
+function validateHybridSteps(steps, registeredTargets) {
+  if (!Array.isArray(steps) || steps.length < 2) {
+    return "A hybrid plan needs at least two stages.";
+  }
+  const stageIds = steps.map(step => String(step?.id || "").trim());
+  if (stageIds.some(id => !id)) return "Every stage needs a non-empty stage ID.";
+  if (new Set(stageIds).size !== stageIds.length) return "Stage IDs must be unique.";
+
+  const targetIds = new Set(
+    (Array.isArray(registeredTargets) ? registeredTargets : [])
+      .map(target => String(target?.id ?? ""))
+      .filter(Boolean)
+  );
+  if (steps.some(step => {
+    const targetId = String(step?.targetId ?? "");
+    return !targetId || !targetIds.has(targetId);
+  })) {
+    return "Choose a registered target for every stage.";
+  }
+  if (new Set(steps.map(step => String(step.targetId))).size < 2) {
+    return "Choose at least two distinct registered targets across the stages.";
+  }
+  return null;
+}
+
 function niceError(error) {
   const message = error instanceof Error ? error.message : String(error || "Unexpected error");
   const friendly = {
@@ -1402,16 +1427,8 @@ document.querySelector("#planHybrid")?.addEventListener("click", async event => 
       targets: registeredTargets
     };
     if (!body.workload.type) throw new Error("Workload type is required.");
-    const stageIds = body.steps.map(step => step.id);
-    if (stageIds.some(id => !id)) throw new Error("Every stage needs a non-empty stage ID.");
-    if (new Set(stageIds).size !== stageIds.length) throw new Error("Stage IDs must be unique.");
-    const registeredTargetIds = new Set(registeredTargets.map(target => String(target.id)));
-    if (body.steps.some(step => !step.targetId || !registeredTargetIds.has(String(step.targetId)))) {
-      throw new Error("Choose a registered target for every stage.");
-    }
-    if (new Set(body.steps.map(step => String(step.targetId))).size < 2) {
-      throw new Error("Choose at least two distinct registered targets across the stages.");
-    }
+    const stageValidationError = validateHybridSteps(body.steps, registeredTargets);
+    if (stageValidationError) throw new Error(stageValidationError);
     if (!Number.isFinite(body.constraints.maxLatencyMs) || body.constraints.maxLatencyMs < 0) throw new Error("Latency budget must be zero or greater.");
     if (!Number.isFinite(body.constraints.maxCostUsd) || body.constraints.maxCostUsd < 0) throw new Error("Cost budget must be zero or greater.");
     const requestRevision = hybridInputRevision;
