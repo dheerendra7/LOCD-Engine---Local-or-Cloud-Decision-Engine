@@ -154,7 +154,7 @@ async function serveWeb(res, pathname) {
     const type = types[extension] || "text/plain";
     res.writeHead(200, {
       ...SECURITY_HEADERS,
-      "content-security-policy": "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self';",
+      "content-security-policy": "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self';",
       "content-type": type + "; charset=utf-8",
       "cache-control": "no-store"
     });
