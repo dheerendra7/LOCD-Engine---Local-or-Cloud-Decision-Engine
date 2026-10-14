@@ -276,6 +276,7 @@ test("dashboard API workflow connects target management, decision, simulation, f
     ]) {
       const response = await fetch(url + route);
       assert.equal(response.status, 200, "dashboard read endpoint failed: " + route);
+      await response.arrayBuffer();
     }
 
     for (const target of targetPayloads) {
@@ -366,6 +367,7 @@ test("dashboard API workflow connects target management, decision, simulation, f
     assert.equal((await rollbackResponse.json()).rolledBackFromVersion, 1);
     const policyDelete = await fetch(url + "/v1/policies/" + policyId, { method: "DELETE" });
     assert.equal(policyDelete.status, 200);
+    assert.equal((await policyDelete.json()).removed, policyId);
 
     const hybridResponse = await json("/v1/hybrid-plan", {
       workload: { type: "ui-workflow-inference", sensitivity: "low" },
@@ -398,6 +400,7 @@ test("dashboard API workflow connects target management, decision, simulation, f
     for (const id of [localId, cloudId]) {
       const removed = await fetch(url + "/v1/targets/" + encodeURIComponent(id), { method: "DELETE" });
       assert.equal(removed.status, 200);
+      assert.equal((await removed.json()).removed, id);
     }
   } finally {
     await new Promise(resolve => workflowServer.close(resolve));
