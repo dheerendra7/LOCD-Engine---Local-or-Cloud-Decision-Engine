@@ -80,3 +80,20 @@ test("console operational data is fetched from LOCD API endpoints", async () => 
   }
   assert.doesNotMatch(script, /localStorage\.(?:setItem|removeItem)\(/);
 });
+
+
+test("custom policy defaults inherit the selected base profile weights", async () => {
+  const html = await readFile(new URL("index.html", webRoot), "utf8");
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  assert.match(html, /id="newPolicyWeights"[^>]*>\{\}<\/textarea>/);
+  assert.match(html, /Base profile/);
+  assert.match(script, /weights,\s*rules/);
+});
+
+test("target registry labels capacity as a score, not observed utilization", async () => {
+  const html = await readFile(new URL("index.html", webRoot), "utf8");
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  assert.match(html, /Capacity score/);
+  assert.match(script, /Capacity score/);
+  assert.doesNotMatch(script, /Capacity used \/ score/);
+});
