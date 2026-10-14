@@ -354,19 +354,32 @@ async function refreshAll() {
   ]);
 }
 
-document.querySelector("#decide").addEventListener("click", async () => {
+document.querySelector("#decide").addEventListener("click", async event => {
+  const button = event.currentTarget;
+  button.disabled = true;
   output.textContent = "Evaluating registered targets…";
 
   try {
+    const workloadType = document.querySelector("#workloadType").value.trim();
+    const latencyRaw = document.querySelector("#latency").value.trim();
+    const costRaw = document.querySelector("#cost").value.trim();
+    if (!workloadType) throw new Error("Workload type is required.");
+    if (latencyRaw === "" || !Number.isFinite(Number(latencyRaw)) || Number(latencyRaw) < 0) {
+      throw new Error("Latency budget must be a finite number of zero or greater.");
+    }
+    if (costRaw === "" || !Number.isFinite(Number(costRaw)) || Number(costRaw) < 0) {
+      throw new Error("Maximum cost must be a finite number of zero or greater.");
+    }
+
     const body = {
       workload: {
-        type: document.querySelector("#workloadType").value.trim(),
+        type: workloadType,
         sensitivity: document.querySelector("#sensitivity").value,
         requiredCapabilities: ["text-generation"]
       },
       constraints: {
-        latencyBudgetMs: Number(document.querySelector("#latency").value),
-        maxCostUsd: Number(document.querySelector("#cost").value),
+        latencyBudgetMs: Number(latencyRaw),
+        maxCostUsd: Number(costRaw),
         strictLatency: true,
         strictCost: true
       },
@@ -378,53 +391,61 @@ document.querySelector("#decide").addEventListener("click", async () => {
     const privacyOverride = document.querySelector("#privacyMode").value;
     if (privacyOverride) body.policy.sensitiveDataMode = privacyOverride;
 
-    const response = await fetch("/v1/decide", {
-      method: "POST",
-      headers: { "content-type": "application/json", ...apiHeaders() },
-      body: JSON.stringify(body)
-    });
-
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "Decision failed");
-
+    const result = await portalFetch("/v1/decide", portalJsonOptions(body));
     render(result);
     await Promise.all([refreshMetrics(), refreshActivity()]);
   } catch (error) {
-    output.textContent = error.message;
+    output.textContent = niceError(error);
+  } finally {
+    button.disabled = false;
   }
 });
 
-document.querySelector("#registerTarget").addEventListener("click", async () => {
+document.querySelector("#registerTarget").addEventListener("click", async event => {
+  const button = event.currentTarget;
   const status = document.querySelector("#targetStatus");
-  const payload = {
-    id: document.querySelector("#targetId").value.trim(),
-    mode: document.querySelector("#targetMode").value,
-    health: Number(document.querySelector("#targetHealth").value),
-    capacity: Number(document.querySelector("#targetCapacity").value),
-    privacy: Number(document.querySelector("#targetPrivacy").value),
-    estimatedLatencyMs: Number(document.querySelector("#targetLatency").value),
-    estimatedCostUsd: Number(document.querySelector("#targetCost").value),
-    regions: document.querySelector("#targetRegions").value
-      .split(",").map(item => item.trim()).filter(Boolean),
-    capabilities: document.querySelector("#targetCapabilities").value
-      .split(",").map(item => item.trim()).filter(Boolean)
+  const readNumber = (id, label, { min = 0, max = Number.POSITIVE_INFINITY } = {}) => {
+    const raw = document.querySelector("#" + id).value.trim();
+    const value = Number(raw);
+    if (raw === "" || !Number.isFinite(value) || value < min || value > max) {
+      throw new Error(label + " must be a finite number between " + min + " and " + max + ".");
+    }
+    return value;
   };
 
+  let payload;
   try {
-    if (!payload.id) throw new Error("Target ID is required");
-    const response = await fetch("/v1/targets", {
-      method: "POST",
-      headers: { "content-type": "application/json", ...apiHeaders() },
-      body: JSON.stringify(payload)
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "Target registration failed");
+    payload = {
+      id: document.querySelector("#targetId").value.trim(),
+      mode: document.querySelector("#targetMode").value,
+      health: readNumber("targetHealth", "Health score", { min: 0, max: 1 }),
+      capacity: readNumber("targetCapacity", "Capacity score", { min: 0, max: 1 }),
+      privacy: readNumber("targetPrivacy", "Privacy score", { min: 0, max: 1 }),
+      estimatedLatencyMs: readNumber("targetLatency", "Estimated latency"),
+      estimatedCostUsd: readNumber("targetCost", "Estimated cost"),
+      regions: document.querySelector("#targetRegions").value.split(",").map(item => item.trim()).filter(Boolean),
+      capabilities: document.querySelector("#targetCapabilities").value.split(",").map(item => item.trim()).filter(Boolean)
+    };
+    if (!payload.id) throw new Error("Target ID is required.");
+  } catch (error) {
+    if (status) status.textContent = niceError(error);
+    toast(niceError(error), true);
+    return;
+  }
 
-    status.textContent = "Registered " + result.id;
+  button.disabled = true;
+  if (status) status.textContent = "Registering target…";
+  try {
+    const result = await portalFetch("/v1/targets", portalJsonOptions(payload));
+    if (status) status.textContent = "Registered " + (result.id || payload.id);
     document.querySelector("#targetId").value = "";
+    toast("Target registered.");
     await refreshAll();
   } catch (error) {
-    status.textContent = error.message;
+    if (status) status.textContent = niceError(error);
+    toast(niceError(error), true);
+  } finally {
+    button.disabled = false;
   }
 });
 
