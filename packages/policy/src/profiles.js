@@ -170,6 +170,16 @@ export function getPolicyProfile(id = "balanced") {
 
 export function resolvePolicy(policy = {}, context = {}) {
   if (policy.weights != null) validateWeights(policy.weights, "policy");
+  if (policy.sensitiveDataMode != null && !SENSITIVE_MODES.includes(policy.sensitiveDataMode)) {
+    throw new Error("policy.sensitiveDataMode must be one of: " + SENSITIVE_MODES.join(", "));
+  }
+  if (policy.maxHeartbeatAgeMs != null && (
+    (typeof policy.maxHeartbeatAgeMs === "string" && policy.maxHeartbeatAgeMs.trim() === "") ||
+    !Number.isFinite(Number(policy.maxHeartbeatAgeMs)) ||
+    Number(policy.maxHeartbeatAgeMs) < 0
+  )) {
+    throw new Error("policy.maxHeartbeatAgeMs must be >= 0");
+  }
   const profile = policy.profile ? getPolicyProfile(policy.profile) : getPolicyProfile("balanced");
   const merged = {
     ...profile,
@@ -223,6 +233,17 @@ export function resolvePolicy(policy = {}, context = {}) {
     const invalid = asList(merged.blockedModes).find(mode => !MODES.includes(mode));
     if (invalid) throw new Error("policy.blockedModes contains invalid mode: " + invalid);
     merged.blockedModes = asList(merged.blockedModes);
+  }
+
+  if (!SENSITIVE_MODES.includes(merged.sensitiveDataMode)) {
+    throw new Error("policy.sensitiveDataMode must be one of: " + SENSITIVE_MODES.join(", "));
+  }
+  if (merged.maxHeartbeatAgeMs != null && (
+    (typeof merged.maxHeartbeatAgeMs === "string" && merged.maxHeartbeatAgeMs.trim() === "") ||
+    !Number.isFinite(Number(merged.maxHeartbeatAgeMs)) ||
+    Number(merged.maxHeartbeatAgeMs) < 0
+  )) {
+    throw new Error("policy.maxHeartbeatAgeMs must be >= 0");
   }
 
   merged.rules = rules;
