@@ -36,6 +36,7 @@ function resetTenantScopedView() {
   const calibrationRows = document.querySelector("#calibrationRows");
   if (calibrationRows) calibrationRows.innerHTML = '<tr><td colspan="6" class="table-empty">Loading observations…</td></tr>';
 
+  setText("readinessChecks", "Checking runtime readiness…");
   setText("probeCount", "—");
   setText("telemetryBackend", "—");
   setText("policyBackend", "—");
@@ -869,13 +870,18 @@ async function refreshReadiness() {
     const checks = data.checks;
     if (checks && typeof checks === "object") {
       const entries = Array.isArray(checks) ? checks : Object.entries(checks).map(([name, item]) => ({ name, ...((item && typeof item === "object") ? item : { status: item }) }));
-      if (entries.length) setText("systemStatus", "Readiness checks: " + entries.map(item => {
-        if (typeof item === "string") return item;
-        return [item.name || item.id, item.status || item.state || (item.ready === true ? "ready" : item.ready === false ? "not ready" : "")].filter(Boolean).join(" ");
-      }).join(" · "));
+      setText("readinessChecks", entries.length
+        ? "Readiness checks: " + entries.map(item => {
+            if (typeof item === "string") return item;
+            return [item.name || item.id, item.status || item.state || (item.ready === true ? "ready" : item.ready === false ? "not ready" : "")].filter(Boolean).join(" ");
+          }).join(" · ")
+        : "No readiness checks reported.");
+    } else {
+      setText("readinessChecks", "Readiness checks not reported.");
     }
   } catch {
     if (accessRevision !== apiAccessRevision) return;
+    setText("readinessChecks", "Readiness checks unavailable.");
     setText("readinessState", "Unavailable");
     const element = document.querySelector("#readinessState");
     if (element) element.style.color = "var(--red)";
