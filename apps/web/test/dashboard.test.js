@@ -126,4 +126,23 @@ test("hybrid plans are invalidated when inputs or registered targets change", as
   assert.match(script, /requestRevision !== hybridInputRevision/);
   assert.match(script, /Validation result discarded/);
   assert.match(script, /No dry-run is available until the current plan is validated/);
+}); 
+
+test("policy and hybrid budget parsing rejects blank, negative and non-finite values", async () => {
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  assert.match(script, /latencyBudgetMs: readNonNegativeInput\("latency", "Latency budget"\)/);
+  assert.match(script, /maxCostUsd: readNonNegativeInput\("cost", "Maximum cost"\)/);
+  assert.match(script, /maxLatencyMs: readNonNegativeInput\("hybridLatency", "Hybrid latency budget"\)/);
+  assert.match(script, /maxCostUsd: readNonNegativeInput\("hybridCost", "Hybrid cost budget"\)/);
+
+  const start = script.indexOf("function parseNonNegativeNumber(");
+  const end = script.indexOf("\nfunction readNonNegativeInput(", start);
+  assert.ok(start >= 0 && end > start, "numeric parser should be defined before its DOM adapter");
+  const parseNonNegativeNumber = new Function(script.slice(start, end) + "; return parseNonNegativeNumber;")();
+
+  assert.equal(parseNonNegativeNumber("0", "Budget"), 0);
+  assert.equal(parseNonNegativeNumber("12.5", "Budget"), 12.5);
+  for (const value of ["", "  ", "-1", "Infinity", "NaN"]) {
+    assert.throws(() => parseNonNegativeNumber(value, "Budget"), /finite number of zero or greater/);
+  }
 });
