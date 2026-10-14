@@ -77,16 +77,20 @@ export function getClientKey(req, { trustProxy = false, trustedProxyHops = 1 } =
       throw new Error("trustedProxyHops must be a positive safe integer");
     }
 
-    const forwarded = String(req.headers?.["x-forwarded-for"] || "")
-      .split(",")
-      .map(value => value.trim())
-      .filter(Boolean);
+    const rawForwarded = String(req.headers?.["x-forwarded-for"] || "");
+    const forwarded = rawForwarded.split(",").map(value => value.trim());
+    const completeChain = rawForwarded.length > 0 &&
+      forwarded.every(value => value.length > 0);
     const clientIndex = forwarded.length - trustedProxyHops;
-    const candidate = clientIndex >= 0 ? forwarded[clientIndex] : null;
+    const candidate = completeChain && clientIndex >= 0
+      ? forwarded[clientIndex]
+      : null;
+    const trustedSuffix = candidate ? forwarded.slice(clientIndex) : [];
 
-    // Only trust an address supplied through a complete, configured proxy chain.
-    // Malformed or shorter-than-configured chains fall back to the socket peer.
-    if (candidate && isIP(candidate)) return candidate;
+    // Empty/malformed chain segments can shift the hop count and are rejected.
+    // Left-side caller-supplied entries do not affect the right-side hop lookup.
+    // Every selected/right-side hop must parse as an IP address.
+    if (candidate && trustedSuffix.every(value => isIP(value) !== 0)) return candidate;
   }
 
   return req.socket?.remoteAddress || "unknown";

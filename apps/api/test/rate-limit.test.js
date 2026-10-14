@@ -58,6 +58,29 @@ test("trusted proxy mode falls back to the socket for malformed or short chains"
   };
   assert.equal(getClientKey(malformed, { trustProxy: true }), "10.0.0.2");
   assert.equal(getClientKey(malformed, { trustProxy: true, trustedProxyHops: 2 }), "10.0.0.2");
+
+  for (const header of [
+    "203.0.113.99, , 198.51.100.10",
+    "203.0.113.99, 198.51.100.10, ",
+    ", 198.51.100.10"
+  ]) {
+    assert.equal(
+      getClientKey({
+        headers: { "x-forwarded-for": header },
+        socket: { remoteAddress: "10.0.0.2" }
+      }, { trustProxy: true }),
+      "10.0.0.2",
+      header
+    );
+  }
+
+  assert.equal(
+    getClientKey({
+      headers: { "x-forwarded-for": "203.0.113.99, 198.51.100.10, bad-proxy-ip" },
+      socket: { remoteAddress: "10.0.0.2" }
+    }, { trustProxy: true, trustedProxyHops: 2 }),
+    "10.0.0.2"
+  );
 });
 
 test("invalid limiter configuration fails clearly", () => {
