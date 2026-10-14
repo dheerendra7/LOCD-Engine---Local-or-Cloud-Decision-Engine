@@ -349,6 +349,10 @@ test("API keys are applied explicitly and access changes reset tenant-scoped UI 
   assert.match(script, /activityBody\.innerHTML = .*Loading decision history/);
   assert.match(script, /setText\("decisionCount", "—"\)/);
   assert.match(script, /if \(decisionId\) decisionId\.value = ""/);
+  assert.match(script, /for \(const id of \["actualLatencyMs", "actualCostUsd", "targetId", "targetRegions"\]\)/);
+  assert.match(script, /hybridRows\.innerHTML = "";[\s\S]*?addHybridStep\(\{ id: "prepare"/);
+  assert.match(script, /addHybridStep\(\{ id: "inference"/);
+  assert.match(script, /hybridOutput\.innerHTML = emptyState\("No hybrid plan"/);
   assert.match(script, /activeApiKey = nextApiKey/);
   assert.match(script, /apiAccessRevision \+= 1/);
   assert.doesNotMatch(script, /querySelector\("#apiKey"\)\.addEventListener\("change", refreshAll\)/);
