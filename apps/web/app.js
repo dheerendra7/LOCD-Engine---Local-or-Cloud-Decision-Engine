@@ -1,7 +1,59 @@
 let activeApiKey = "";
+let apiAccessRevision = 0;
 
 function apiHeaders() {
   return activeApiKey ? { authorization: "Bearer " + activeApiKey } : {};
+}
+
+function resetTenantScopedView() {
+  registeredTargets = [];
+  lastPolicyCatalogFingerprint = null;
+  activeHistoryPolicy = null;
+  invalidateHybridPlan();
+  renderTargets([]);
+
+  setText("targetStatus", "Loading registry for the current access…");
+  setText("decisionCount", "—");
+  setText("successRate", "—");
+  setText("avgLatency", "—");
+  setText("metrics", "Loading telemetry for the current access…");
+  setText("policyManagerStatus", "Loading policy catalog…");
+  setPolicySelectors([{ id: "balanced", name: "Balanced" }]);
+
+  const policyCards = document.querySelector("#policyCards");
+  if (policyCards) policyCards.innerHTML = emptyState("Loading policies", "Refreshing the catalog for the current API access.");
+  const policyHistoryPanel = document.querySelector("#policyHistoryPanel");
+  if (policyHistoryPanel) policyHistoryPanel.classList.add("hidden");
+  const policyHistory = document.querySelector("#policyHistory");
+  if (policyHistory) policyHistory.innerHTML = "";
+
+  setText("activityStatus", "Loading decision history…");
+  const activityBody = document.querySelector("#activityTableBody");
+  if (activityBody) activityBody.innerHTML = '<tr><td colspan="7" class="table-empty">Loading decision history…</td></tr>';
+  setText("calibrationStatus", "Loading calibration…");
+  const calibrationCards = document.querySelector("#calibrationCards");
+  if (calibrationCards) calibrationCards.innerHTML = emptyState("Loading calibration", "Waiting for the current API context.");
+  const calibrationRows = document.querySelector("#calibrationRows");
+  if (calibrationRows) calibrationRows.innerHTML = '<tr><td colspan="6" class="table-empty">Loading observations…</td></tr>';
+
+  setText("probeCount", "—");
+  setText("telemetryBackend", "—");
+  setText("policyBackend", "—");
+  setText("executionAdapters", "—");
+  renderCapabilities({});
+  setStatus("API access changed; refreshing current tenant data…", "checking");
+
+  if (output) output.textContent = "Access changed. Run a new decision for the current tenant.";
+  setText("simulationOutput", "Access changed. Run a new comparison for the current tenant.");
+  setText("hybridStatus", "Rebuild and validate a plan for the current tenant.");
+  setText("executionOutput", "No validated plan is available for the current API access.");
+  const decisionId = document.querySelector("#outcomeDecisionId");
+  if (decisionId) decisionId.value = "";
+  for (const id of ["newPolicyId", "newPolicyName", "newPolicyDescription"]) {
+    const field = document.querySelector("#" + id);
+    if (field) field.value = "";
+  }
+  setText("accessStatus", "API access changed in page memory.");
 }
 
 const output = document.querySelector("#output");
@@ -1156,13 +1208,22 @@ document.querySelector("#executeDryRun")?.addEventListener("click", async event 
 });
 
 document.querySelector("#applyApiKey")?.addEventListener("click", async () => {
-  activeApiKey = document.querySelector("#apiKey").value.trim();
+  const nextApiKey = document.querySelector("#apiKey").value.trim();
+  if (nextApiKey !== activeApiKey) {
+    activeApiKey = nextApiKey;
+    apiAccessRevision += 1;
+    resetTenantScopedView();
+  }
   setText("accessStatus", activeApiKey ? "Key applied to this page's memory." : "No key entered; requests will be unauthenticated.");
   await refreshAll();
 });
 document.querySelector("#clearApiKey")?.addEventListener("click", async () => {
-  activeApiKey = "";
   document.querySelector("#apiKey").value = "";
+  if (activeApiKey !== "") {
+    activeApiKey = "";
+    apiAccessRevision += 1;
+    resetTenantScopedView();
+  }
   setText("accessStatus", "Key cleared from this page's memory.");
   await refreshAll();
 });
