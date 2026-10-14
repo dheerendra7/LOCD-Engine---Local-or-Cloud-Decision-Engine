@@ -114,3 +114,16 @@ test("dry-run UI documents the API execute-scope requirement", async () => {
   assert.match(html, /key must include the <code>execute<\/code> scope/);
   assert.match(html, /sends <code>mode: "dry-run"<\/code> only/);
 });
+
+test("hybrid plans are invalidated when inputs or registered targets change", async () => {
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  assert.match(script, /function invalidateHybridPlan\(\)/);
+  assert.match(script, /lastHybridPlan = null/);
+  assert.match(script, /executeButton\.disabled = true/);
+  assert.match(script, /targetRegistryChanged\) invalidateHybridPlan\(\)/);
+  assert.match(script, /document\.querySelector\("#hybridStepRows"\)\?\.addEventListener\("input", invalidateHybridPlan\)/);
+  assert.match(script, /document\.querySelector\("#hybridStepRows"\)\?\.addEventListener\("change", invalidateHybridPlan\)/);
+  assert.match(script, /requestRevision !== hybridInputRevision/);
+  assert.match(script, /Validation result discarded/);
+  assert.match(script, /No dry-run is available until the current plan is validated/);
+});
