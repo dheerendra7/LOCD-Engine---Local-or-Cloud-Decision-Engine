@@ -319,6 +319,10 @@
               <span class="help-text">Sent as an Authorization: Bearer header to this same origin. Never paste provider credentials here.</span>
             </label>
             <div class="button-row"><button class="btn btn-primary" type="button" id="applyApiKey">Apply key & refresh</button><button class="btn btn-secondary" type="button" id="clearApiKey">Clear key</button><span class="status" id="accessStatus">No API key stored in this page.</span></div>
+            <div class="inline-note" style="margin-top:14px">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+              <span>Access scopes: <code>read</code> loads the console; <code>decide</code> runs decisions, simulations and hybrid validation; <code>targets</code> manages targets; <code>telemetry</code> records outcomes; <code>execute</code> submits dry-runs; <code>admin</code> saves, edits, deletes or rolls back custom policies. Keys need <code>read</code> plus the scope for the action. The API enforces all permissions server-side.</span>
+            </div>
           </section>
           <section class="panel">
             <div class="section-heading"><div><h2>Runtime capabilities</h2><p>Capability flags reflect the API's current status response. They do not imply that providers are reachable unless a probe confirms it.</p></div></div>
