@@ -667,7 +667,7 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
         purgeExpired(db);
         const normalized = String(key);
         const row = db.prepare(
-          "SELECT value FROM coordination_kv WHERE key = ?"
+          "SELECT value, expires_at FROM coordination_kv WHERE key = ?"
         ).get(normalized);
 
         let next;
@@ -684,7 +684,11 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
           }
           next = current + 1;
           if (!Number.isSafeInteger(next)) throw new Error("coordination counter overflow");
-          db.prepare("UPDATE coordination_kv SET value = ? WHERE key = ?").run(JSON.stringify(next), normalized);
+          const expiresAt = ttlMs != null && row.expires_at == null
+            ? Date.now() + ttlMs
+            : row.expires_at;
+          db.prepare("UPDATE coordination_kv SET value = ?, expires_at = ? WHERE key = ?")
+            .run(JSON.stringify(next), expiresAt, normalized);
         }
 
         db.exec("COMMIT");
