@@ -171,3 +171,13 @@ test("system access help documents each API operation scope", async () => {
   }
   assert.match(html, /Keys need <code>read<\/code> plus the scope for the action/);
 });
+
+test("refreshing a changed or unavailable policy catalog expires the previous hybrid plan", async () => {
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  assert.match(script, /let lastPolicyCatalogFingerprint = null/);
+  assert.match(script, /JSON\.stringify\(policies\)/);
+  assert.match(script, /fingerprint !== lastPolicyCatalogFingerprint/);
+  assert.match(script, /lastPolicyCatalogFingerprint = null;[\s\S]*?invalidateHybridPlan\(\)/);
+  assert.match(script, /Plan inputs, targets, or policy catalog changed/);
+  assert.match(script, /planOutput\.innerHTML = emptyState\([\s\S]*?Plan requires revalidation/);
+});
