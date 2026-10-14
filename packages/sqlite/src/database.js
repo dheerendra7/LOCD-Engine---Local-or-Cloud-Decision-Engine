@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 const { DatabaseSync } = sqlite;
 const nativeBackup = sqlite.backup;
 import path from "node:path";
-import { access, mkdir, rename, rm } from "node:fs/promises";
+import { access, link, mkdir, rename, rm } from "node:fs/promises";
 import { mkdirSync } from "node:fs";
 import { createDecisionStore, normalizeDecisionEvent } from "../../../packages/telemetry/src/store.js";
 import { createPolicyStore } from "../../../packages/policy-store/src/index.js";
@@ -84,10 +84,25 @@ export async function backupSQLiteDatabase({
       verification.close();
     }
 
-    // Publish the verified backup with rename so a failed publish cannot first
-    // delete the user's last known-good destination backup. On filesystems that
-    // support replacement, rename also keeps publication atomic.
-    await rename(temporary, destination);
+    if (overwrite) {
+      // Replace the previous backup only after the new file has been verified.
+      // POSIX rename atomically replaces the destination after verification.
+      await rename(temporary, destination);
+    } else {
+      // Atomically publish without replacing a destination created by a
+      // concurrent backup process after the earlier existence check.
+      try {
+        await link(temporary, destination);
+      } catch (error) {
+        if (error?.code === "EEXIST") {
+          throw new Error("backup destination already exists", { cause: error });
+        }
+        throw error;
+      }
+      // Publication already succeeded; temp cleanup must not report failure
+      // after a valid destination has been created.
+      await rm(temporary, { force: true }).catch(() => {});
+    }
     return {
       destination,
       pages
