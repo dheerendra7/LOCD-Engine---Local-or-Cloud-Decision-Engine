@@ -527,6 +527,7 @@ document.querySelector("#simulatePolicy").addEventListener("click", async event 
 
 // Enhanced light-console behaviour. All displayed operational data is read from the LOCD API.
 let lastHybridPlan = null;
+let hybridInputRevision = 0;
 let hybridStepSequence = 0;
 let activeHistoryPolicy = null;
 
@@ -654,6 +655,18 @@ function emptyState(title, description) {
 function setText(id, value) {
   const element = document.querySelector("#" + id);
   if (element) element.textContent = value == null ? "—" : String(value);
+}
+
+function invalidateHybridPlan() {
+  hybridInputRevision += 1;
+  const hadValidatedPlan = lastHybridPlan !== null;
+  lastHybridPlan = null;
+  const executeButton = document.querySelector("#executeDryRun");
+  if (executeButton) executeButton.disabled = true;
+  if (hadValidatedPlan) {
+    setText("hybridStatus", "Plan inputs or targets changed. Revalidate before dry-run.");
+    setText("executionOutput", "The previously validated plan is stale. Validate the current inputs before dry-run.");
+  }
 }
 
 function setOptions(select, options, previousValue) {
@@ -805,6 +818,7 @@ function syncHybridTargets() {
 function addHybridStep(values = {}) {
   const root = document.querySelector("#hybridStepRows");
   if (!root) return;
+  invalidateHybridPlan();
   if (!root.querySelector("[data-step-id]")) root.innerHTML = "";
   hybridStepSequence += 1;
   const row = document.createElement("div");
@@ -817,6 +831,7 @@ function addHybridStep(values = {}) {
     '<button class="btn btn-secondary remove-step" type="button" aria-label="Remove stage">×</button>';
   row.querySelector("[data-step-sensitivity]").value = values.dataSensitivity || document.querySelector("#hybridSensitivity")?.value || "medium";
   row.querySelector(".remove-step").addEventListener("click", () => {
+    invalidateHybridPlan();
     row.remove();
     if (!root.querySelector("[data-step-id]")) root.innerHTML = emptyState("No stages configured", "Add at least two stages to create a hybrid plan.");
     const execute = document.querySelector("#executeDryRun");
@@ -877,10 +892,14 @@ async function refreshTargets() {
   if (status) status.textContent = "Loading registry…";
   try {
     const data = await portalFetch("/v1/targets");
-    registeredTargets = Array.isArray(data.targets) ? data.targets : [];
+    const nextTargets = Array.isArray(data.targets) ? data.targets : [];
+    const targetRegistryChanged = JSON.stringify(registeredTargets) !== JSON.stringify(nextTargets);
+    registeredTargets = nextTargets;
+    if (targetRegistryChanged) invalidateHybridPlan();
     renderTargets(registeredTargets);
     if (status) status.textContent = registeredTargets.length + " target" + (registeredTargets.length === 1 ? "" : "s") + " loaded";
   } catch (error) {
+    if (registeredTargets.length) invalidateHybridPlan();
     registeredTargets = [];
     renderTargets([]);
     if (status) status.textContent = niceError(error);
@@ -1307,11 +1326,25 @@ function renderHybridResult(result) {
 }
 
 document.querySelector("#addHybridStep")?.addEventListener("click", () => addHybridStep());
+
+document.querySelector("#hybridStepRows")?.addEventListener("input", invalidateHybridPlan);
+document.querySelector("#hybridStepRows")?.addEventListener("change", invalidateHybridPlan);
+[
+  "hybridWorkloadType", "hybridSensitivity", "hybridLatency", "hybridCost", "hybridPolicyProfile"
+].forEach(id => {
+  const input = document.querySelector("#" + id);
+  input?.addEventListener("input", invalidateHybridPlan);
+  input?.addEventListener("change", invalidateHybridPlan);
+});
+
 document.querySelector("#planHybrid")?.addEventListener("click", async event => {
   const button = event.currentTarget;
   const status = document.querySelector("#hybridStatus");
   const outputRoot = document.querySelector("#hybridOutput");
   button.disabled = true;
+  lastHybridPlan = null;
+  const executeButton = document.querySelector("#executeDryRun");
+  if (executeButton) executeButton.disabled = true;
   if (status) status.textContent = "Validating plan against registered targets…";
   if (outputRoot) outputRoot.innerHTML = '<div class="status">Running hybrid validation…</div>';
   try {
@@ -1341,10 +1374,17 @@ document.querySelector("#planHybrid")?.addEventListener("click", async event => 
     if (!body.workload.type) throw new Error("Workload type is required.");
     if (!Number.isFinite(body.constraints.maxLatencyMs) || body.constraints.maxLatencyMs < 0) throw new Error("Latency budget must be zero or greater.");
     if (!Number.isFinite(body.constraints.maxCostUsd) || body.constraints.maxCostUsd < 0) throw new Error("Cost budget must be zero or greater.");
+    const requestRevision = hybridInputRevision;
     const result = await portalFetch("/v1/hybrid-plan", portalJsonOptions(body));
+    if (requestRevision !== hybridInputRevision) {
+      lastHybridPlan = null;
+      if (executeButton) executeButton.disabled = true;
+      if (status) status.textContent = "Inputs or targets changed during validation. Run validation again.";
+      if (outputRoot) outputRoot.innerHTML = emptyState("Validation result discarded", "The plan changed while validation was in progress. No dry-run is available until the current plan is validated.");
+      return;
+    }
     lastHybridPlan = result.valid ? result : null;
     renderHybridResult(result);
-    const executeButton = document.querySelector("#executeDryRun");
     if (executeButton) executeButton.disabled = !lastHybridPlan;
     if (status) status.textContent = result.valid ? "Plan validated. Dry-run is available; no providers were invoked." : "Validation rejected the current plan. Resolve the listed constraints.";
   } catch (error) {
