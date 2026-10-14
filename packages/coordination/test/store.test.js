@@ -95,3 +95,17 @@ test("invalid TTL configuration fails before mutating coordination state", async
   );
   assert.equal(await store.get("existing-counter"), 1);
 });
+
+
+test("fractional TTLs use safe whole-millisecond expiry deadlines", async () => {
+  const store = createInMemoryCoordinationStore();
+
+  await store.set("fractional", "value", { ttlMs: 1500.5 });
+  assert.equal(await store.get("fractional"), "value");
+
+  await assert.rejects(
+    () => store.set("unsafe-expiry", "value", { ttlMs: Number.MAX_VALUE }),
+    /ttlMs exceeds supported expiry range/
+  );
+  assert.equal(await store.get("unsafe-expiry"), null);
+});

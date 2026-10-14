@@ -577,3 +577,49 @@ test("sqlite coordination atomically replaces only the expected value", async ()
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+
+test("sqlite coordination rounds fractional TTL deadlines and rejects unsafe expiries before mutation", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-fractional-ttl-"));
+  const file = path.join(dir, "state.db");
+  const store = createSQLiteCoordinationStore({ filePath: file });
+
+  try {
+    await store.set("set-ttl", "value", { ttlMs: 1500.5 });
+    assert.ok(Number.isSafeInteger(
+      store.database.prepare("SELECT expires_at FROM coordination_kv WHERE key = ?")
+        .get("set-ttl").expires_at
+    ));
+
+    assert.equal(await store.setIfAbsent("absent-ttl", "value", { ttlMs: 1500.5 }), true);
+    assert.ok(Number.isSafeInteger(
+      store.database.prepare("SELECT expires_at FROM coordination_kv WHERE key = ?")
+        .get("absent-ttl").expires_at
+    ));
+
+    await store.set("conditional-ttl", { state: "before" });
+    assert.equal(await store.setIfValue(
+      "conditional-ttl", { state: "before" }, { state: "after" }, { ttlMs: 1500.5 }
+    ), true);
+    assert.ok(Number.isSafeInteger(
+      store.database.prepare("SELECT expires_at FROM coordination_kv WHERE key = ?")
+        .get("conditional-ttl").expires_at
+    ));
+
+    await store.set("counter-ttl", 0);
+    assert.equal(await store.incr("counter-ttl", { ttlMs: 1500.5 }), 1);
+    assert.ok(Number.isSafeInteger(
+      store.database.prepare("SELECT expires_at FROM coordination_kv WHERE key = ?")
+        .get("counter-ttl").expires_at
+    ));
+
+    await assert.rejects(
+      () => store.set("unsafe-expiry", "value", { ttlMs: Number.MAX_VALUE }),
+      /ttlMs exceeds supported expiry range/
+    );
+    assert.equal(await store.get("unsafe-expiry"), null);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

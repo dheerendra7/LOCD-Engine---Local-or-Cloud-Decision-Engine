@@ -4,6 +4,16 @@ export function createInMemoryCoordinationStore() {
   const values = new Map();
   const expiries = new Map();
 
+  function resolveExpiry(ttlMs) {
+    if (ttlMs == null) return null;
+    if (!Number.isFinite(ttlMs) || ttlMs < 1) throw new Error("ttlMs must be >= 1");
+    const expiresAt = Math.ceil(Date.now() + ttlMs);
+    if (!Number.isSafeInteger(expiresAt)) {
+      throw new Error("ttlMs exceeds supported expiry range");
+    }
+    return expiresAt;
+  }
+
   function purge(now = Date.now()) {
     for (const [key, expiresAt] of expiries) {
       if (expiresAt <= now) {
@@ -28,36 +38,36 @@ export function createInMemoryCoordinationStore() {
     },
 
     async set(key, value, { ttlMs = null } = {}) {
-      if (ttlMs != null && (!Number.isFinite(ttlMs) || ttlMs < 1)) throw new Error("ttlMs must be >= 1");
+      const expiresAt = resolveExpiry(ttlMs);
       purge();
       const normalized = String(key);
       values.set(normalized, structuredClone(value));
-      if (ttlMs == null) expiries.delete(normalized);
-      else expiries.set(normalized, Date.now() + ttlMs);
+      if (expiresAt === null) expiries.delete(normalized);
+      else expiries.set(normalized, expiresAt);
       return true;
     },
 
     async setIfAbsent(key, value, { ttlMs = null } = {}) {
-      if (ttlMs != null && (!Number.isFinite(ttlMs) || ttlMs < 1)) throw new Error("ttlMs must be >= 1");
+      const expiresAt = resolveExpiry(ttlMs);
       purge();
       const normalized = String(key);
       if (values.has(normalized)) return false;
 
       values.set(normalized, structuredClone(value));
-      if (ttlMs == null) expiries.delete(normalized);
-      else expiries.set(normalized, Date.now() + ttlMs);
+      if (expiresAt === null) expiries.delete(normalized);
+      else expiries.set(normalized, expiresAt);
       return true;
     },
 
     async setIfValue(key, expectedValue, value, { ttlMs = null } = {}) {
-      if (ttlMs != null && (!Number.isFinite(ttlMs) || ttlMs < 1)) throw new Error("ttlMs must be >= 1");
+      const expiresAt = resolveExpiry(ttlMs);
       purge();
       const normalized = String(key);
       if (!values.has(normalized) || !isDeepStrictEqual(values.get(normalized), expectedValue)) return false;
 
       values.set(normalized, structuredClone(value));
-      if (ttlMs == null) expiries.delete(normalized);
-      else expiries.set(normalized, Date.now() + ttlMs);
+      if (expiresAt === null) expiries.delete(normalized);
+      else expiries.set(normalized, expiresAt);
       return true;
     },
 
@@ -77,7 +87,7 @@ export function createInMemoryCoordinationStore() {
     },
 
     async incr(key, { ttlMs = null } = {}) {
-      if (ttlMs != null && (!Number.isFinite(ttlMs) || ttlMs < 1)) throw new Error("ttlMs must be >= 1");
+      const expiresAt = resolveExpiry(ttlMs);
       purge();
       const normalized = String(key);
       const currentValue = values.has(normalized) ? values.get(normalized) : 0;
@@ -87,8 +97,8 @@ export function createInMemoryCoordinationStore() {
       const next = currentValue + 1;
       if (!Number.isSafeInteger(next)) throw new Error("coordination counter overflow");
       values.set(normalized, next);
-      if (ttlMs != null && !expiries.has(normalized)) {
-        expiries.set(normalized, Date.now() + ttlMs);
+      if (expiresAt !== null && !expiries.has(normalized)) {
+        expiries.set(normalized, expiresAt);
       }
       return next;
     },

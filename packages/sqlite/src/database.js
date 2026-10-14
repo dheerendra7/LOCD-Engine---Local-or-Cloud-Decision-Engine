@@ -558,8 +558,13 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
   ]);
 
   function validateTtl(ttlMs) {
-    if (ttlMs == null) return;
+    if (ttlMs == null) return null;
     if (!Number.isFinite(ttlMs) || ttlMs < 1) throw new Error("ttlMs must be >= 1");
+    const expiresAt = Math.ceil(Date.now() + ttlMs);
+    if (!Number.isSafeInteger(expiresAt)) {
+      throw new Error("ttlMs exceeds supported expiry range");
+    }
+    return expiresAt;
   }
 
   function getValue(key) {
@@ -581,9 +586,8 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
     },
 
     async set(key, value, { ttlMs = null } = {}) {
-      validateTtl(ttlMs);
+      const expiresAt = validateTtl(ttlMs);
       purgeExpired(db);
-      const expiresAt = ttlMs == null ? null : Date.now() + ttlMs;
       db.prepare(`
         INSERT INTO coordination_kv(key, value, expires_at)
         VALUES (?, ?, ?)
@@ -595,9 +599,8 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
     },
 
     async setIfAbsent(key, value, { ttlMs = null } = {}) {
-      validateTtl(ttlMs);
+      const expiresAt = validateTtl(ttlMs);
       purgeExpired(db);
-      const expiresAt = ttlMs == null ? null : Date.now() + ttlMs;
       const result = db.prepare(
         "INSERT OR IGNORE INTO coordination_kv(key, value, expires_at) VALUES (?, ?, ?)"
       ).run(String(key), JSON.stringify(value), expiresAt);
@@ -633,7 +636,7 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
     },
 
     async setIfValue(key, expectedValue, value, { ttlMs = null } = {}) {
-      validateTtl(ttlMs);
+      const requestedExpiry = validateTtl(ttlMs);
       if (expectedValue === undefined) return false;
       const next = JSON.stringify(value);
       if (next === undefined) return false;
@@ -648,7 +651,7 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
           return false;
         }
 
-        const expiresAt = ttlMs == null ? null : Date.now() + ttlMs;
+        const expiresAt = requestedExpiry;
         const result = db.prepare(
           "UPDATE coordination_kv SET value = ?, expires_at = ? WHERE key = ? AND value = ?"
         ).run(next, expiresAt, normalized, row.value);
@@ -661,7 +664,7 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
     },
 
     async incr(key, { ttlMs = null } = {}) {
-      validateTtl(ttlMs);
+      const requestedExpiry = validateTtl(ttlMs);
       db.exec("BEGIN IMMEDIATE");
       try {
         purgeExpired(db);
@@ -673,7 +676,7 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
         let next;
         if (!row) {
           next = 1;
-          const expiresAt = ttlMs == null ? null : Date.now() + ttlMs;
+          const expiresAt = requestedExpiry;
           db.prepare(
             "INSERT INTO coordination_kv(key, value, expires_at) VALUES (?, ?, ?)"
           ).run(normalized, JSON.stringify(next), expiresAt);
@@ -684,8 +687,8 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
           }
           next = current + 1;
           if (!Number.isSafeInteger(next)) throw new Error("coordination counter overflow");
-          const expiresAt = ttlMs != null && row.expires_at == null
-            ? Date.now() + ttlMs
+          const expiresAt = requestedExpiry !== null && row.expires_at == null
+            ? requestedExpiry
             : row.expires_at;
           db.prepare("UPDATE coordination_kv SET value = ?, expires_at = ? WHERE key = ?")
             .run(JSON.stringify(next), expiresAt, normalized);
