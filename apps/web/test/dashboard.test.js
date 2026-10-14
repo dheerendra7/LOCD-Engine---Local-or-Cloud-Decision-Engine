@@ -146,3 +146,28 @@ test("policy and hybrid budget parsing rejects blank, negative and non-finite va
     assert.throws(() => parseNonNegativeNumber(value, "Budget"), /finite number of zero or greater/);
   }
 });
+
+test("hybrid planner rejects incomplete stages and single-target plans before calling the API", async () => {
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  assert.match(script, /Every stage needs a non-empty stage ID/);
+  assert.match(script, /Stage IDs must be unique/);
+  assert.match(script, /Choose a registered target for every stage/);
+  assert.match(script, /Choose at least two distinct registered targets across the stages/);
+  assert.match(script, /new Set\(body\.steps\.map\(step => String\(step\.targetId\)\)\)\.size < 2/);
+});
+
+test("changing the policy catalog invalidates a previously validated hybrid plan", async () => {
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  assert.match(script, /let lastPolicyCatalogFingerprint = null/);
+  assert.match(script, /fingerprint !== lastPolicyCatalogFingerprint/);
+  assert.match(script, /Plan requires revalidation/);
+  assert.match(script, /Planner inputs, registered targets, or policy definitions changed/);
+});
+
+test("system access help documents each API operation scope", async () => {
+  const html = await readFile(new URL("index.html", webRoot), "utf8");
+  for (const scope of ["read", "decide", "targets", "telemetry", "execute", "admin"]) {
+    assert.match(html, new RegExp("<code>" + scope + "</code>"), "missing API scope guidance: " + scope);
+  }
+  assert.match(html, /Keys need <code>read<\/code> plus the scope for the action/);
+});
