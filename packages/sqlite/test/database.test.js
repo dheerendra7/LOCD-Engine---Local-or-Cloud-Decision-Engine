@@ -99,6 +99,7 @@ test("sqlite backup refuses accidental destination overwrite", async () => {
       () => backupSQLiteDatabase({ sourcePath: source, destinationPath: destination }),
       /backup destination already exists/
     );
+    assert.equal(await readFile(destination, "utf8"), "existing");
 
     const result = await backupSQLiteDatabase({
       sourcePath: source,
@@ -106,6 +107,57 @@ test("sqlite backup refuses accidental destination overwrite", async () => {
       overwrite: true
     });
     assert.ok(result.pages > 0);
+
+    const restored = new DatabaseSync(destination);
+    try {
+      assert.equal(
+        restored.prepare("PRAGMA integrity_check").get().integrity_check,
+        "ok"
+      );
+    } finally {
+      restored.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("concurrent sqlite backups never overwrite an existing destination when overwrite is false", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-backup-race-"));
+  const source = path.join(dir, "state.db");
+  const destination = path.join(dir, "backup.db");
+
+  try {
+    const stores = createSQLiteStateStores({ filePath: source });
+    stores.telemetry.record({
+      id: "concurrent-backup",
+      route: "local",
+      workloadType: "backup-race-test"
+    });
+    stores.close();
+
+    const results = await Promise.allSettled([
+      backupSQLiteDatabase({ sourcePath: source, destinationPath: destination }),
+      backupSQLiteDatabase({ sourcePath: source, destinationPath: destination })
+    ]);
+
+    assert.equal(results.filter(result => result.status === "fulfilled").length, 1);
+    assert.equal(results.filter(result => result.status === "rejected").length, 1);
+    assert.match(
+      results.find(result => result.status === "rejected").reason.message,
+      /backup destination already exists/
+    );
+
+    const backup = new DatabaseSync(destination);
+    try {
+      assert.equal(
+        backup.prepare("PRAGMA integrity_check").get().integrity_check,
+        "ok"
+      );
+    } finally {
+      backup.close();
+    }
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
