@@ -30,11 +30,13 @@ test("request policy can override preset fields without losing default weights",
   assert.equal(policy.weights.latency, 0.30);
 });
 
-test("unknown profiles fail clearly", () => {
-  assert.throws(
-    () => getPolicyProfile("does-not-exist"),
-    /unknown policy profile/
-  );
+test("unknown profiles fail clearly, including inherited object property names", () => {
+  for (const id of ["does-not-exist", "constructor", "toString", "__proto__"]) {
+    assert.throws(
+      () => getPolicyProfile(id),
+      /unknown policy profile/
+    );
+  }
 });
 
 test("resolvePolicy applies matching rules in deterministic priority order", () => {
