@@ -61,7 +61,7 @@ function resetTenantScopedView() {
   if (baseProfile) baseProfile.value = "balanced";
   for (const id of ["decide", "registerTarget", "simulatePolicy", "savePolicy", "recordOutcome", "planHybrid", "refreshAll"]) {
     const button = document.querySelector("#" + id);
-    if (button) if (accessRevision === apiAccessRevision) button.disabled = false;
+    if (button) button.disabled = false;
   }
   const dryRunButton = document.querySelector("#executeDryRun");
   if (dryRunButton) dryRunButton.disabled = true;
@@ -939,7 +939,7 @@ async function refreshAll() {
     refreshActivity(), refreshCalibration(), refreshHealth(), refreshReadiness()
   ];
   await Promise.allSettled(tasks);
-  if (accessRevision === apiAccessRevision && button) if (accessRevision === apiAccessRevision) button.disabled = false;
+  if (accessRevision === apiAccessRevision && button) button.disabled = false;
 }
 
 function renderSimulation(result) {
@@ -1096,7 +1096,7 @@ document.querySelector("#policyForm")?.addEventListener("submit", async event =>
     if (status) status.textContent = niceError(error);
     toast(niceError(error), true);
   } finally {
-    if (button) if (accessRevision === apiAccessRevision) button.disabled = false;
+    if (accessRevision === apiAccessRevision && button) button.disabled = false;
   }
 });
 
@@ -1134,7 +1134,7 @@ document.querySelector("#outcomeForm")?.addEventListener("submit", async event =
     if (status) status.textContent = niceError(error);
     toast(niceError(error), true);
   } finally {
-    if (button) if (accessRevision === apiAccessRevision) button.disabled = false;
+    if (accessRevision === apiAccessRevision && button) button.disabled = false;
   }
 });
 
