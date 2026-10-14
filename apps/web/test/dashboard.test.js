@@ -409,3 +409,19 @@ test("target and policy operations ignore stale responses after the API access c
   assert.match(script, /document\.querySelector\("#policyHistory"\)\?\.addEventListener\("click", async event => \{[\s\S]*?const accessRevision = apiAccessRevision;[\s\S]*?if \(accessRevision !== apiAccessRevision\) return/);
   assert.match(script, /document\.querySelector\("#policyForm"\)\?\.addEventListener\("submit", async event => \{[\s\S]*?const accessRevision = apiAccessRevision;[\s\S]*?if \(accessRevision !== apiAccessRevision\) return/);
 });
+
+test("readiness diagnostics do not overwrite the API connection status", async () => {
+  const html = await readFile(new URL("index.html", webRoot), "utf8");
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  assert.match(html, /id="systemStatus"/);
+  assert.match(html, /id="readinessState"/);
+  assert.match(html, /id="readinessChecks"/);
+
+  const start = script.indexOf("async function refreshReadiness()");
+  const end = script.indexOf("\nfunction renderCapabilities", start);
+  assert.ok(start >= 0 && end > start, "readiness refresh implementation should exist");
+  const readiness = script.slice(start, end);
+  assert.match(readiness, /setText\("readinessChecks"/);
+  assert.doesNotMatch(readiness, /setText\("systemStatus"/);
+  assert.match(script, /function setStatus\(message, state\)[\s\S]*?querySelector\("#systemStatus"\)/);
+});
