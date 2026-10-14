@@ -29,3 +29,5 @@ At startup the API loads the provider adapters, validates them, and registers th
 Provider adapters start unavailable until their first successful probe unless an explicit initial availability value is supplied. This avoids routing traffic to an unverified remote target.
 
 Provider config is operator-controlled. The public target registration API still accepts normalized snapshots and does not accept provider credentials or arbitrary provider connection settings.
+
+Provider adapter `timeoutMs` is optional and defaults to `5000` (5 seconds). It must be a positive finite JSON number. Zero, negative, infinite/non-finite values, and strings such as `"5000"` are rejected at startup instead of silently disabling request timeouts. The same configured timeout applies to provider probing and live execution.

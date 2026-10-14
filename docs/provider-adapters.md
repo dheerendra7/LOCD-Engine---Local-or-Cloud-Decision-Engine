@@ -75,3 +75,8 @@ Example:
       "baseUrl": "http://localhost:11434/api",
       "model": "llama3.2"
     }
+
+
+## Request timeout configuration
+
+All provider adapters use `timeoutMs` for both probe and live execution requests. The default is `5000` milliseconds; configured values must be positive finite numbers. Invalid values fail adapter construction so a typo cannot silently turn off the timeout and allow an upstream request to hang indefinitely.
