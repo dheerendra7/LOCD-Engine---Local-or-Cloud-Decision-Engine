@@ -341,6 +341,33 @@ test("sqlite coordination compares structured values independent of property ins
   }
 });
 
+test("sqlite increment rejects invalid or overflowing counters without mutation", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-counter-validation-"));
+  const file = path.join(dir, "state.db");
+
+  try {
+    const store = createSQLiteCoordinationStore({ filePath: file });
+    for (const value of ["3", "not-a-counter", -1, 1.5, null]) {
+      await store.set("invalid-counter", value);
+      await assert.rejects(
+        () => store.incr("invalid-counter"),
+        /coordination counter must be a non-negative safe integer/
+      );
+      assert.equal(await store.get("invalid-counter"), value);
+    }
+
+    await store.set("max-counter", Number.MAX_SAFE_INTEGER);
+    await assert.rejects(
+      () => store.incr("max-counter"),
+      /coordination counter overflow/
+    );
+    assert.equal(await store.get("max-counter"), Number.MAX_SAFE_INTEGER);
+    store.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("sqlite coordination expires state", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-expiry-"));
   const file = path.join(dir, "state.db");
