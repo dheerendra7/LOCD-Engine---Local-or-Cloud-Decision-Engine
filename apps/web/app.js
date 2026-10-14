@@ -76,6 +76,7 @@ function formatDelta(value, unit = "", digits = 3) {
 }
 
 document.querySelector("#decide").addEventListener("click", async event => {
+  const accessRevision = apiAccessRevision;
   const button = event.currentTarget;
   button.disabled = true;
   output.textContent = "Evaluating registered targets…";
@@ -113,9 +114,11 @@ document.querySelector("#decide").addEventListener("click", async event => {
     if (privacyOverride) body.policy.sensitiveDataMode = privacyOverride;
 
     const result = await portalFetch("/v1/decide", portalJsonOptions(body));
+    if (accessRevision !== apiAccessRevision) return;
     render(result);
     await Promise.all([refreshMetrics(), refreshActivity()]);
   } catch (error) {
+    if (accessRevision !== apiAccessRevision) return;
     output.textContent = niceError(error);
   } finally {
     button.disabled = false;
@@ -123,6 +126,7 @@ document.querySelector("#decide").addEventListener("click", async event => {
 });
 
 document.querySelector("#registerTarget").addEventListener("click", async event => {
+  const accessRevision = apiAccessRevision;
   const button = event.currentTarget;
   const status = document.querySelector("#targetStatus");
   const readNumber = (id, label, { min = 0, max = Number.POSITIVE_INFINITY } = {}) => {
@@ -161,11 +165,13 @@ document.querySelector("#registerTarget").addEventListener("click", async event 
   if (status) status.textContent = "Registering target…";
   try {
     const result = await portalFetch("/v1/targets", portalJsonOptions(payload));
+    if (accessRevision !== apiAccessRevision) return;
     if (status) status.textContent = "Registered " + (result.id || payload.id);
     document.querySelector("#targetId").value = "";
     toast("Target registered.");
     await refreshAll();
   } catch (error) {
+    if (accessRevision !== apiAccessRevision) return;
     if (status) status.textContent = niceError(error);
     toast(niceError(error), true);
   } finally {
@@ -178,6 +184,7 @@ document.querySelector("#refreshAll").addEventListener("click", refreshAll);
 
 
 document.querySelector("#simulatePolicy").addEventListener("click", async event => {
+  const accessRevision = apiAccessRevision;
   const button = event.currentTarget;
   const status = document.querySelector("#simulationStatus");
   const simulationOutput = document.querySelector("#simulationOutput");
@@ -218,12 +225,14 @@ document.querySelector("#simulatePolicy").addEventListener("click", async event 
     if (!body.workload.type) throw new Error("Workload type is required");
 
     const result = await portalFetch("/v1/policies/simulate", portalJsonOptions(body));
+    if (accessRevision !== apiAccessRevision) return;
 
     renderSimulation(result);
     status.textContent = "Comparison complete · read-only";
   } catch (error) {
+    if (accessRevision !== apiAccessRevision) return;
     status.textContent = "Simulation failed";
-    simulationOutput.textContent = error.message;
+    simulationOutput.textContent = niceError(error);
   } finally {
     button.disabled = false;
   }
@@ -652,10 +661,12 @@ function setPolicySelectors(policies) {
 }
 
 async function refreshTargets() {
+  const accessRevision = apiAccessRevision;
   const status = document.querySelector("#targetStatus");
   if (status) status.textContent = "Loading registry…";
   try {
     const data = await portalFetch("/v1/targets");
+    if (accessRevision !== apiAccessRevision) return;
     const nextTargets = Array.isArray(data.targets) ? data.targets : [];
     const targetRegistryChanged = JSON.stringify(registeredTargets) !== JSON.stringify(nextTargets);
     registeredTargets = nextTargets;
@@ -663,6 +674,7 @@ async function refreshTargets() {
     renderTargets(registeredTargets);
     if (status) status.textContent = registeredTargets.length + " target" + (registeredTargets.length === 1 ? "" : "s") + " loaded";
   } catch (error) {
+    if (accessRevision !== apiAccessRevision) return;
     if (registeredTargets.length) invalidateHybridPlan();
     registeredTargets = [];
     renderTargets([]);
@@ -671,9 +683,11 @@ async function refreshTargets() {
 }
 
 async function refreshPolicies() {
+  const accessRevision = apiAccessRevision;
   const status = document.querySelector("#policyManagerStatus");
   try {
     const data = await portalFetch("/v1/policies");
+    if (accessRevision !== apiAccessRevision) return;
     const policies = Array.isArray(data.policies) ? data.policies : [];
     const fingerprint = JSON.stringify(policies);
     if (lastPolicyCatalogFingerprint !== null && fingerprint !== lastPolicyCatalogFingerprint) {
@@ -688,6 +702,7 @@ async function refreshPolicies() {
       value: item.id, label: item.name || item.id
     })), formBase.value || "balanced");
   } catch (error) {
+    if (accessRevision !== apiAccessRevision) return;
     if (lastPolicyCatalogFingerprint !== null) {
       lastPolicyCatalogFingerprint = null;
       invalidateHybridPlan();
@@ -703,9 +718,11 @@ async function refreshPolicies() {
 }
 
 async function refreshMetrics() {
+  const accessRevision = apiAccessRevision;
   const metrics = document.querySelector("#metrics");
   try {
     const data = await portalFetch("/v1/metrics");
+    if (accessRevision !== apiAccessRevision) return;
     setText("decisionCount", formatNumber(data.totalDecisions, "0"));
     setText("successRate", formatPercent(data.successRate));
     setText("avgLatency", data.averageEstimatedLatencyMs == null ? "—" : formatNumber(data.averageEstimatedLatencyMs) + " ms");
@@ -716,6 +733,7 @@ async function refreshMetrics() {
       " · Actual outcomes: " + formatNumber((data.outcomes?.success || 0) + (data.outcomes?.failure || 0), "0") +
       " · Routes: " + (routes || "none recorded");
   } catch (error) {
+    if (accessRevision !== apiAccessRevision) return;
     setText("decisionCount", "—");
     setText("successRate", "—");
     setText("avgLatency", "—");
@@ -724,11 +742,13 @@ async function refreshMetrics() {
 }
 
 async function refreshActivity() {
+  const accessRevision = apiAccessRevision;
   const body = document.querySelector("#activityTableBody");
   if (!body) return;
   const status = document.querySelector("#activityStatus");
   try {
     const data = await portalFetch("/v1/decisions?limit=25");
+    if (accessRevision !== apiAccessRevision) return;
     const rows = Array.isArray(data.decisions) ? data.decisions : [];
     if (status) status.textContent = rows.length + " recent decision record" + (rows.length === 1 ? "" : "s");
     if (!rows.length) {
@@ -757,17 +777,20 @@ async function refreshActivity() {
       });
     });
   } catch (error) {
+    if (accessRevision !== apiAccessRevision) return;
     if (status) status.textContent = niceError(error);
     body.innerHTML = '<tr><td colspan="7" class="table-empty">' + escapeHtml(niceError(error)) + "</td></tr>";
   }
 }
 
 async function refreshCalibration() {
+  const accessRevision = apiAccessRevision;
   const cards = document.querySelector("#calibrationCards");
   const table = document.querySelector("#calibrationRows");
   if (!cards || !table) return;
   try {
     const data = await portalFetch("/v1/calibration");
+    if (accessRevision !== apiAccessRevision) return;
     const entries = Array.isArray(data.entries) ? data.entries : [];
     setText("calibrationStatus", data.enabled ? "Calibration enabled" : "Calibration disabled");
     const minSamples = data.config?.minSamples;
@@ -786,6 +809,7 @@ async function refreshCalibration() {
       escapeHtml(item.samples) + "</td><td>" + escapeHtml(formatNumber(item.latencyFactor)) + "</td><td>" +
       escapeHtml(formatNumber(item.costFactor)) + "</td></tr>").join("");
   } catch (error) {
+    if (accessRevision !== apiAccessRevision) return;
     setText("calibrationStatus", niceError(error));
     cards.innerHTML = emptyState("Calibration unavailable", niceError(error));
     table.innerHTML = '<tr><td colspan="6" class="table-empty">' + escapeHtml(niceError(error)) + "</td></tr>";
@@ -793,9 +817,11 @@ async function refreshCalibration() {
 }
 
 async function refreshHealth() {
+  const accessRevision = apiAccessRevision;
   try {
     const response = await fetch("/health", { cache: "no-store" });
     const data = await response.json();
+    if (accessRevision !== apiAccessRevision) return;
     if (!response.ok) throw new Error(data.error || "API health check failed");
     setText("healthState", data.status === "ok" ? "API responding" : data.status);
     setText("runtimeVersion", data.version || "Not reported");
@@ -805,6 +831,7 @@ async function refreshHealth() {
     const state = document.querySelector("#healthState");
     if (state) state.className = "state-badge " + (data.status === "ok" ? "good" : "bad");
   } catch (error) {
+    if (accessRevision !== apiAccessRevision) return;
     setText("healthState", "Unavailable");
     setText("runtimeVersion", "—");
     setText("environmentLabel", "API unavailable");
@@ -814,9 +841,11 @@ async function refreshHealth() {
 }
 
 async function refreshReadiness() {
+  const accessRevision = apiAccessRevision;
   try {
     const response = await fetch("/ready", { cache: "no-store" });
     const data = await response.json();
+    if (accessRevision !== apiAccessRevision) return;
     const value = data.status || (response.ok ? "ready" : "not ready");
     setText("readinessState", value);
     const element = document.querySelector("#readinessState");
@@ -830,6 +859,7 @@ async function refreshReadiness() {
       }).join(" · "));
     }
   } catch {
+    if (accessRevision !== apiAccessRevision) return;
     setText("readinessState", "Unavailable");
     const element = document.querySelector("#readinessState");
     if (element) element.style.color = "var(--red)";
@@ -860,8 +890,10 @@ function renderCapabilities(caps) {
 }
 
 async function refreshStatus() {
+  const accessRevision = apiAccessRevision;
   try {
     const data = await portalFetch("/v1/status");
+    if (accessRevision !== apiAccessRevision) return;
     const caps = data.capabilities || {};
     const counts = data.counts || {};
     setStatus("Connected · " + (data.service || "locd-api") + " · " + (data.version || "version unknown"), "connected");
@@ -871,6 +903,7 @@ async function refreshStatus() {
     setText("executionAdapters", counts.executionAdapters == null ? "Not reported" : counts.executionAdapters);
     renderCapabilities(caps);
   } catch (error) {
+    if (accessRevision !== apiAccessRevision) return;
     setStatus(niceError(error), "error");
     setText("probeCount", "—");
     setText("telemetryBackend", "Unavailable");
@@ -881,6 +914,7 @@ async function refreshStatus() {
 }
 
 async function refreshAll() {
+  const accessRevision = apiAccessRevision;
   const button = document.querySelector("#refreshAll");
   if (button) button.disabled = true;
   setStatus("Refreshing current tenant data…", "checking");
@@ -889,7 +923,7 @@ async function refreshAll() {
     refreshActivity(), refreshCalibration(), refreshHealth(), refreshReadiness()
   ];
   await Promise.allSettled(tasks);
-  if (button) button.disabled = false;
+  if (accessRevision === apiAccessRevision && button) button.disabled = false;
 }
 
 function renderSimulation(result) {
@@ -923,6 +957,7 @@ function renderSimulation(result) {
 }
 
 async function showPolicyHistory(policyId) {
+  const accessRevision = apiAccessRevision;
   const root = document.querySelector("#policyHistory");
   const panel = document.querySelector("#policyHistoryPanel");
   activeHistoryPolicy = policyId;
@@ -932,6 +967,7 @@ async function showPolicyHistory(policyId) {
   root.innerHTML = '<div class="status">Loading versions…</div>';
   try {
     const data = await portalFetch("/v1/policies/" + encodeURIComponent(policyId) + "/history");
+    if (accessRevision !== apiAccessRevision) return;
     const versions = Array.isArray(data.versions) ? data.versions : [];
     root.innerHTML = versions.length ? versions.slice().reverse().map(item =>
       '<div class="history-row"><div><strong>Version ' + escapeHtml(item.version) + '</strong><span>' +
@@ -941,11 +977,13 @@ async function showPolicyHistory(policyId) {
       '" data-version="' + escapeHtml(item.version) + '">Restore as new version</button></div>'
     ).join("") : emptyState("No version history found", "This custom policy has no versions available to restore.");
   } catch (error) {
+    if (accessRevision !== apiAccessRevision) return;
     root.innerHTML = emptyState("Version history unavailable", niceError(error));
   }
 }
 
 document.querySelector("#policyCards")?.addEventListener("click", async event => {
+  const accessRevision = apiAccessRevision;
   const button = event.target.closest("button[data-policy-action]");
   if (!button) return;
   const id = button.dataset.id;
@@ -969,10 +1007,12 @@ document.querySelector("#policyCards")?.addEventListener("click", async event =>
     button.disabled = true;
     try {
       await portalFetch("/v1/policies/" + encodeURIComponent(id), { method: "DELETE" });
+      if (accessRevision !== apiAccessRevision) return;
       toast("Custom policy deleted.");
       document.querySelector("#policyHistoryPanel")?.classList.add("hidden");
       await refreshPolicies();
     } catch (error) {
+      if (accessRevision !== apiAccessRevision) return;
       toast(niceError(error), true);
     } finally {
       button.disabled = false;
@@ -981,6 +1021,7 @@ document.querySelector("#policyCards")?.addEventListener("click", async event =>
 });
 
 document.querySelector("#policyHistory")?.addEventListener("click", async event => {
+  const accessRevision = apiAccessRevision;
   const button = event.target.closest("[data-rollback-policy]");
   if (!button) return;
   const id = button.dataset.rollbackPolicy;
@@ -990,9 +1031,11 @@ document.querySelector("#policyHistory")?.addEventListener("click", async event 
   try {
     await portalFetch("/v1/policies/" + encodeURIComponent(id) + "/rollback",
       portalJsonOptions({ version }));
+    if (accessRevision !== apiAccessRevision) return;
     toast("Policy restored as a new version.");
     await Promise.all([refreshPolicies(), showPolicyHistory(id)]);
   } catch (error) {
+    if (accessRevision !== apiAccessRevision) return;
     toast(niceError(error), true);
   } finally {
     button.disabled = false;
@@ -1001,6 +1044,7 @@ document.querySelector("#policyHistory")?.addEventListener("click", async event 
 
 document.querySelector("#policyForm")?.addEventListener("submit", async event => {
   event.preventDefault();
+  const accessRevision = apiAccessRevision;
   const button = document.querySelector("#savePolicy");
   const status = document.querySelector("#policyFormStatus");
   if (button) button.disabled = true;
@@ -1025,11 +1069,13 @@ document.querySelector("#policyForm")?.addEventListener("submit", async event =>
       rules
     };
     await portalFetch("/v1/policies", portalJsonOptions(payload));
+    if (accessRevision !== apiAccessRevision) return;
     if (status) status.textContent = "Policy saved. Reloading catalog…";
     toast("Custom policy saved.");
     await refreshPolicies();
     if (status) status.textContent = "Saved successfully. Review its version in the policy catalog.";
   } catch (error) {
+    if (accessRevision !== apiAccessRevision) return;
     if (status) status.textContent = niceError(error);
     toast(niceError(error), true);
   } finally {
@@ -1044,6 +1090,7 @@ document.querySelector("#closePolicyHistory")?.addEventListener("click", () => {
 
 document.querySelector("#outcomeForm")?.addEventListener("submit", async event => {
   event.preventDefault();
+  const accessRevision = apiAccessRevision;
   const button = document.querySelector("#recordOutcome");
   const status = document.querySelector("#outcomeStatus");
   if (button) button.disabled = true;
@@ -1061,10 +1108,12 @@ document.querySelector("#outcomeForm")?.addEventListener("submit", async event =
     if (latency !== "" && (!Number.isFinite(body.actualLatencyMs) || body.actualLatencyMs < 0)) throw new Error("Actual latency must be zero or greater.");
     if (cost !== "" && (!Number.isFinite(body.actualCostUsd) || body.actualCostUsd < 0)) throw new Error("Actual cost must be zero or greater.");
     await portalFetch("/v1/outcomes", portalJsonOptions(body));
+    if (accessRevision !== apiAccessRevision) return;
     if (status) status.textContent = "Outcome recorded.";
     toast("Actual outcome recorded; calibration observations refreshed.");
     await Promise.all([refreshMetrics(), refreshActivity(), refreshCalibration()]);
   } catch (error) {
+    if (accessRevision !== apiAccessRevision) return;
     if (status) status.textContent = niceError(error);
     toast(niceError(error), true);
   } finally {
@@ -1111,6 +1160,7 @@ document.querySelector("#hybridStepRows")?.addEventListener("change", invalidate
 });
 
 document.querySelector("#planHybrid")?.addEventListener("click", async event => {
+  const accessRevision = apiAccessRevision;
   const button = event.currentTarget;
   const status = document.querySelector("#hybridStatus");
   const outputRoot = document.querySelector("#hybridOutput");
@@ -1151,6 +1201,7 @@ document.querySelector("#planHybrid")?.addEventListener("click", async event => 
     if (!Number.isFinite(body.constraints.maxCostUsd) || body.constraints.maxCostUsd < 0) throw new Error("Cost budget must be zero or greater.");
     const requestRevision = hybridInputRevision;
     const result = await portalFetch("/v1/hybrid-plan", portalJsonOptions(body));
+    if (accessRevision !== apiAccessRevision) return;
     if (requestRevision !== hybridInputRevision) {
       lastHybridPlan = null;
       if (executeButton) executeButton.disabled = true;
@@ -1163,6 +1214,7 @@ document.querySelector("#planHybrid")?.addEventListener("click", async event => 
     if (executeButton) executeButton.disabled = !lastHybridPlan;
     if (status) status.textContent = result.valid ? "Plan validated. Dry-run is available; no providers were invoked." : "Validation rejected the current plan. Resolve the listed constraints.";
   } catch (error) {
+    if (accessRevision !== apiAccessRevision) return;
     lastHybridPlan = null;
     const executeButton = document.querySelector("#executeDryRun");
     if (executeButton) executeButton.disabled = true;
@@ -1175,6 +1227,7 @@ document.querySelector("#planHybrid")?.addEventListener("click", async event => 
 });
 
 document.querySelector("#executeDryRun")?.addEventListener("click", async event => {
+  const accessRevision = apiAccessRevision;
   const button = event.currentTarget;
   if (!lastHybridPlan || lastHybridPlan.valid !== true) {
     toast("Validate a plan successfully before dry-run.", true);
@@ -1187,6 +1240,7 @@ document.querySelector("#executeDryRun")?.addEventListener("click", async event 
       plan: lastHybridPlan,
       mode: "dry-run"
     }));
+    if (accessRevision !== apiAccessRevision) return;
     const receipts = (result.receipts || []).map(item => "<tr><td>" + escapeHtml(item.stepId) + "</td><td>" +
       escapeHtml(item.targetId) + "</td><td>" + escapeHtml(item.adapterId || "No adapter") + "</td><td>" +
       stateBadge(item.status, item.status === "completed" ? "good" : "bad") + "</td><td>" +
@@ -1200,6 +1254,7 @@ document.querySelector("#executeDryRun")?.addEventListener("click", async event 
       '<details><summary>View dry-run response JSON</summary><pre>' + escapeHtml(JSON.stringify(result, null, 2)) + "</pre></details>";
     toast("Dry-run request completed.");
   } catch (error) {
+    if (accessRevision !== apiAccessRevision) return;
     setText("executionOutput", niceError(error));
     toast(niceError(error), true);
   } finally {
