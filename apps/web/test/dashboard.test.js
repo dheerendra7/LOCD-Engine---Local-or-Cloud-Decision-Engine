@@ -232,3 +232,16 @@ test("the dashboard has one implementation per named function and one API transp
   assert.match(script, /const result = await portalFetch\("\/v1\/policies\/simulate", portalJsonOptions\(body\)\)/);
   assert.doesNotMatch(script, /fetch\(["'`]\/v1\//);
 });
+
+test("dashboard HTML escaping protects rendered API text from markup injection", async () => {
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  const match = script.match(/function escapeHtml\(value\) \{[\s\S]*?\n\}/);
+  assert.ok(match, "the UI should centralize escaping before inserting API data into HTML");
+  const escapeHtml = new Function(match[0] + "; return escapeHtml;")();
+  assert.equal(
+    escapeHtml("<img src=x onerror=\"alert(1)\">&'"),
+    "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;&amp;&#039;"
+  );
+  assert.equal(escapeHtml(null), "");
+  assert.equal(escapeHtml(42), "42");
+});
