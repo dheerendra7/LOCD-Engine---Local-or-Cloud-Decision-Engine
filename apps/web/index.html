@@ -269,7 +269,7 @@
           </section>
           <section class="panel">
             <div class="section-heading"><div><div class="section-label">Guarded operation</div><h2>Dry-run execution</h2><p>Run the latest valid plan through configured server-side adapters in dry-run mode only. Live execution is intentionally not exposed here.</p></div><span class="state-badge warn">Dry-run only</span></div>
-            <div class="inline-note" style="margin-bottom:14px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 20 7v5c0 4.5-3 7.5-8 9-5-1.5-8-4.5-8-9V7l8-4Z"/><path d="M12 8v4M12 16h.01"/></svg><span>The server remains the enforcement boundary. This control sends <code>mode: "dry-run"</code> only; adapter availability and execution safety are still checked by the API.</span></div>
+            <div class="inline-note" style="margin-bottom:14px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 20 7v5c0 4.5-3 7.5-8 9-5-1.5-8-4.5-8-9V7l8-4Z"/><path d="M12 8v4M12 16h.01"/></svg><span>The server remains the enforcement boundary. This control sends <code>mode: "dry-run"</code> only. If API authentication is enabled, the key must include the <code>execute</code> scope; the API still checks adapter availability and execution safety.</span></div>
             <button class="btn btn-secondary" type="button" id="executeDryRun" disabled>Run last valid plan · dry-run</button>
             <div id="executionOutput" class="status" style="margin-top:12px">Validate a hybrid plan first.</div>
           </section>
