@@ -38,6 +38,25 @@ test("keys are scoped by endpoint", () => {
   );
 });
 
+test("scope and key delimiter characters cannot cause cross-scope replay", () => {
+  const store = createIdempotencyStore();
+  store.remember(
+    "scope:prefix",
+    "key",
+    { operation: "shared-body" },
+    { status: 200, body: { operation: "scope-A" } }
+  );
+
+  assert.equal(
+    store.lookup("scope", "prefix:key", { operation: "shared-body" }),
+    null
+  );
+  assert.deepEqual(
+    store.lookup("scope:prefix", "key", { operation: "shared-body" }),
+    { status: 200, body: { operation: "scope-A" }, replayed: true }
+  );
+});
+
 test("invalid keys fail closed", () => {
   const store = createIdempotencyStore();
   assert.throws(
