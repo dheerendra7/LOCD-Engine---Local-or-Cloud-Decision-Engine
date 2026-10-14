@@ -181,3 +181,41 @@ test("refreshing a changed or unavailable policy catalog expires the previous hy
   assert.match(script, /Plan inputs, targets, or policy catalog changed/);
   assert.match(script, /planOutput\.innerHTML = emptyState\([\s\S]*?Plan requires revalidation/);
 });
+
+test("hybrid step validation enforces unique IDs, registered targets, and genuine hybrid routing", async () => {
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  const match = script.match(/function validateHybridSteps\(steps, registeredTargets\) \{[\s\S]*?\n\}/);
+  assert.ok(match, "a pure hybrid-step validator should exist");
+  const validateHybridSteps = new Function(match[0] + "; return validateHybridSteps;")();
+  const targets = [{ id: "local", mode: "local" }, { id: "cloud", mode: "cloud" }];
+  const valid = [{ id: "prepare", targetId: "local" }, { id: "infer", targetId: "cloud" }];
+
+  assert.equal(validateHybridSteps(valid, targets), null);
+  assert.match(validateHybridSteps([{ id: "only" }], targets), /at least two stages/);
+  assert.match(validateHybridSteps([{ id: " " , targetId: "local" }, { id: "infer", targetId: "cloud" }], targets), /non-empty stage ID/);
+  assert.match(validateHybridSteps([{ id: "same", targetId: "local" }, { id: "same", targetId: "cloud" }], targets), /unique/);
+  assert.match(validateHybridSteps([{ id: "a", targetId: "missing" }, { id: "b", targetId: "cloud" }], targets), /registered target/);
+  assert.match(validateHybridSteps([{ id: "a", targetId: "local" }, { id: "b", targetId: "local" }], targets), /two distinct registered targets/);
+});
+
+test("dashboard scope guidance matches the API's actual authorizer contract", async () => {
+  const html = await readFile(new URL("index.html", webRoot), "utf8");
+  const server = await readFile(new URL("../api/src/server.js", webRoot), "utf8");
+  const match = server.match(/function requiredScope\(method, pathname\) \{[\s\S]*?\n\}/);
+  assert.ok(match, "API requiredScope must remain available for contract tests");
+  const requiredScope = new Function(match[0] + "; return requiredScope;")();
+
+  assert.equal(requiredScope("GET", "/v1/status"), "read");
+  assert.equal(requiredScope("POST", "/v1/decide"), "decide");
+  assert.equal(requiredScope("POST", "/v1/hybrid-plan"), "decide");
+  assert.equal(requiredScope("POST", "/v1/policies/simulate"), "decide");
+  assert.equal(requiredScope("POST", "/v1/targets"), "targets");
+  assert.equal(requiredScope("DELETE", "/v1/targets/local"), "targets");
+  assert.equal(requiredScope("POST", "/v1/outcomes"), "telemetry");
+  assert.equal(requiredScope("POST", "/v1/execute"), "execute");
+  assert.equal(requiredScope("POST", "/v1/policies"), "admin");
+  assert.equal(requiredScope("POST", "/v1/policies/demo/rollback"), "admin");
+  for (const scope of ["read", "decide", "targets", "telemetry", "execute", "admin"]) {
+    assert.match(html, new RegExp("<code>" + scope + "</code>"));
+  }
+});
