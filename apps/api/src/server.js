@@ -571,6 +571,7 @@ export function createServer({
     let requestLogWritten = false;
     let pathname = "unknown";
     let idempotencyClaim = null;
+    let idempotencyResultProduced = false;
 
     try {
       const url = new URL(req.url || "/", "http://localhost");
@@ -671,6 +672,9 @@ export function createServer({
           idempotencyClaim.key === idempotencyKey
           ? idempotencyClaim
           : null;
+        // Once the business operation has produced a result, a cache write failure
+        // must not release the claim and permit an immediate duplicate side effect.
+        if (activeClaim) idempotencyResultProduced = true;
         await effectiveIdempotencyStore.remember(
           scope,
           idempotencyKey,
@@ -1401,7 +1405,8 @@ export function createServer({
         requestId
       });
     } finally {
-      if (idempotencyClaim && typeof effectiveIdempotencyStore.release === "function") {
+      if (idempotencyClaim && !idempotencyResultProduced &&
+          typeof effectiveIdempotencyStore.release === "function") {
         try {
           await effectiveIdempotencyStore.release(
             idempotencyClaim.scope,
