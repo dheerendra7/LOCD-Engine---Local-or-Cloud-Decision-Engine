@@ -94,6 +94,51 @@ test("coordinated consumer validates backend configuration", () => {
   );
 });
 
+test("coordinated rate limiter rejects fractional and unsafe limits", () => {
+  const store = createInMemoryCoordinationStore();
+  for (const maxRequests of [1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(
+      () => createCoordinatedFixedWindowRateLimiter({ store, maxRequests }),
+      /safe integer/
+    );
+  }
+  for (const windowMs of [1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(
+      () => createCoordinatedFixedWindowRateLimiter({ store, windowMs }),
+      /safe integer/
+    );
+  }
+});
+
+test("coordinated rate limiter rejects invalid clock inputs before incrementing", async () => {
+  const base = createInMemoryCoordinationStore();
+  let incrementCalls = 0;
+  const store = {
+    ...base,
+    incr: async (...args) => {
+      incrementCalls++;
+      return base.incr(...args);
+    }
+  };
+  const limiter = createCoordinatedFixedWindowRateLimiter({
+    store,
+    maxRequests: 1,
+    windowMs: 1000,
+    namespace: "invalid-clock"
+  });
+
+  for (const now of [Number.NaN, Number.POSITIVE_INFINITY, -1, 1.5, Number.MAX_SAFE_INTEGER]) {
+    await assert.rejects(
+      () => limiter.consume("client", now),
+      /now must be a non-negative safe integer and allow a safe window deadline/
+    );
+  }
+
+  assert.equal(incrementCalls, 0);
+  assert.equal((await limiter.consume("client", 100)).allowed, true);
+  assert.equal(incrementCalls, 1);
+});
+
 
 test("coordinated idempotency releases claims only for their owner", async () => {
   const store = createInMemoryCoordinationStore();

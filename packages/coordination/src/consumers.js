@@ -19,11 +19,11 @@ export function createCoordinatedFixedWindowRateLimiter({
   const limit = Number(maxRequests);
   const window = Number(windowMs);
 
-  if (!Number.isFinite(limit) || limit < 0) {
-    throw new Error("maxRequests must be >= 0");
+  if (!Number.isSafeInteger(limit) || limit < 0) {
+    throw new Error("maxRequests must be >= 0 and a safe integer");
   }
-  if (!Number.isFinite(window) || window < 1) {
-    throw new Error("windowMs must be >= 1");
+  if (!Number.isSafeInteger(window) || window < 1) {
+    throw new Error("windowMs must be >= 1 and a safe integer");
   }
 
   return {
@@ -37,6 +37,11 @@ export function createCoordinatedFixedWindowRateLimiter({
           remaining: Infinity,
           resetAt: null
         };
+      }
+
+      if (!Number.isSafeInteger(now) || now < 0 ||
+          now > Number.MAX_SAFE_INTEGER - window) {
+        throw new Error("now must be a non-negative safe integer and allow a safe window deadline");
       }
 
       const bucketStart = Math.floor(now / window) * window;

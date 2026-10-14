@@ -47,5 +47,23 @@ test("trusted proxy mode uses first forwarded address", () => {
 
 test("invalid limiter configuration fails clearly", () => {
   assert.throws(() => createRateLimiter({ maxRequests: -1 }), /maxRequests must be >= 0/);
+  assert.throws(() => createRateLimiter({ maxRequests: 1.5 }), /safe integer/);
+  assert.throws(() => createRateLimiter({ maxRequests: Number.MAX_SAFE_INTEGER + 1 }), /safe integer/);
   assert.throws(() => createRateLimiter({ windowMs: 0 }), /windowMs must be >= 1/);
+  assert.throws(() => createRateLimiter({ windowMs: 1.5 }), /safe integer/);
+  assert.throws(() => createRateLimiter({ windowMs: Number.MAX_SAFE_INTEGER + 1 }), /safe integer/);
+});
+
+test("invalid clock inputs are rejected before mutating rate-limit state", () => {
+  const limiter = createRateLimiter({ maxRequests: 1, windowMs: 1000 });
+
+  for (const now of [Number.NaN, Number.POSITIVE_INFINITY, -1, 1.5, Number.MAX_SAFE_INTEGER]) {
+    assert.throws(
+      () => limiter.consume("client", now),
+      /now must be a non-negative safe integer and allow a safe window deadline/
+    );
+  }
+
+  assert.equal(limiter.size(), 0);
+  assert.equal(limiter.consume("client", 100).allowed, true);
 });

@@ -2,11 +2,11 @@ export function createRateLimiter({ maxRequests = 0, windowMs = 60_000 } = {}) {
   const limit = Number(maxRequests);
   const window = Number(windowMs);
 
-  if (!Number.isFinite(limit) || limit < 0) {
-    throw new Error("maxRequests must be >= 0");
+  if (!Number.isSafeInteger(limit) || limit < 0) {
+    throw new Error("maxRequests must be >= 0 and a safe integer");
   }
-  if (!Number.isFinite(window) || window < 1) {
-    throw new Error("windowMs must be >= 1");
+  if (!Number.isSafeInteger(window) || window < 1) {
+    throw new Error("windowMs must be >= 1 and a safe integer");
   }
 
   const entries = new Map();
@@ -28,6 +28,11 @@ export function createRateLimiter({ maxRequests = 0, windowMs = 60_000 } = {}) {
           remaining: Infinity,
           resetAt: null
         };
+      }
+
+      if (!Number.isSafeInteger(now) || now < 0 ||
+          now > Number.MAX_SAFE_INTEGER - window) {
+        throw new Error("now must be a non-negative safe integer and allow a safe window deadline");
       }
 
       purge(now);
