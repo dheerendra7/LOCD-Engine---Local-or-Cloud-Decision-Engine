@@ -80,6 +80,14 @@ test("non-matching policy rules do not mutate resolved policy", () => {
 });
 
 test("resolvePolicy rejects invalid root policy controls", () => {
+  assert.equal(
+    resolvePolicy({ profile: "privacyFirst", sensitiveDataMode: null }).sensitiveDataMode,
+    "private-only"
+  );
+  assert.deepEqual(
+    resolvePolicy({ profile: "privacyFirst", allowedModes: null }).allowedModes,
+    ["local", "private", "cloud", "hybrid"]
+  );
   assert.throws(
     () => resolvePolicy({ sensitiveDataMode: "cloud-only" }),
     /policy.sensitiveDataMode must be one of/
