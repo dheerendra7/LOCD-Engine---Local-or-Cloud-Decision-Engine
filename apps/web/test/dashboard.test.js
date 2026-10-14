@@ -107,3 +107,10 @@ test("decision and target actions guard duplicate submissions and validate numer
   assert.match(script, /portalFetch\("\/v1\/targets", portalJsonOptions\(payload\)\)/);
   assert.match(script, /readNumber\("targetCapacity", "Capacity score", \{ min: 0, max: 1 \}\)/);
 });
+
+
+test("dry-run UI documents the API execute-scope requirement", async () => {
+  const html = await readFile(new URL("index.html", webRoot), "utf8");
+  assert.match(html, /key must include the <code>execute<\/code> scope/);
+  assert.match(html, /sends <code>mode: "dry-run"<\/code> only/);
+});
