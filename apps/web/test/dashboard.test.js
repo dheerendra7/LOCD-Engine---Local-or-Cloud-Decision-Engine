@@ -326,3 +326,67 @@ test("API transport converts authentication, scope, registry, and rate-limit err
     /workload\.type is required/
   );
 });
+
+test("API keys are applied explicitly and access changes reset tenant-scoped UI state", async () => {
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  const headersMatch = script.match(/function apiHeaders\(\) \{[\s\S]*?\n\}/);
+  assert.ok(headersMatch, "API headers helper should exist");
+  const createHeaders = new Function("initialKey", "let activeApiKey = initialKey;" +
+    headersMatch[0] +
+    "; return { get: apiHeaders, set(key) { activeApiKey = key; } };");
+  const headers = createHeaders("");
+  assert.deepEqual(headers.get(), {});
+  headers.set("tenant-a-key");
+  assert.deepEqual(headers.get(), { authorization: "Bearer tenant-a-key" });
+  headers.set("");
+  assert.deepEqual(headers.get(), {});
+
+  assert.match(script, /let apiAccessRevision = 0/);
+  assert.match(script, /function resetTenantScopedView\(\)/);
+  assert.match(script, /lastPolicyCatalogFingerprint = null/);
+  assert.match(script, /invalidateHybridPlan\(\)/);
+  assert.match(script, /activityBody\.innerHTML = .*Loading decision history/);
+  assert.match(script, /setText\("decisionCount", "—"\)/);
+  assert.match(script, /setText\("outcomeDecisionId"/);
+  assert.match(script, /activeApiKey = nextApiKey/);
+  assert.match(script, /apiAccessRevision \+= 1/);
+  assert.doesNotMatch(script, /querySelector\("#apiKey"\)\.addEventListener\("change", refreshAll\)/);
+});
+
+test("in-flight API refreshes and mutations ignore responses from a previous access context", async () => {
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  const guardedRefreshes = [
+    "refreshTargets", "refreshPolicies", "refreshMetrics", "refreshStatus",
+    "refreshActivity", "refreshCalibration", "refreshHealth", "refreshReadiness"
+  ];
+  for (const name of guardedRefreshes) {
+    const start = script.indexOf("async function " + name + "()");
+    assert.ok(start >= 0, "missing refresh function: " + name);
+    const nextAsync = script.indexOf("\nasync function ", start + 10);
+    const nextFunction = script.indexOf("\nfunction ", start + 10);
+    const nextDocument = script.indexOf("\ndocument.", start + 10);
+    const endings = [nextAsync, nextFunction, nextDocument].filter(index => index >= 0);
+    const end = endings.length ? Math.min(...endings) : script.length;
+    const block = script.slice(start, end);
+    assert.match(block, /const accessRevision = apiAccessRevision/);
+    assert.match(block, /accessRevision !== apiAccessRevision/);
+  }
+
+  assert.match(script, /await Promise\.allSettled\(tasks\);[\s\S]*?accessRevision === apiAccessRevision && button/);
+  assert.match(script, /async function portalFetch[\s\S]*?throw new Error\(message\)/);
+  for (const marker of [
+    'document.querySelector("#decide").addEventListener',
+    'document.querySelector("#registerTarget").addEventListener',
+    'document.querySelector("#simulatePolicy").addEventListener',
+    'document.querySelector("#outcomeForm")?.addEventListener',
+    'document.querySelector("#planHybrid")?.addEventListener',
+    'document.querySelector("#executeDryRun")?.addEventListener'
+  ]) {
+    const start = script.indexOf(marker);
+    assert.ok(start >= 0, "missing mutation handler: " + marker);
+    const end = script.indexOf("\n});", start);
+    const block = script.slice(start, end >= 0 ? end : start + 5000);
+    assert.match(block, /const accessRevision = apiAccessRevision/);
+    assert.match(block, /accessRevision !== apiAccessRevision/);
+  }
+});
