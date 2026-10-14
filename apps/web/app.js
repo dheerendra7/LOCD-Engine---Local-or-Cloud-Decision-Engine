@@ -550,6 +550,7 @@ function renderTargets(targets) {
 
   root.querySelectorAll("button[data-action]").forEach(button => {
     button.addEventListener("click", async () => {
+      const accessRevision = apiAccessRevision;
       const id = button.dataset.id;
       const action = button.dataset.action;
       button.disabled = true;
@@ -557,14 +558,17 @@ function renderTargets(targets) {
         if (action === "delete") {
           if (!confirm("Remove target '" + id + "' from this tenant's registry?")) return;
           await portalFetch("/v1/targets/" + encodeURIComponent(id), { method: "DELETE" });
+          if (accessRevision !== apiAccessRevision) return;
           toast("Target removed from the registry.");
         } else {
           await portalFetch("/v1/targets/" + encodeURIComponent(id) + "/probe",
             portalJsonOptions({}));
+          if (accessRevision !== apiAccessRevision) return;
           toast("Probe request completed.");
         }
         await refreshAll();
       } catch (error) {
+        if (accessRevision !== apiAccessRevision) return;
         toast(niceError(error), true);
         setText("targetStatus", niceError(error));
       } finally {
@@ -1073,6 +1077,7 @@ document.querySelector("#policyForm")?.addEventListener("submit", async event =>
     if (status) status.textContent = "Policy saved. Reloading catalog…";
     toast("Custom policy saved.");
     await refreshPolicies();
+    if (accessRevision !== apiAccessRevision) return;
     if (status) status.textContent = "Saved successfully. Review its version in the policy catalog.";
   } catch (error) {
     if (accessRevision !== apiAccessRevision) return;
