@@ -887,13 +887,13 @@ document.querySelector("#policyCards")?.addEventListener("click", async event =>
   const id = button.dataset.id;
   const action = button.dataset.policyAction;
   if (action === "use") {
-    ["policyProfile", "simulationCurrentPolicy", "simulationCandidatePolicy", "hybridPolicyProfile"].forEach(key => {
+    ["policyProfile", "simulationCandidatePolicy", "hybridPolicyProfile"].forEach(key => {
       const select = document.querySelector("#" + key);
       if (select && [...select.options].some(option => option.value === id)) select.value = id;
     });
     const policyId = document.querySelector("#newPolicyId");
     if (policyId && !["balanced", "localFirst", "privacyFirst", "latencyFirst", "costFirst", "strictLocalSensitive"].includes(id)) policyId.value = id;
-    toast("Selected " + id + " in the available workbenches.");
+    toast("Selected " + id + " for the decision and hybrid labs and as the simulation candidate. The current baseline is unchanged.");
     return;
   }
   if (action === "history") {
