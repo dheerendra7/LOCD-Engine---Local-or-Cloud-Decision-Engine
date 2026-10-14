@@ -212,13 +212,7 @@
                   <label>Base profile<select id="newPolicyBase"><option value="balanced">Balanced</option><option value="localFirst">Local First</option><option value="privacyFirst">Privacy First</option><option value="latencyFirst">Latency First</option><option value="costFirst">Cost First</option><option value="strictLocalSensitive">Strict Local Sensitive</option></select></label>
                   <label>Description<input id="newPolicyDescription" placeholder="When this policy should be used"></label>
                   <label class="field-full">Weight overrides <span class="help-text">JSON object; omit any weight you do not want to override.</span>
-                    <textarea id="newPolicyWeights" spellcheck="false">{
-  "privacy": 0.30,
-  "latency": 0.25,
-  "cost": 0.20,
-  "capacity": 0.10,
-  "reliability": 0.15
-}</textarea>
+                    <textarea id="newPolicyWeights" spellcheck="false">{}</textarea>
                   </label>
                   <label class="field-full">Policy rules <span class="help-text">JSON array. Rules may conditionally set sensitiveDataMode, weights, allowed/blocked modes, regions, or heartbeat age.</span>
                     <textarea id="newPolicyRules" spellcheck="false">[]</textarea>
