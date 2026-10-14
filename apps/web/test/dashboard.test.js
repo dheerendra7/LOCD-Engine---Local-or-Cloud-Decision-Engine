@@ -169,7 +169,7 @@ test("system access help documents each API operation scope", async () => {
   for (const scope of ["read", "decide", "targets", "telemetry", "execute", "admin"]) {
     assert.match(html, new RegExp("<code>" + scope + "</code>"), "missing API scope guidance: " + scope);
   }
-  assert.match(html, /Keys need <code>read<\/code> plus the scope for the action/);
+  assert.match(html, /Keys need <code>read<\/code> plus the matching action scope, or <code>admin<\/code>/);
 });
 
 test("refreshing a changed or unavailable policy catalog expires the previous hybrid plan", async () => {
