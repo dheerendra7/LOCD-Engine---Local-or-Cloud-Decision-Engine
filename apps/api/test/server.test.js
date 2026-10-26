@@ -1,7 +1,7 @@
 import http from "node:http";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { checkReadiness, createConfiguredExecutionRegistry, createConfiguredProbeScheduler, createConfiguredTargetRegistry, createGracefulShutdown, createServer } from "../src/server.js";
+import { checkReadiness, readBody, createConfiguredExecutionRegistry, createConfiguredProbeScheduler, createConfiguredTargetRegistry, createGracefulShutdown, createServer } from "../src/server.js";
 import { createDecisionStore, createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { createCalibrator } from "../../../packages/calibration/src/index.js";
 import { createPolicyStore } from "../../../packages/policy-store/src/index.js";
