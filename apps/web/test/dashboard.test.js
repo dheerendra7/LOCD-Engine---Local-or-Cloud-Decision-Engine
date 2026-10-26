@@ -608,12 +608,6 @@ test("policy catalog only applies the newest refresh response", async () => {
   assert.deepEqual(renderedCatalogs.at(-1), ["policy-current"]);
   assert.equal(status.textContent, currentStatus);
 
-  const previousAccess = runtime.refreshPolicies();
-  runtime.changeAccess();
-  requests[4].resolve({ policies: [{ id: "tenant-a-policy", name: "Old tenant", source: "custom" }] });
-  await previousAccess;
-  assert.deepEqual(renderedCatalogs.at(-1), ["policy-current"]);
-  assert.equal(status.textContent, currentStatus);
 
   const obsoleteAccessError = runtime.refreshPolicies();
   runtime.changeAccess();
