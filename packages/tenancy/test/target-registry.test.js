@@ -54,7 +54,7 @@ test("tenant target file preserves per-tenant state", async () => {
 });
 
 test("queued target file saves observe mutations in call order", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir, "locd-target-save-race-"));
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-target-save-race-"));
   const file = path.join(dir, "targets.json");
 
   try {
