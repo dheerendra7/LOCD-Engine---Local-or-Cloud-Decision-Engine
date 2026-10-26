@@ -246,6 +246,17 @@ test("null utilization maps to the unknown calibration band", () => {
   });
 
   assert.equal(calibrator.get("gpu", "llm", null).utilizationBand, "unknown");
+  assert.equal(calibrator.get("gpu", "llm", " ").utilizationBand, "unknown");
+
+  calibrator.observe({
+    targetId: "gpu-blank",
+    workloadType: "llm",
+    utilization: " ",
+    estimatedLatencyMs: 100,
+    actualLatencyMs: 150,
+    outcome: "success"
+  });
+  assert.equal(calibrator.get("gpu-blank", "llm", " ").utilizationBand, "unknown");
 });
 
 test("calibration factors are isolated by tenant", () => {

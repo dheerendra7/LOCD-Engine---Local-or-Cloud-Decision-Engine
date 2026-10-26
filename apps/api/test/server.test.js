@@ -1,7 +1,7 @@
 import http from "node:http";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { checkReadiness, createConfiguredExecutionRegistry, createConfiguredProbeScheduler, createConfiguredTargetRegistry, createGracefulShutdown, createServer } from "../src/server.js";
+import { checkReadiness, readBody, createConfiguredExecutionRegistry, createConfiguredProbeScheduler, createConfiguredTargetRegistry, createGracefulShutdown, createServer } from "../src/server.js";
 import { createDecisionStore, createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { createCalibrator } from "../../../packages/calibration/src/index.js";
 import { createPolicyStore } from "../../../packages/policy-store/src/index.js";
@@ -107,6 +107,14 @@ test("graceful shutdown rejects an invalid timeout", () => {
 
 test("HTTP server rejects invalid resource guard configuration", () => {
   assert.throws(
+    () => createServer({ trustProxy: true, trustedProxyHops: 0 }),
+    /trustedProxyHops must be a positive safe integer when trustProxy is enabled/
+  );
+  assert.throws(
+    () => createServer({ trustProxy: true, trustedProxyHops: 1.5 }),
+    /trustedProxyHops must be a positive safe integer when trustProxy is enabled/
+  );
+  assert.throws(
     () => createServer({ requestTimeoutMs: 0 }),
     /requestTimeoutMs must be >= 1/
   );
@@ -163,7 +171,7 @@ test("readBody enforces the limit across streamed chunks", async () => {
 
 test("API replaces unsafe caller request IDs with a generated ID", async () => {
   const response = await fetch(baseUrl + "/health", {
-    headers: { "x-request-id": "trace\nforged" }
+    headers: { "x-request-id": "trace id forged" }
   });
 
   assert.equal(response.status, 200);
@@ -235,11 +243,9 @@ test("readiness probe reports dependency health", async () => {
 });
 
 test("ready endpoint returns 503 when a dependency is unavailable", async () => {
-  const degradedServer = createServer({
-    decisionStore: {
-      summary: async () => { throw new Error("telemetry unavailable"); }
-    }
-  });
+  const decisionStore = createDecisionStore({ maxEntries: 20 });
+  decisionStore.summary = async () => { throw new Error("telemetry unavailable"); };
+  const degradedServer = createServer({ decisionStore });
 
   await new Promise(resolve => degradedServer.listen(0, "127.0.0.1", resolve));
   const address = degradedServer.address();
@@ -452,7 +458,7 @@ test("unexpected dependency failures return a generic 500 without leaking intern
     const body = await response.json();
     assert.equal(body.error, "internal_server_error");
     assert.equal(body.requestId, "error-contract-test");
-    assert.equal("database credential leaked in internal failure" in JSON.stringify(body), false);
+    assert.equal(JSON.stringify(body).includes("database credential leaked in internal failure"), false);
   } finally {
     await new Promise(resolve => failingServer.close(resolve));
   }
@@ -2362,7 +2368,13 @@ test("readiness endpoint reports public service readiness", async () => {
   assert.deepEqual(await response.json(), {
     status: "ready",
     service: "locd-api",
-    version: "0.1.0"
+    version: "0.1.0",
+    checks: {
+      telemetry: "ok",
+      targets: "ok",
+      policies: "ok",
+      coordination: "not_configured"
+    }
   });
 });
 
@@ -3255,9 +3267,94 @@ test("concurrent identical idempotency keys reject the in-progress duplicate", a
   }
 });
 
+test("cache-write failure preserves an idempotency claim after the operation mutates state", async () => {
+  const targetRegistry = createTargetRegistry();
+  const originalRegister = targetRegistry.register.bind(targetRegistry);
+  let registerCalls = 0;
+  targetRegistry.register = (...args) => {
+    registerCalls++;
+    return originalRegister(...args);
+  };
+
+  let claimed = false;
+  let releaseCalls = 0;
+  const idempotencyStore = {
+    async claim() {
+      if (claimed) return { claimed: false, reason: "in_progress" };
+      claimed = true;
+      return { claimed: true, claimToken: "claim-token" };
+    },
+    async remember() {
+      throw new Error("simulated idempotency cache write failure");
+    },
+    async release() {
+      releaseCalls++;
+      claimed = false;
+      return true;
+    }
+  };
+  const scopedServer = createServer({ targetRegistry, idempotencyStore });
+  await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + scopedServer.address().port;
+  const request = () => fetch(url + "/v1/targets", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": "target-create-cache-failure"
+    },
+    body: JSON.stringify({
+      id: "cache-failure-target",
+      mode: "local",
+      available: true,
+      capabilities: ["text-generation"],
+      regions: ["local"]
+    })
+  });
+
+  try {
+    const first = await request();
+    assert.equal(first.status, 500);
+    const second = await request();
+    assert.equal(second.status, 409);
+    assert.deepEqual(await second.json(), { error: "idempotency_request_in_progress" });
+    assert.equal(registerCalls, 1);
+    assert.equal(releaseCalls, 0);
+  } finally {
+    await new Promise(resolve => scopedServer.close(resolve));
+  }
+});
+
 test("invalid idempotency lock TTL fails at server creation", () => {
   assert.throws(
     () => createServer({ idempotencyLockTtlMs: 0 }),
     /idempotencyLockTtlMs must be >= 1/
   );
+});
+
+
+test("failed idempotent operations release claims for immediate shared-store retry", async () => {
+  const scopedServer = createServer({
+    targetRegistry: createTargetRegistry(),
+    coordinationStore: createInMemoryCoordinationStore()
+  });
+  await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + scopedServer.address().port;
+  const request = () => fetch(url + "/v1/targets/idempotency-missing-target/probe", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": "failed-probe-retry"
+    },
+    body: "{}"
+  });
+
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await request();
+      assert.equal(response.status, 404);
+      assert.deepEqual(await response.json(), { error: "target_not_found" });
+    }
+  } finally {
+    await new Promise(resolve => scopedServer.close(resolve));
+  }
 });

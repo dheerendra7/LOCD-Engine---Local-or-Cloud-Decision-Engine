@@ -1,7 +1,11 @@
 const UNITS = new Set(["flat", "per-request", "per-1k-tokens"]);
 
+function missingValue(value) {
+  return value == null || (typeof value === "string" && value.trim() === "");
+}
+
 function finite(value) {
-  if (value == null || value === "") return null;
+  if (missingValue(value)) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -13,6 +17,9 @@ function nonNegative(value, field) {
 }
 
 function positiveIntegerOrZero(value, field) {
+  if (typeof value === "string" && value.trim() === "") {
+    throw new Error(field + " must be a non-negative integer");
+  }
   const number = Number(value ?? 0);
   if (!Number.isInteger(number) || number < 0) {
     throw new Error(field + " must be a non-negative integer");
@@ -35,6 +42,17 @@ function normalizePricing(pricing = {}) {
     throw new Error("only USD pricing is supported in V1");
   }
 
+  const requiredFields = {
+    flat: ["flatUsd"],
+    "per-request": ["requestUsd"],
+    "per-1k-tokens": ["inputUsdPer1kTokens", "outputUsdPer1kTokens"]
+  }[unit];
+  for (const field of requiredFields) {
+    if (missingValue(pricing[field])) {
+      throw new Error("target.pricing." + field + " is required for " + unit + " pricing");
+    }
+  }
+
   return {
     unit,
     currency,
@@ -50,6 +68,14 @@ function normalizePricing(pricing = {}) {
 }
 
 export function estimateWorkloadCost({ workload = {}, target = {} } = {}) {
+  // Validate supplied usage values even when the selected pricing unit does not
+  // consume them. Missing token counts remain valid for flat/per-request pricing.
+  const inputTokens = missingValue(workload.inputTokens)
+    ? null
+    : positiveIntegerOrZero(workload.inputTokens, "workload.inputTokens");
+  const outputTokens = missingValue(workload.outputTokens)
+    ? null
+    : positiveIntegerOrZero(workload.outputTokens, "workload.outputTokens");
   const explicit = finite(target.estimatedCostUsd);
   if (explicit != null && explicit >= 0) {
     return {
@@ -68,9 +94,6 @@ export function estimateWorkloadCost({ workload = {}, target = {} } = {}) {
   }
 
   const pricing = normalizePricing(target.pricing);
-  const requests = positiveIntegerOrZero(workload.requests ?? 1, "workload.requests");
-  const inputTokens = positiveIntegerOrZero(workload.inputTokens ?? 0, "workload.inputTokens");
-  const outputTokens = positiveIntegerOrZero(workload.outputTokens ?? 0, "workload.outputTokens");
 
   if (pricing.unit === "flat") {
     return {
@@ -81,10 +104,22 @@ export function estimateWorkloadCost({ workload = {}, target = {} } = {}) {
   }
 
   if (pricing.unit === "per-request") {
+    const requests = positiveIntegerOrZero(workload.requests ?? 1, "workload.requests");
     return {
       costUsd: Number((pricing.requestUsd * requests).toFixed(6)),
       source: "pricing",
       reason: "per_request_pricing"
+    };
+  }
+
+  if (
+    missingValue(workload.inputTokens) ||
+    missingValue(workload.outputTokens)
+  ) {
+    return {
+      costUsd: null,
+      source: "unknown",
+      reason: "token_usage_missing"
     };
   }
 
@@ -104,7 +139,8 @@ export function applyCostEstimates(targets = [], workload = {}) {
 
   return targets.map(target => {
     const estimate = estimateWorkloadCost({ workload, target });
-    if (estimate.costUsd == null || target.estimatedCostUsd != null) {
+    const explicit = finite(target.estimatedCostUsd);
+    if (estimate.costUsd == null || (explicit != null && explicit >= 0)) {
       return structuredClone(target);
     }
 

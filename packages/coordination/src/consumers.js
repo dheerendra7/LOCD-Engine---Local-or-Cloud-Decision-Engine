@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { fingerprint } from "../../../packages/runtime/src/idempotency.js";
 import { assertCoordinationStore } from "./store.js";
 
@@ -18,11 +19,11 @@ export function createCoordinatedFixedWindowRateLimiter({
   const limit = Number(maxRequests);
   const window = Number(windowMs);
 
-  if (!Number.isFinite(limit) || limit < 0) {
-    throw new Error("maxRequests must be >= 0");
+  if (!Number.isSafeInteger(limit) || limit < 0) {
+    throw new Error("maxRequests must be >= 0 and a safe integer");
   }
-  if (!Number.isFinite(window) || window < 1) {
-    throw new Error("windowMs must be >= 1");
+  if (!Number.isSafeInteger(window) || window < 1) {
+    throw new Error("windowMs must be >= 1 and a safe integer");
   }
 
   return {
@@ -36,6 +37,11 @@ export function createCoordinatedFixedWindowRateLimiter({
           remaining: Infinity,
           resetAt: null
         };
+      }
+
+      if (!Number.isSafeInteger(now) || now < 0 ||
+          now > Number.MAX_SAFE_INTEGER - window) {
+        throw new Error("now must be a non-negative safe integer and allow a safe window deadline");
       }
 
       const bucketStart = Math.floor(now / window) * window;
@@ -66,6 +72,15 @@ export function createCoordinatedIdempotencyStore({
   namespace = "locd:idempotency"
 } = {}) {
   assertCoordinationStore(store);
+  const missingClaimOperations = ["deleteIfValue", "setIfValue"]
+    .filter(method => typeof store[method] !== "function");
+  if (missingClaimOperations.length) {
+    throw new Error(
+      "coordination store must implement " +
+      missingClaimOperations.map(method => method + "()").join(" and ") +
+      " for safe idempotency claims"
+    );
+  }
 
   if (!Number.isFinite(ttlMs) || ttlMs < 1) {
     throw new Error("ttlMs must be >= 1");
@@ -88,55 +103,97 @@ export function createCoordinatedIdempotencyStore({
     if (existing.fingerprint !== current) {
       throw new Error("idempotency_key_reused");
     }
+    if (existing.processing) return null;
 
-    return {
+    return structuredClone({
       ...existing.response,
       replayed: true
-    };
+    });
   }
 
-  async function remember(scope, key, body, response) {
-    if (!key) return;
+  async function remember(scope, key, body, response, claimToken = null) {
+    if (!key) return false;
 
-    await store.set(storageKey(scope, key), {
-      fingerprint: fingerprint(body),
-      response: { ...response, replayed: false },
+    const storedKey = storageKey(scope, key);
+    const currentFingerprint = fingerprint(body);
+    const completed = {
+      fingerprint: currentFingerprint,
+      response: structuredClone({ ...response, replayed: false }),
       storedAt: new Date().toISOString()
-    }, { ttlMs });
+    };
+
+    if (claimToken) {
+      if (typeof store.setIfValue !== "function") return false;
+      const existing = await store.get(storedKey);
+      if (!existing) {
+        // The lease expired without a replacement claim; setIfAbsent fences
+        // a new owner racing this late response.
+        return store.setIfAbsent(storedKey, completed, { ttlMs });
+      }
+      if (!existing.processing || existing.claimToken !== claimToken ||
+          existing.fingerprint !== currentFingerprint) return false;
+      return store.setIfValue(storedKey, existing, completed, { ttlMs });
+    }
+
+    await store.set(storedKey, completed, { ttlMs });
+    return true;
   }
 
   async function claim(scope, key, body, lockTtlMs = 30_000) {
     if (!key) return { claimed: false, reason: "no_key" };
+    if (!Number.isFinite(lockTtlMs) || lockTtlMs < 1) {
+      throw new Error("idempotency_lock_ttl_invalid");
+    }
 
     const storedKey = storageKey(scope, key);
     const value = {
       fingerprint: fingerprint(body),
+      claimToken: randomUUID(),
       response: null,
       processing: true,
       storedAt: new Date().toISOString()
     };
 
-    const claimed = await store.setIfAbsent(storedKey, value, {
-      ttlMs: lockTtlMs
-    });
+    // A competing request may expire/delete the value after setIfAbsent
+    // returns false but before get() reads it. Retry atomically rather than
+    // misreporting that harmless race as a reused key with a different body.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const claimed = await store.setIfAbsent(storedKey, value, {
+        ttlMs: lockTtlMs
+      });
+      if (claimed) return { claimed: true, claimToken: value.claimToken };
 
-    if (claimed) return { claimed: true };
+      const existing = await store.get(storedKey);
+      if (!existing) continue;
 
-    const existing = await store.get(storedKey);
-    if (existing?.fingerprint !== value.fingerprint) {
-      throw new Error("idempotency_key_reused");
+      if (existing.fingerprint !== value.fingerprint) {
+        throw new Error("idempotency_key_reused");
+      }
+
+      if (existing.processing) {
+        return { claimed: false, reason: "in_progress" };
+      }
+
+      return {
+        claimed: false,
+        reason: "completed",
+        response: structuredClone(existing.response)
+      };
     }
 
-    if (existing?.processing) {
-      return { claimed: false, reason: "in_progress" };
-    }
-
-    return { claimed: false, reason: "completed", response: existing.response };
+    // Fail closed: a continuously disappearing claim must never be treated
+    // as permission to execute the operation without an idempotency claim.
+    return { claimed: false, reason: "in_progress" };
   }
 
-  return {
-    lookup,
-    remember,
-    claim
-  };
+  async function release(scope, key, body, claimToken) {
+    if (!key || !claimToken || typeof store.deleteIfValue !== "function") return false;
+    const storedKey = storageKey(scope, key);
+    const existing = await store.get(storedKey);
+    if (!existing || !existing.processing || existing.claimToken !== claimToken ||
+        existing.fingerprint !== fingerprint(body)) return false;
+    return store.deleteIfValue(storedKey, existing);
+  }
+
+  return { lookup, remember, claim, release };
 }

@@ -31,6 +31,12 @@ function authHeaders(apiKey) {
   return apiKey ? { authorization: "Bearer " + apiKey } : {};
 }
 
+function optionalNonNegative(value) {
+  if (value == null || (typeof value === "string" && value.trim() === "")) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
 function timeoutSignal(timeoutMs) {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return { signal: undefined, cancel: () => {} };
 
@@ -42,21 +48,27 @@ function timeoutSignal(timeoutMs) {
   };
 }
 
+function finiteOrFallback(value, fallback) {
+  if (value == null || (typeof value === "string" && value.trim() === "")) return fallback;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : fallback;
+}
+
 function normalizeSnapshot(snapshot) {
   return {
     id: snapshot.id,
     mode: snapshot.mode,
     available: snapshot.available !== false,
-    health: Number.isFinite(Number(snapshot.health)) ? Math.min(1, Math.max(0, Number(snapshot.health))) : 0,
-    capacity: Number.isFinite(Number(snapshot.capacity)) ? Math.min(1, Math.max(0, Number(snapshot.capacity))) : 1,
-    privacy: Number.isFinite(Number(snapshot.privacy)) ? Math.min(1, Math.max(0, Number(snapshot.privacy))) : 0,
-    estimatedLatencyMs: Number.isFinite(Number(snapshot.estimatedLatencyMs)) ? Math.max(0, Number(snapshot.estimatedLatencyMs)) : null,
-    estimatedCostUsd: Number.isFinite(Number(snapshot.estimatedCostUsd)) ? Math.max(0, Number(snapshot.estimatedCostUsd)) : null,
+    health: Math.min(1, Math.max(0, finiteOrFallback(snapshot.health, 0))),
+    capacity: Math.min(1, Math.max(0, finiteOrFallback(snapshot.capacity, 1))),
+    privacy: Math.min(1, Math.max(0, finiteOrFallback(snapshot.privacy, 0))),
+    estimatedLatencyMs: optionalNonNegative(snapshot.estimatedLatencyMs),
+    estimatedCostUsd: optionalNonNegative(snapshot.estimatedCostUsd),
     pricing: snapshot.pricing && typeof snapshot.pricing === "object"
       ? structuredClone(snapshot.pricing)
       : null,
-    availableMemoryGb: Number.isFinite(Number(snapshot.availableMemoryGb)) ? Math.max(0, Number(snapshot.availableMemoryGb)) : null,
-    maxContextTokens: Number.isFinite(Number(snapshot.maxContextTokens)) ? Math.max(0, Number(snapshot.maxContextTokens)) : null,
+    availableMemoryGb: optionalNonNegative(snapshot.availableMemoryGb),
+    maxContextTokens: optionalNonNegative(snapshot.maxContextTokens),
     lastHeartbeatAt: snapshot.lastHeartbeatAt ? new Date(snapshot.lastHeartbeatAt).toISOString() : null,
     errorClass: snapshot.errorClass ? String(snapshot.errorClass) : null,
     regions: Array.isArray(snapshot.regions) ? [...new Set(snapshot.regions.map(String))] : [],
@@ -85,6 +97,9 @@ export function createOpenAICompatibleAdapter({
   if (!targetId) throw new Error("targetId is required");
   if (!MODES.has(mode)) throw new Error("mode must be local, private, cloud or hybrid");
   if (typeof fetchImpl !== "function") throw new Error("fetch implementation is required");
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("timeoutMs must be a positive finite number");
+  }
 
   const url = assertSafeBaseUrl(baseUrl, { allowInsecureHttp });
   let snapshot = normalizeSnapshot({

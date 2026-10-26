@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 function sortValue(value) {
   if (Array.isArray(value)) return value.map(sortValue);
@@ -8,7 +8,7 @@ function sortValue(value) {
       .reduce((out, key) => {
         out[key] = sortValue(value[key]);
         return out;
-      }, {});
+      }, Object.create(null));
   }
   return value;
 }
@@ -16,6 +16,12 @@ function sortValue(value) {
 export function fingerprint(value) {
   const normalized = JSON.stringify(sortValue(value));
   return createHash("sha256").update(normalized).digest("hex");
+}
+
+function scopedEntryKey(scope, key) {
+  // Encode the scope and key as separate tuple members so delimiters inside
+  // either value cannot make distinct scopes collide.
+  return JSON.stringify([String(scope), key]);
 }
 
 export function createIdempotencyStore({
@@ -52,7 +58,7 @@ export function createIdempotencyStore({
         throw new Error("idempotency_key_invalid");
       }
 
-      const composite = String(scope) + ":" + normalizedKey;
+      const composite = scopedEntryKey(scope, normalizedKey);
       const existing = entries.get(composite);
       if (!existing) return null;
 
@@ -60,12 +66,13 @@ export function createIdempotencyStore({
       if (existing.fingerprint !== currentFingerprint) {
         throw new Error("idempotency_key_reused");
       }
+      if (existing.processing) return null;
 
-      return { ...existing.response, replayed: true };
+      return structuredClone({ ...existing.response, replayed: true });
     },
 
-    remember(scope, key, body, response) {
-      if (!key) return;
+    remember(scope, key, body, response, claimToken = null) {
+      if (!key) return false;
       purge();
 
       const normalizedKey = String(key).trim();
@@ -74,14 +81,26 @@ export function createIdempotencyStore({
       }
 
       const now = clock();
-      const composite = String(scope) + ":" + normalizedKey;
-      entries.set(composite, {
-        fingerprint: fingerprint(body),
-        response: { ...response, replayed: false },
+      const composite = scopedEntryKey(scope, normalizedKey);
+      const currentFingerprint = fingerprint(body);
+      const completed = {
+        fingerprint: currentFingerprint,
+        response: structuredClone({ ...response, replayed: false }),
         createdAt: now,
         expiresAt: now + ttlMs
-      });
+      };
+
+      if (claimToken) {
+        const existing = entries.get(composite);
+        if (existing && (!existing.processing || existing.claimToken !== claimToken ||
+            existing.fingerprint !== currentFingerprint)) return false;
+        // If the lease expired and no replacement claim exists, this synchronous
+        // insertion is safe: no other in-process request can interleave here.
+      }
+
+      entries.set(composite, completed);
       purge();
+      return true;
     },
 
     claim(scope, key, body, lockTtlMs = 30_000) {
@@ -96,7 +115,7 @@ export function createIdempotencyStore({
         throw new Error("idempotency_key_invalid");
       }
 
-      const composite = String(scope) + ":" + normalizedKey;
+      const composite = scopedEntryKey(scope, normalizedKey);
       const currentFingerprint = fingerprint(body);
       const existing = entries.get(composite);
 
@@ -112,20 +131,34 @@ export function createIdempotencyStore({
         return {
           claimed: false,
           reason: "completed",
-          response: { ...existing.response, replayed: true }
+          response: structuredClone({ ...existing.response, replayed: true })
         };
       }
 
       const now = clock();
+      const claimToken = randomUUID();
       entries.set(composite, {
         fingerprint: currentFingerprint,
+        claimToken,
         processing: true,
         response: null,
         createdAt: now,
         expiresAt: now + lockTtlMs
       });
 
-      return { claimed: true };
+      return { claimed: true, claimToken };
+    },
+
+    release(scope, key, body, claimToken) {
+      if (!key || !claimToken) return false;
+      purge();
+      const normalizedKey = String(key).trim();
+      if (!normalizedKey || normalizedKey.length > 256) throw new Error("idempotency_key_invalid");
+      const composite = scopedEntryKey(scope, normalizedKey);
+      const existing = entries.get(composite);
+      if (!existing || !existing.processing || existing.claimToken !== claimToken ||
+          existing.fingerprint !== fingerprint(body)) return false;
+      return entries.delete(composite);
     },
 
     size() {

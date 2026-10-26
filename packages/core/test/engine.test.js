@@ -645,6 +645,276 @@ test("negative token usage is rejected before candidate evaluation", () => {
   );
 });
 
+test("relative cost scoring prefers the cheaper eligible target when no budget is supplied", () => {
+  const result = decide({
+    workload: { type: "llm-inference", sensitivity: "low" },
+    targets: [
+      {
+        id: "a-expensive",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 100,
+        estimatedCostUsd: 0.2
+      },
+      {
+        id: "z-cheaper",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 100,
+        estimatedCostUsd: 0.05
+      }
+    ]
+  });
+
+  assert.equal(result.targetId, "z-cheaper");
+  assert.equal(result.evaluated.find(item => item.targetId === "z-cheaper").factors.cost, 1);
+  assert.equal(result.evaluated.find(item => item.targetId === "a-expensive").factors.cost, 0);
+  assert.ok(result.evaluated.find(item => item.targetId === "z-cheaper").score >
+    result.evaluated.find(item => item.targetId === "a-expensive").score);
+});
+
+test("relative cost scoring preserves budget-referenced factors when a budget is supplied", () => {
+  const result = decide({
+    workload: { type: "llm-inference", sensitivity: "low" },
+    constraints: { maxCostUsd: 0.2 },
+    targets: [
+      {
+        id: "cheap",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 100,
+        estimatedCostUsd: 0.05
+      },
+      {
+        id: "expensive",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 100,
+        estimatedCostUsd: 0.15
+      }
+    ]
+  });
+
+  const evaluated = Object.fromEntries(result.evaluated.map(item => [item.targetId, item]));
+  assert.equal(evaluated.cheap.factors.cost, 0.75);
+  assert.ok(Math.abs(evaluated.expensive.factors.cost - 0.25) < 1e-12);
+  assert.equal(result.targetId, "cheap");
+});
+
+test("relative cost scoring retains fallback factors when only one eligible target has a known price", () => {
+  const result = decide({
+    workload: { type: "batch", sensitivity: "low" },
+    targets: [
+      {
+        id: "known",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 100,
+        estimatedCostUsd: 0.05
+      },
+      {
+        id: "unknown",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 100
+      }
+    ]
+  });
+
+  const evaluated = Object.fromEntries(result.evaluated.map(item => [item.targetId, item]));
+  assert.equal(evaluated.known.factors.cost, 0.5);
+  assert.equal(evaluated.unknown.costEstimate.usd, null);
+  assert.equal(evaluated.unknown.factors.cost, 0);
+});
+
+test("relative cost scoring retains fallback factors when eligible targets have equal known prices", () => {
+  const result = decide({
+    workload: { type: "batch", sensitivity: "low" },
+    targets: [
+      {
+        id: "a",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 100,
+        estimatedCostUsd: 0.02
+      },
+      {
+        id: "b",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 100,
+        estimatedCostUsd: 0.02
+      }
+    ]
+  });
+
+  const evaluated = Object.fromEntries(result.evaluated.map(item => [item.targetId, item]));
+  assert.equal(evaluated.a.factors.cost, 0.5);
+  assert.equal(evaluated.b.factors.cost, 0.5);
+});
+
+test("relative cost normalization uses only eligible targets and ignores unknown estimates", () => {
+  const result = decide({
+    workload: { type: "batch", sensitivity: "low" },
+    targets: [
+      {
+        id: "eligible-cheap",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 100,
+        estimatedCostUsd: 0.05
+      },
+      {
+        id: "eligible-expensive",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 100,
+        estimatedCostUsd: 0.15
+      },
+      {
+        id: "unknown-price",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 100
+      },
+      {
+        id: "ineligible-cheapest",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 100,
+        estimatedCostUsd: 0,
+        available: false
+      }
+    ]
+  });
+
+  const evaluated = Object.fromEntries(result.evaluated.map(item => [item.targetId, item]));
+  assert.equal(evaluated["eligible-cheap"].factors.cost, 1);
+  assert.equal(evaluated["eligible-expensive"].factors.cost, 0);
+  assert.equal(evaluated["unknown-price"].costEstimate.usd, null);
+  assert.equal(evaluated["ineligible-cheapest"].eligible, false);
+  assert.equal(evaluated["ineligible-cheapest"].factors, null);
+});
+
+test("token-based pricing stays unknown when either token count is missing", () => {
+  const pricing = {
+    unit: "per-1k-tokens",
+    inputUsdPer1kTokens: 0.003,
+    outputUsdPer1kTokens: 0.012
+  };
+  const workloads = [
+    { type: "llm-inference", sensitivity: "low" },
+    { type: "llm-inference", sensitivity: "low", inputTokens: 1000 },
+    { type: "llm-inference", sensitivity: "low", outputTokens: 500 }
+  ];
+
+  for (const workload of workloads) {
+    const result = decide({
+      workload,
+      constraints: { strictCost: true, maxCostUsd: 0.05 },
+      targets: [{
+        id: "priced-cloud",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.2,
+        privacy: 0.5,
+        estimatedLatencyMs: 100,
+        pricing
+      }]
+    });
+
+    assert.equal(result.route, "none");
+    assert.equal(result.rejected[0].reasons.includes("cost_estimate_missing"), true);
+  }
+});
+
+test("explicitly zero token usage produces a valid zero token-based cost", () => {
+  const result = decide({
+    workload: {
+      type: "llm-inference",
+      sensitivity: "low",
+      inputTokens: 0,
+      outputTokens: 0
+    },
+    targets: [{
+      id: "zero-token-cloud",
+      mode: "cloud",
+      health: 1,
+      capacity: 0.2,
+      privacy: 0.5,
+      estimatedLatencyMs: 100,
+      pricing: {
+        unit: "per-1k-tokens",
+        inputUsdPer1kTokens: 0.003,
+        outputUsdPer1kTokens: 0.012
+      }
+    }]
+  });
+
+  assert.equal(result.estimated.costUsd, 0);
+  assert.equal(result.evaluated[0].costEstimate.source, "pricing");
+});
+
+test("flat pricing does not require token usage", () => {
+  const result = decide({
+    workload: { type: "batch", sensitivity: "low" },
+    targets: [{
+      id: "flat-cloud",
+      mode: "cloud",
+      health: 1,
+      capacity: 0.2,
+      privacy: 0.5,
+      estimatedLatencyMs: 100,
+      pricing: { unit: "flat", flatUsd: 0.003 }
+    }]
+  });
+
+  assert.equal(result.estimated.costUsd, 0.003);
+  assert.equal(result.evaluated[0].costEstimate.source, "pricing");
+});
+
+test("per-request pricing does not require token usage", () => {
+  const result = decide({
+    workload: { type: "batch", sensitivity: "low", requests: 3 },
+    targets: [{
+      id: "request-priced-cloud",
+      mode: "cloud",
+      health: 1,
+      capacity: 0.2,
+      privacy: 0.5,
+      estimatedLatencyMs: 100,
+      pricing: { unit: "per-request", requestUsd: 0.002 }
+    }]
+  });
+
+  assert.equal(result.estimated.costUsd, 0.006);
+  assert.equal(result.evaluated[0].costEstimate.source, "pricing");
+});
+
 test("pricing can make a target ineligible under a strict budget", () => {
   const result = decide({
     workload: {
@@ -673,4 +943,127 @@ test("pricing can make a target ineligible under a strict budget", () => {
 
   assert.equal(result.route, "none");
   assert.equal(result.rejected[0].reasons.includes("cost_budget_exceeded"), true);
+});
+
+
+test("blank token usage and target telemetry remain unknown rather than zero", () => {
+  const result = decide({
+    workload: {
+      type: "llm-inference",
+      sensitivity: "low",
+      inputTokens: " ",
+      outputTokens: " "
+    },
+    policy: { sensitiveDataMode: "balanced" },
+    targets: [{
+      id: "blank-target",
+      mode: "cloud",
+      available: true,
+      health: 1,
+      capacity: " ",
+      privacy: 0.5,
+      estimatedLatencyMs: " ",
+      estimatedCostUsd: null,
+      pricing: {
+        unit: "per-1k-tokens",
+        currency: "USD",
+        inputUsdPer1kTokens: 0.003,
+        outputUsdPer1kTokens: 0.012
+      }
+    }]
+  });
+
+  assert.equal(result.route, "cloud");
+  assert.equal(result.targetId, "blank-target");
+  assert.equal(result.estimated.latencyMs, null);
+  assert.equal(result.estimated.costUsd, null);
+});
+
+
+test("blank budget and freshness constraints are rejected instead of being disabled", () => {
+  assert.throws(
+    () => decide({
+      workload: { type: "batch", sensitivity: "low" },
+      constraints: { maxCostUsd: " ", strictCost: true },
+      targets: [{ id: "local", mode: "local", estimatedCostUsd: 0 }]
+    }),
+    /constraints.maxCostUsd must be >= 0/
+  );
+
+  assert.throws(
+    () => decide({
+      workload: { type: "batch", sensitivity: "low" },
+      policy: { maxHeartbeatAgeMs: " " },
+      targets: [{ id: "local", mode: "local", estimatedCostUsd: 0 }]
+    }),
+    /policy.maxHeartbeatAgeMs must be >= 0/
+  );
+});
+
+
+test("decision output uses validated pricing when explicit target cost is negative", () => {
+  const result = decide({
+    workload: {
+      type: "llm-inference",
+      sensitivity: "low",
+      inputTokens: 1000,
+      outputTokens: 500
+    },
+    targets: [{
+      id: "repaired-cost",
+      mode: "cloud",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 0.5,
+      estimatedLatencyMs: 100,
+      estimatedCostUsd: -1,
+      pricing: { unit: "flat", flatUsd: 0.04 }
+    }]
+  });
+
+  assert.equal(result.targetId, "repaired-cost");
+  assert.equal(result.estimated.costUsd, 0.04);
+  assert.equal(result.evaluated[0].costEstimate.usd, 0.04);
+});
+
+
+test("negative target latency cannot be returned as a valid latency estimate", () => {
+  const result = decide({
+    workload: { type: "batch", sensitivity: "low" },
+    constraints: { latencyBudgetMs: 500, strictLatency: true },
+    targets: [{
+      id: "negative-latency",
+      mode: "cloud",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 0.5,
+      estimatedLatencyMs: -10,
+      estimatedCostUsd: 0.01
+    }]
+  });
+
+  assert.equal(result.route, "none");
+  assert.equal(result.rejected[0].reasons.includes("latency_estimate_missing"), true);
+});
+
+
+test("negative capacity telemetry is rejected rather than rewarded as headroom", () => {
+  const result = decide({
+    workload: { type: "batch", sensitivity: "low" },
+    targets: [{
+      id: "negative-capacity",
+      mode: "local",
+      available: true,
+      health: 1,
+      capacity: -0.1,
+      privacy: 1,
+      estimatedLatencyMs: 20,
+      estimatedCostUsd: 0
+    }]
+  });
+
+  assert.equal(result.route, "none");
+  assert.equal(result.rejected[0].reasons.includes("invalid_capacity_telemetry"), true);
 });

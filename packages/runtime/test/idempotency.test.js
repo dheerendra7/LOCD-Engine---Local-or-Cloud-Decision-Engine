@@ -38,6 +38,25 @@ test("keys are scoped by endpoint", () => {
   );
 });
 
+test("scope and key delimiter characters cannot cause cross-scope replay", () => {
+  const store = createIdempotencyStore();
+  store.remember(
+    "scope:prefix",
+    "key",
+    { operation: "shared-body" },
+    { status: 200, body: { operation: "scope-A" } }
+  );
+
+  assert.equal(
+    store.lookup("scope", "prefix:key", { operation: "shared-body" }),
+    null
+  );
+  assert.deepEqual(
+    store.lookup("scope:prefix", "key", { operation: "shared-body" }),
+    { status: 200, body: { operation: "scope-A" }, replayed: true }
+  );
+});
+
 test("invalid keys fail closed", () => {
   const store = createIdempotencyStore();
   assert.throws(
@@ -61,10 +80,9 @@ test("history is bounded", () => {
 test("local idempotency claims prevent concurrent duplicate work", () => {
   const store = createIdempotencyStore();
 
-  assert.deepEqual(
-    store.claim("POST /v1/execute", "same-key", { x: 1 }),
-    { claimed: true }
-  );
+  const firstClaim = store.claim("POST /v1/execute", "same-key", { x: 1 });
+  assert.equal(firstClaim.claimed, true);
+  assert.equal(typeof firstClaim.claimToken, "string");
 
   assert.deepEqual(
     store.claim("POST /v1/execute", "same-key", { x: 1 }),
@@ -112,10 +130,7 @@ test("processing claims expire using their own lock TTL", () => {
     clock: () => now
   });
 
-  assert.deepEqual(
-    store.claim("scope", "key", { x: 1 }, 100),
-    { claimed: true }
-  );
+  assert.equal(store.claim("scope", "key", { x: 1 }, 100).claimed, true);
 
   now = 1050;
   assert.deepEqual(
@@ -124,10 +139,7 @@ test("processing claims expire using their own lock TTL", () => {
   );
 
   now = 1100;
-  assert.deepEqual(
-    store.claim("scope", "key", { x: 1 }, 100),
-    { claimed: true }
-  );
+  assert.equal(store.claim("scope", "key", { x: 1 }, 100).claimed, true);
 });
 
 test("completed responses keep the normal retention TTL", () => {
@@ -144,4 +156,125 @@ test("completed responses keep the normal retention TTL", () => {
 
   now = 1100;
   assert.equal(store.lookup("scope", "key", { x: 1 }), null);
+});
+
+
+test("fingerprints preserve JSON own properties named __proto__", () => {
+  const reader = JSON.parse('{"role":"reader","__proto__":{"admin":false}}');
+  const admin = JSON.parse('{"role":"reader","__proto__":{"admin":true}}');
+  assert.notEqual(fingerprint(reader), fingerprint(admin));
+  assert.equal(
+    fingerprint(reader),
+    fingerprint(JSON.parse('{"__proto__":{"admin":false},"role":"reader"}'))
+  );
+});
+
+test("idempotency rejects a different payload hidden behind __proto__", () => {
+  const store = createIdempotencyStore();
+  const reader = JSON.parse('{"role":"reader","__proto__":{"admin":false}}');
+  const admin = JSON.parse('{"role":"reader","__proto__":{"admin":true}}');
+  store.remember("POST /v1/execute", "proto-key", reader, { status: 200, body: { ok: true } });
+  assert.throws(
+    () => store.lookup("POST /v1/execute", "proto-key", admin),
+    /idempotency_key_reused/
+  );
+});
+
+
+test("cached idempotency responses cannot be mutated through caller-owned objects", () => {
+  const store = createIdempotencyStore();
+  const response = {
+    status: 200,
+    body: { result: { targetId: "safe" } }
+  };
+  store.remember("POST /v1/decide", "immutable-response", { x: 1 }, response);
+
+  response.body.result.targetId = "mutated-before-replay";
+  const firstReplay = store.lookup("POST /v1/decide", "immutable-response", { x: 1 });
+  assert.equal(firstReplay.body.result.targetId, "safe");
+
+  firstReplay.body.result.targetId = "mutated-after-replay";
+  const secondReplay = store.claim("POST /v1/decide", "immutable-response", { x: 1 });
+  assert.equal(secondReplay.response.body.result.targetId, "safe");
+});
+
+
+test("local idempotency releases only its own unfinished claim", () => {
+  const store = createIdempotencyStore();
+  const body = { payload: "same" };
+  const claim = store.claim("scope", "key", body);
+  assert.equal(claim.claimed, true);
+  assert.equal(store.release("scope", "key", body, claim.claimToken + "-wrong"), false);
+  assert.equal(store.claim("scope", "key", body).reason, "in_progress");
+  assert.equal(store.release("scope", "key", body, claim.claimToken), true);
+  const replacement = store.claim("scope", "key", body);
+  assert.equal(replacement.claimed, true);
+  assert.equal(store.release("scope", "key", body, claim.claimToken), false);
+  assert.equal(store.claim("scope", "key", body).reason, "in_progress");
+});
+
+
+test("a stale local request cannot complete a replacement claim", () => {
+  let now = 1_000;
+  const store = createIdempotencyStore({ ttlMs: 1_000, clock: () => now });
+  const body = { payload: "same" };
+  const oldClaim = store.claim("scope", "key", body, 100);
+  now = 1_100;
+  const newClaim = store.claim("scope", "key", body, 100);
+  assert.equal(newClaim.claimed, true);
+  assert.notEqual(newClaim.claimToken, oldClaim.claimToken);
+
+  assert.equal(
+    store.remember("scope", "key", body, { status: 200, body: { owner: "old" } }, oldClaim.claimToken),
+    false
+  );
+  assert.equal(store.claim("scope", "key", body).reason, "in_progress");
+  assert.equal(
+    store.remember("scope", "key", body, { status: 200, body: { owner: "new" } }, newClaim.claimToken),
+    true
+  );
+  assert.equal(store.lookup("scope", "key", body).body.owner, "new");
+});
+
+
+test("expired local claim caches its result only when no replacement owner exists", () => {
+  let now = 1_000;
+  const store = createIdempotencyStore({ ttlMs: 1_000, clock: () => now });
+  const body = { payload: "slow but successful" };
+  const expired = store.claim("scope", "expired", body, 100);
+
+  now = 1_101;
+  assert.equal(
+    store.remember("scope", "expired", body, { status: 200, body: { result: "ok" } }, expired.claimToken),
+    true
+  );
+  assert.equal(store.lookup("scope", "expired", body).body.result, "ok");
+
+  const oldClaim = store.claim("scope", "replacement", body, 100);
+  now += 101;
+  const newClaim = store.claim("scope", "replacement", body, 100);
+  assert.equal(newClaim.claimed, true);
+  assert.equal(
+    store.remember("scope", "replacement", body, { status: 200, body: { result: "stale" } }, oldClaim.claimToken),
+    false
+  );
+  assert.equal(store.claim("scope", "replacement", body).reason, "in_progress");
+});
+
+
+test("lookup does not return a replay before the claimed request completes", () => {
+  const store = createIdempotencyStore();
+  const body = { operation: "write" };
+  const claim = store.claim("POST /resource", "key-processing", body);
+  assert.equal(claim.claimed, true);
+  assert.equal(store.lookup("POST /resource", "key-processing", body), null);
+
+  assert.equal(
+    store.remember("POST /resource", "key-processing", body, { status: 201, body: { id: "created" } }, claim.claimToken),
+    true
+  );
+  assert.deepEqual(
+    store.lookup("POST /resource", "key-processing", body),
+    { status: 201, body: { id: "created" }, replayed: true }
+  );
 });

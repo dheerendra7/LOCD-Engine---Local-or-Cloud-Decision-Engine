@@ -28,3 +28,18 @@ test("decision console calls the read-only simulator endpoint", async () => {
   assert.match(script, /basePolicy\.sensitiveDataMode = privacyOverride/);
   assert.match(script, /candidatePolicy\.sensitiveDataMode = privacyOverride/);
 });
+
+
+test("dashboard labels cost as a known subtotal when estimates are missing", async () => {
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  assert.match(script, /estimatedCostUnknownCount/);
+  assert.match(script, /known subtotal;/);
+});
+
+
+test("dashboard does not show zero cost when every estimate is unknown", async () => {
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  assert.match(script, /estimatedCostKnownCount/);
+  assert.match(script, /unknown \(0 known;/);
+  assert.match(script, /known subtotal;/);
+});

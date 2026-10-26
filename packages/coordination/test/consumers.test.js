@@ -72,10 +72,9 @@ test("coordinated idempotency can claim a key and identify in-progress retries",
   const one = createCoordinatedIdempotencyStore({ store, namespace: "claim-test" });
   const two = createCoordinatedIdempotencyStore({ store, namespace: "claim-test" });
 
-  assert.deepEqual(
-    await one.claim("scope", "key", { payload: 1 }),
-    { claimed: true }
-  );
+  const initialClaim = await one.claim("scope", "key", { payload: 1 });
+  assert.equal(initialClaim.claimed, true);
+  assert.equal(typeof initialClaim.claimToken, "string");
 
   assert.deepEqual(
     await two.claim("scope", "key", { payload: 1 }),
@@ -92,5 +91,189 @@ test("coordinated consumer validates backend configuration", () => {
   assert.throws(
     () => createCoordinatedFixedWindowRateLimiter({ store: {}, maxRequests: 1 }),
     /must implement get/
+  );
+});
+
+test("coordinated rate limiter rejects fractional and unsafe limits", () => {
+  const store = createInMemoryCoordinationStore();
+  for (const maxRequests of [1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(
+      () => createCoordinatedFixedWindowRateLimiter({ store, maxRequests }),
+      /safe integer/
+    );
+  }
+  for (const windowMs of [1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(
+      () => createCoordinatedFixedWindowRateLimiter({ store, windowMs }),
+      /safe integer/
+    );
+  }
+});
+
+test("coordinated rate limiter rejects invalid clock inputs before incrementing", async () => {
+  const base = createInMemoryCoordinationStore();
+  let incrementCalls = 0;
+  const store = {
+    ...base,
+    incr: async (...args) => {
+      incrementCalls++;
+      return base.incr(...args);
+    }
+  };
+  const limiter = createCoordinatedFixedWindowRateLimiter({
+    store,
+    maxRequests: 1,
+    windowMs: 1000,
+    namespace: "invalid-clock"
+  });
+
+  for (const now of [Number.NaN, Number.POSITIVE_INFINITY, -1, 1.5, Number.MAX_SAFE_INTEGER]) {
+    await assert.rejects(
+      () => limiter.consume("client", now),
+      /now must be a non-negative safe integer and allow a safe window deadline/
+    );
+  }
+
+  assert.equal(incrementCalls, 0);
+  assert.equal((await limiter.consume("client", 100)).allowed, true);
+  assert.equal(incrementCalls, 1);
+});
+
+
+test("coordinated idempotency releases claims only for their owner", async () => {
+  const store = createInMemoryCoordinationStore();
+  const one = createCoordinatedIdempotencyStore({ store, namespace: "release-test" });
+  const two = createCoordinatedIdempotencyStore({ store, namespace: "release-test" });
+  const body = { payload: "same" };
+  const claim = await one.claim("scope", "key", body);
+  assert.equal(claim.claimed, true);
+  assert.equal(typeof claim.claimToken, "string");
+  assert.equal(await two.release("scope", "key", body, claim.claimToken + "-wrong"), false);
+  assert.equal((await two.claim("scope", "key", body)).reason, "in_progress");
+  assert.equal(await one.release("scope", "key", body, claim.claimToken), true);
+  const replacement = await two.claim("scope", "key", body);
+  assert.equal(replacement.claimed, true);
+  assert.equal(await one.release("scope", "key", body, claim.claimToken), false);
+  assert.equal((await one.claim("scope", "key", body)).reason, "in_progress");
+});
+
+
+test("a stale coordinated request cannot complete a replacement claim", async () => {
+  const store = createInMemoryCoordinationStore();
+  const one = createCoordinatedIdempotencyStore({ store, namespace: "completion-fence" });
+  const two = createCoordinatedIdempotencyStore({ store, namespace: "completion-fence" });
+  const body = { payload: "same" };
+  const oldClaim = await one.claim("scope", "key", body);
+
+  assert.equal(await one.release("scope", "key", body, oldClaim.claimToken), true);
+  const newClaim = await two.claim("scope", "key", body);
+  assert.equal(newClaim.claimed, true);
+  assert.notEqual(newClaim.claimToken, oldClaim.claimToken);
+
+  assert.equal(
+    await one.remember("scope", "key", body, { status: 200, body: { owner: "old" } }, oldClaim.claimToken),
+    false
+  );
+  assert.equal((await one.claim("scope", "key", body)).reason, "in_progress");
+  assert.equal(
+    await two.remember("scope", "key", body, { status: 200, body: { owner: "new" } }, newClaim.claimToken),
+    true
+  );
+  assert.equal((await one.lookup("scope", "key", body)).body.owner, "new");
+});
+
+
+test("coordinated idempotency fails fast when the backend lacks atomic claim fencing", () => {
+  const base = createInMemoryCoordinationStore();
+  const legacy = {
+    get: base.get,
+    set: base.set,
+    setIfAbsent: base.setIfAbsent,
+    delete: base.delete,
+    incr: base.incr
+  };
+  assert.throws(
+    () => createCoordinatedIdempotencyStore({ store: legacy }),
+    /must implement deleteIfValue\(\) and setIfValue\(\) for safe idempotency claims/
+  );
+});
+
+
+test("a missing shared lease can cache a late result without overwriting a new claim", async () => {
+  const store = createInMemoryCoordinationStore();
+  const one = createCoordinatedIdempotencyStore({ store, namespace: "late-result" });
+  const body = { payload: "slow but successful" };
+
+  const expired = await one.claim("scope", "empty-key", body, 5);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(
+    await one.remember("scope", "empty-key", body, { status: 200, body: { owner: "late" } }, expired.claimToken),
+    true
+  );
+  assert.equal((await one.lookup("scope", "empty-key", body)).body.owner, "late");
+
+  const oldClaim = await one.claim("scope", "replacement-key", body);
+  assert.equal(await one.release("scope", "replacement-key", body, oldClaim.claimToken), true);
+  const replacement = await one.claim("scope", "replacement-key", body);
+  assert.equal(replacement.claimed, true);
+  assert.notEqual(replacement.claimToken, oldClaim.claimToken);
+  assert.equal(
+    await one.remember("scope", "replacement-key", body, { status: 200, body: { owner: "stale" } }, oldClaim.claimToken),
+    false
+  );
+  assert.equal((await one.claim("scope", "replacement-key", body)).reason, "in_progress");
+});
+
+
+test("coordinated idempotency retries when a claim disappears between set-if-absent and read", async () => {
+  const base = createInMemoryCoordinationStore();
+  let setIfAbsentCalls = 0;
+  let getCalls = 0;
+  const flakyStore = {
+    get: async key => {
+      getCalls++;
+      if (getCalls === 1) return null;
+      return base.get(key);
+    },
+    set: (...args) => base.set(...args),
+    setIfAbsent: async (...args) => {
+      setIfAbsentCalls++;
+      if (setIfAbsentCalls === 1) return false;
+      return base.setIfAbsent(...args);
+    },
+    delete: (...args) => base.delete(...args),
+    incr: (...args) => base.incr(...args),
+    setIfValue: (...args) => base.setIfValue(...args),
+    deleteIfValue: (...args) => base.deleteIfValue(...args)
+  };
+  const idempotency = createCoordinatedIdempotencyStore({
+    store: flakyStore,
+    namespace: "claim-disappeared"
+  });
+
+  const claim = await idempotency.claim("scope", "key", { payload: 1 });
+  assert.equal(claim.claimed, true);
+  assert.equal(typeof claim.claimToken, "string");
+  assert.equal(setIfAbsentCalls, 2);
+  assert.equal((await idempotency.claim("scope", "key", { payload: 1 })).reason, "in_progress");
+});
+
+
+test("coordinated lookup does not fake a response while a claim is processing", async () => {
+  const store = createInMemoryCoordinationStore();
+  const idempotency = createCoordinatedIdempotencyStore({ store, namespace: "lookup-in-progress" });
+  const body = { operation: "write" };
+  const claim = await idempotency.claim("POST /resource", "key", body);
+
+  assert.equal(claim.claimed, true);
+  assert.equal(await idempotency.lookup("POST /resource", "key", body), null);
+
+  assert.equal(
+    await idempotency.remember("POST /resource", "key", body, { status: 201, body: { id: "created" } }, claim.claimToken),
+    true
+  );
+  assert.deepEqual(
+    await idempotency.lookup("POST /resource", "key", body),
+    { status: 201, body: { id: "created" }, replayed: true }
   );
 });

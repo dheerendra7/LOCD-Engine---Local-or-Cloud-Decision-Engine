@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -99,6 +99,7 @@ test("sqlite backup refuses accidental destination overwrite", async () => {
       () => backupSQLiteDatabase({ sourcePath: source, destinationPath: destination }),
       /backup destination already exists/
     );
+    assert.equal(await readFile(destination, "utf8"), "existing");
 
     const result = await backupSQLiteDatabase({
       sourcePath: source,
@@ -106,6 +107,57 @@ test("sqlite backup refuses accidental destination overwrite", async () => {
       overwrite: true
     });
     assert.ok(result.pages > 0);
+
+    const restored = new DatabaseSync(destination);
+    try {
+      assert.equal(
+        restored.prepare("PRAGMA integrity_check").get().integrity_check,
+        "ok"
+      );
+    } finally {
+      restored.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("concurrent sqlite backups never overwrite an existing destination when overwrite is false", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-backup-race-"));
+  const source = path.join(dir, "state.db");
+  const destination = path.join(dir, "backup.db");
+
+  try {
+    const stores = createSQLiteStateStores({ filePath: source });
+    stores.telemetry.record({
+      id: "concurrent-backup",
+      route: "local",
+      workloadType: "backup-race-test"
+    });
+    stores.close();
+
+    const results = await Promise.allSettled([
+      backupSQLiteDatabase({ sourcePath: source, destinationPath: destination }),
+      backupSQLiteDatabase({ sourcePath: source, destinationPath: destination })
+    ]);
+
+    assert.equal(results.filter(result => result.status === "fulfilled").length, 1);
+    assert.equal(results.filter(result => result.status === "rejected").length, 1);
+    assert.match(
+      results.find(result => result.status === "rejected").reason.message,
+      /backup destination already exists/
+    );
+
+    const backup = new DatabaseSync(destination);
+    try {
+      assert.equal(
+        backup.prepare("PRAGMA integrity_check").get().integrity_check,
+        "ok"
+      );
+    } finally {
+      backup.close();
+    }
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -122,7 +174,10 @@ test("sqlite records component schema versions", async () => {
       "SELECT component, version FROM locd_schema_migrations ORDER BY component"
     ).all();
 
-    assert.deepEqual(rows, [
+    assert.deepEqual(rows.map(row => ({
+      component: row.component,
+      version: row.version
+    })), [
       { component: "coordination_kv", version: 1 },
       { component: "decision_events", version: 1 },
       { component: "policy_records", version: 1 }
@@ -253,6 +308,92 @@ test("sqlite coordination is shared across separate connections", async () => {
     one.close();
     two.close();
   } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("sqlite coordination compares structured values independent of property insertion order", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-coord-compare-"));
+  const file = path.join(dir, "state.db");
+
+  try {
+    const one = createSQLiteCoordinationStore({ filePath: file });
+    const two = createSQLiteCoordinationStore({ filePath: file });
+    const original = { outer: { z: 3, a: 1 }, top: true };
+    const reordered = { top: true, outer: { a: 1, z: 3 } };
+
+    await one.set("conditional", original);
+    assert.equal(await two.setIfValue("conditional", reordered, { updated: true }), true);
+    assert.deepEqual(await one.get("conditional"), { updated: true });
+
+    assert.equal(await one.deleteIfValue("conditional", { updated: true }), true);
+    assert.equal(await two.get("conditional"), null);
+
+    await one.set("conditional", original);
+    assert.equal(await two.deleteIfValue("conditional", reordered), true);
+    assert.equal(await one.get("conditional"), null);
+
+    await one.set("conditional", original);
+    assert.equal(await two.deleteIfValue("conditional", { outer: { a: 1, z: 999 }, top: true }), false);
+    assert.deepEqual(await one.get("conditional"), original);
+
+    one.close();
+    two.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("sqlite increment rejects invalid or overflowing counters without mutation", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-counter-validation-"));
+  const file = path.join(dir, "state.db");
+
+  try {
+    const store = createSQLiteCoordinationStore({ filePath: file });
+    for (const value of ["3", "not-a-counter", -1, 1.5, null]) {
+      await store.set("invalid-counter", value);
+      await assert.rejects(
+        () => store.incr("invalid-counter"),
+        /coordination counter must be a non-negative safe integer/
+      );
+      assert.equal(await store.get("invalid-counter"), value);
+    }
+
+    await store.set("max-counter", Number.MAX_SAFE_INTEGER);
+    await assert.rejects(
+      () => store.incr("max-counter"),
+      /coordination counter overflow/
+    );
+    assert.equal(await store.get("max-counter"), Number.MAX_SAFE_INTEGER);
+    store.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("sqlite increment applies TTL to an existing key without expiry", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-incr-ttl-"));
+  const file = path.join(dir, "state.db");
+  const store = createSQLiteCoordinationStore({ filePath: file });
+  try {
+    await store.set("persistent-counter", 4);
+    assert.equal(await store.incr("persistent-counter", { ttlMs: 60_000 }), 5);
+    const row = store.database.prepare(
+      "SELECT expires_at FROM coordination_kv WHERE key = ?"
+    ).get("persistent-counter");
+    assert.ok(row.expires_at > Date.now());
+
+    await store.set("already-expiring-counter", 7, { ttlMs: 120_000 });
+    const originalExpiry = store.database.prepare(
+      "SELECT expires_at FROM coordination_kv WHERE key = ?"
+    ).get("already-expiring-counter").expires_at;
+    assert.equal(await store.incr("already-expiring-counter", { ttlMs: 1_000 }), 8);
+    const preservedExpiry = store.database.prepare(
+      "SELECT expires_at FROM coordination_kv WHERE key = ?"
+    ).get("already-expiring-counter").expires_at;
+    assert.equal(preservedExpiry, originalExpiry);
+  } finally {
+    store.close();
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -389,9 +530,100 @@ test("sqlite migrates legacy decision tables without tenant columns", async () =
     const migration = store.database.prepare(
       "SELECT component, version FROM locd_schema_migrations WHERE component = ?"
     ).get("decision_events");
-    assert.deepEqual(migration, { component: "decision_events", version: 1 });
+    assert.equal(migration.component, "decision_events");
+    assert.equal(migration.version, 1);
     store.close();
   } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("sqlite coordination atomically deletes only the expected value", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-delete-if-value-"));
+  const file = path.join(dir, "state.db");
+  const one = createSQLiteCoordinationStore({ filePath: file });
+  const two = createSQLiteCoordinationStore({ filePath: file });
+  try {
+    await one.set("claim", { owner: "first", token: "one" }, { ttlMs: 10_000 });
+    assert.equal(await two.deleteIfValue("claim", { owner: "first", token: "stale" }), false);
+    assert.deepEqual(await one.get("claim"), { owner: "first", token: "one" });
+    assert.equal(await two.deleteIfValue("claim", { owner: "first", token: "one" }), true);
+    assert.equal(await one.get("claim"), null);
+  } finally {
+    one.close();
+    two.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("sqlite coordination atomically replaces only the expected value", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-set-if-value-"));
+  const file = path.join(dir, "state.db");
+  const one = createSQLiteCoordinationStore({ filePath: file });
+  const two = createSQLiteCoordinationStore({ filePath: file });
+  try {
+    await one.set("claim", { processing: true, token: "one" }, { ttlMs: 10_000 });
+    assert.equal(
+      await two.setIfValue("claim", { processing: true, token: "stale" }, { response: "wrong" }, { ttlMs: 10_000 }),
+      false
+    );
+    assert.deepEqual(await one.get("claim"), { processing: true, token: "one" });
+    assert.equal(
+      await two.setIfValue("claim", { processing: true, token: "one" }, { response: "right" }, { ttlMs: 10_000 }),
+      true
+    );
+    assert.deepEqual(await one.get("claim"), { response: "right" });
+  } finally {
+    one.close();
+    two.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("sqlite coordination rounds fractional TTL deadlines and rejects unsafe expiries before mutation", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-sqlite-fractional-ttl-"));
+  const file = path.join(dir, "state.db");
+  const store = createSQLiteCoordinationStore({ filePath: file });
+
+  try {
+    await store.set("set-ttl", "value", { ttlMs: 1500.5 });
+    assert.ok(Number.isSafeInteger(
+      store.database.prepare("SELECT expires_at FROM coordination_kv WHERE key = ?")
+        .get("set-ttl").expires_at
+    ));
+
+    assert.equal(await store.setIfAbsent("absent-ttl", "value", { ttlMs: 1500.5 }), true);
+    assert.ok(Number.isSafeInteger(
+      store.database.prepare("SELECT expires_at FROM coordination_kv WHERE key = ?")
+        .get("absent-ttl").expires_at
+    ));
+
+    await store.set("conditional-ttl", { state: "before" });
+    assert.equal(await store.setIfValue(
+      "conditional-ttl", { state: "before" }, { state: "after" }, { ttlMs: 1500.5 }
+    ), true);
+    assert.ok(Number.isSafeInteger(
+      store.database.prepare("SELECT expires_at FROM coordination_kv WHERE key = ?")
+        .get("conditional-ttl").expires_at
+    ));
+
+    await store.set("counter-ttl", 0);
+    assert.equal(await store.incr("counter-ttl", { ttlMs: 1500.5 }), 1);
+    assert.ok(Number.isSafeInteger(
+      store.database.prepare("SELECT expires_at FROM coordination_kv WHERE key = ?")
+        .get("counter-ttl").expires_at
+    ));
+
+    await assert.rejects(
+      () => store.set("unsafe-expiry", "value", { ttlMs: Number.MAX_VALUE }),
+      /ttlMs exceeds supported expiry range/
+    );
+    assert.equal(await store.get("unsafe-expiry"), null);
+  } finally {
+    store.close();
     await rm(dir, { recursive: true, force: true });
   }
 });

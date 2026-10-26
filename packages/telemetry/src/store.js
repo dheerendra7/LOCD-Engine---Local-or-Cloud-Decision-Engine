@@ -11,13 +11,14 @@ function iso(value) {
 }
 
 function finite(value, fallback = null) {
+  if (value == null || (typeof value === "string" && value.trim() === "")) return fallback;
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
 }
 
 function nonNegative(value) {
   const number = finite(value);
-  return number == null ? null : Math.max(0, number);
+  return number == null || number < 0 ? null : number;
 }
 
 function applyOutcome(event, patch) {
@@ -123,6 +124,8 @@ export function createDecisionStore({ maxEntries = 500, initialEvents = [] } = {
       const outcomes = { pending: 0, success: 0, failure: 0 };
       let totalDecisions = 0;
       let estimatedCostUsd = 0;
+      let estimatedCostKnownCount = 0;
+      let estimatedCostUnknownCount = 0;
       let latencyCount = 0;
       let latencyTotal = 0;
       let confidenceTotal = 0;
@@ -140,7 +143,12 @@ export function createDecisionStore({ maxEntries = 500, initialEvents = [] } = {
         routes[event.route] = (routes[event.route] || 0) + 1;
         outcomes[event.outcome] = (outcomes[event.outcome] || 0) + 1;
 
-        if (event.estimatedCostUsd != null) estimatedCostUsd += event.estimatedCostUsd;
+        if (event.estimatedCostUsd != null) {
+          estimatedCostUsd += event.estimatedCostUsd;
+          estimatedCostKnownCount++;
+        } else {
+          estimatedCostUnknownCount++;
+        }
         if (event.estimatedLatencyMs != null) {
           latencyTotal += event.estimatedLatencyMs;
           latencyCount++;
@@ -170,6 +178,8 @@ export function createDecisionStore({ maxEntries = 500, initialEvents = [] } = {
         routes,
         outcomes,
         estimatedCostUsd: Number(estimatedCostUsd.toFixed(6)),
+        estimatedCostKnownCount,
+        estimatedCostUnknownCount,
         averageEstimatedLatencyMs: latencyCount ? Number((latencyTotal / latencyCount).toFixed(2)) : null,
         averageConfidence: totalDecisions
           ? Number((confidenceTotal / totalDecisions).toFixed(6))

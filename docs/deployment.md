@@ -119,7 +119,7 @@ Tune these with the deployment proxy/load balancer in mind.
 
 Use LOCD_MAX_BODY_BYTES to cap JSON request size.
 
-Use LOCD_RATE_LIMIT_RPM to enable an in-process /v1 rate limit. Use LOCD_TRUST_PROXY=true only behind a trusted reverse proxy.
+Use `LOCD_RATE_LIMIT_RPM` to enable an in-process `/v1` rate limit. Only enable `LOCD_TRUST_PROXY=true` when the API cannot be reached directly from untrusted networks and a trusted ingress proxy appends or overwrites `X-Forwarded-For`. Configure `LOCD_TRUST_PROXY_HOPS` to the exact number of trusted proxy hops (default `1`). LOCD selects the client address by counting from the right edge of the forwarding chain, so untrusted entries on the left do not override the address appended by the trusted ingress. If the selected entry is not a valid IP address or the chain is shorter than configured, LOCD falls back to the socket peer address. Incorrect hop counts may group users behind a proxy or select the wrong address; do not turn on proxy trust without matching the real network topology.
 
 Rate limiting is intentionally local to a process; distributed deployments need a shared limiter for a global quota.
 
@@ -171,7 +171,7 @@ Keep migrations backward-compatible and additive where possible. A failed migrat
 
 ## SQLite backup and recovery
 
-Use `npm run state:backup -- <source.db> <destination.db>` or the equivalent CLI command to create a native online SQLite backup. The backup refuses to overwrite an existing destination unless `--force` is supplied, and writes through a temporary file before the final rename. Native SQLite online backup support requires Node.js 22.16+; the application itself remains compatible with Node.js 22+.
+Use `npm run state:backup -- <source.db> <destination.db>` or the equivalent CLI command to create a native online SQLite backup. The backup refuses to overwrite an existing destination unless `--force` is supplied, and writes through a temporary file before the final rename. The application declares Node.js >=22.16.0 <25.0.0. CI tests Node.js 22 and 24. Native SQLite online backup support requires Node.js 22.16+.
 
 ## State Service client timeout
 

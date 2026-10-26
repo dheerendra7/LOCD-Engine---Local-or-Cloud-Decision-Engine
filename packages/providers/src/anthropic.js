@@ -54,8 +54,9 @@ function timeoutSignal(timeoutMs) {
 }
 
 function number(value, fallback = null, min = 0) {
+  if (value == null || (typeof value === "string" && value.trim() === "")) return fallback;
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.max(min, parsed) : fallback;
+  return Number.isFinite(parsed) && parsed >= min ? parsed : fallback;
 }
 
 function normalizeSnapshot(snapshot) {
@@ -119,6 +120,9 @@ export function createAnthropicAdapter({
     throw new Error("maxTokens must be a positive integer");
   }
   if (typeof fetchImpl !== "function") throw new Error("fetch implementation is required");
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("timeoutMs must be a positive finite number");
+  }
 
   const url = assertSafeBaseUrl(baseUrl, { allowInsecureHttp });
 

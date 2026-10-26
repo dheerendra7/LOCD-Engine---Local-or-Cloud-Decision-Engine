@@ -313,9 +313,18 @@ async function refreshMetrics() {
       .map(([route, count]) => route + ": " + count)
       .join(" · ");
 
+    const costKnownCount = Number(data.estimatedCostKnownCount || 0);
+    const costUnknownCount = Number(data.estimatedCostUnknownCount || 0);
+    const costSubtotal = "$" + data.estimatedCostUsd;
+    const costLabel = costUnknownCount > 0
+      ? (costKnownCount > 0
+        ? costSubtotal + " (known subtotal; " + costUnknownCount + " unknown)"
+        : "unknown (0 known; " + costUnknownCount + " unknown)")
+      : costSubtotal;
+
     metrics.textContent =
       "Avg latency: " + (data.averageEstimatedLatencyMs ?? "—") + " ms" +
-      " · Estimated cost: $" + data.estimatedCostUsd +
+      " · Estimated cost: " + costLabel +
       " · Confidence: " + data.averageConfidence +
       " · " + (routes || "no routes yet");
   } catch (error) {

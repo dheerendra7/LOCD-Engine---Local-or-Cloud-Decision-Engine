@@ -46,10 +46,66 @@ test("coordination store contract is validated", () => {
   );
 });
 
-test("invalid TTL configuration fails clearly", async () => {
+test("increment rejects invalid or overflowing counters without mutation", async () => {
   const store = createInMemoryCoordinationStore();
+
+  for (const value of ["3", "not-a-counter", -1, 1.5, null]) {
+    await store.set("invalid-counter", value);
+    await assert.rejects(
+      () => store.incr("invalid-counter"),
+      /coordination counter must be a non-negative safe integer/
+    );
+    assert.equal(await store.get("invalid-counter"), value);
+  }
+
+  await store.set("max-counter", Number.MAX_SAFE_INTEGER);
   await assert.rejects(
-    () => store.set("key", "value", { ttlMs: 0 }),
+    () => store.incr("max-counter"),
+    /coordination counter overflow/
+  );
+  assert.equal(await store.get("max-counter"), Number.MAX_SAFE_INTEGER);
+});
+
+test("invalid TTL configuration fails before mutating coordination state", async () => {
+  const store = createInMemoryCoordinationStore();
+
+  await assert.rejects(
+    () => store.set("new-key", "value", { ttlMs: 0 }),
     /ttlMs must be >= 1/
   );
+  assert.equal(await store.get("new-key"), null);
+
+  await store.set("existing-key", "original");
+  await assert.rejects(
+    () => store.set("existing-key", "replacement", { ttlMs: -1 }),
+    /ttlMs must be >= 1/
+  );
+  assert.equal(await store.get("existing-key"), "original");
+
+  await assert.rejects(
+    () => store.incr("new-counter", { ttlMs: 0 }),
+    /ttlMs must be >= 1/
+  );
+  assert.equal(await store.get("new-counter"), null);
+
+  assert.equal(await store.incr("existing-counter", { ttlMs: 1000 }), 1);
+  await assert.rejects(
+    () => store.incr("existing-counter", { ttlMs: 0 }),
+    /ttlMs must be >= 1/
+  );
+  assert.equal(await store.get("existing-counter"), 1);
+});
+
+
+test("fractional TTLs use safe whole-millisecond expiry deadlines", async () => {
+  const store = createInMemoryCoordinationStore();
+
+  await store.set("fractional", "value", { ttlMs: 1500.5 });
+  assert.equal(await store.get("fractional"), "value");
+
+  await assert.rejects(
+    () => store.set("unsafe-expiry", "value", { ttlMs: Number.MAX_VALUE }),
+    /ttlMs exceeds supported expiry range/
+  );
+  assert.equal(await store.get("unsafe-expiry"), null);
 });

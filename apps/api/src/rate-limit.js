@@ -1,12 +1,14 @@
+import { isIP } from "node:net";
+
 export function createRateLimiter({ maxRequests = 0, windowMs = 60_000 } = {}) {
   const limit = Number(maxRequests);
   const window = Number(windowMs);
 
-  if (!Number.isFinite(limit) || limit < 0) {
-    throw new Error("maxRequests must be >= 0");
+  if (!Number.isSafeInteger(limit) || limit < 0) {
+    throw new Error("maxRequests must be >= 0 and a safe integer");
   }
-  if (!Number.isFinite(window) || window < 1) {
-    throw new Error("windowMs must be >= 1");
+  if (!Number.isSafeInteger(window) || window < 1) {
+    throw new Error("windowMs must be >= 1 and a safe integer");
   }
 
   const entries = new Map();
@@ -28,6 +30,11 @@ export function createRateLimiter({ maxRequests = 0, windowMs = 60_000 } = {}) {
           remaining: Infinity,
           resetAt: null
         };
+      }
+
+      if (!Number.isSafeInteger(now) || now < 0 ||
+          now > Number.MAX_SAFE_INTEGER - window) {
+        throw new Error("now must be a non-negative safe integer and allow a safe window deadline");
       }
 
       purge(now);
@@ -64,14 +71,26 @@ export function createRateLimiter({ maxRequests = 0, windowMs = 60_000 } = {}) {
   };
 }
 
-export function getClientKey(req, { trustProxy = false } = {}) {
+export function getClientKey(req, { trustProxy = false, trustedProxyHops = 1 } = {}) {
   if (trustProxy) {
-    const forwarded = String(req.headers["x-forwarded-for"] || "")
-      .split(",")
-      .map(value => value.trim())
-      .filter(Boolean)[0];
+    if (!Number.isSafeInteger(trustedProxyHops) || trustedProxyHops < 1) {
+      throw new Error("trustedProxyHops must be a positive safe integer");
+    }
 
-    if (forwarded) return forwarded;
+    const rawForwarded = String(req.headers?.["x-forwarded-for"] || "");
+    const forwarded = rawForwarded.split(",").map(value => value.trim());
+    const completeChain = rawForwarded.length > 0 &&
+      forwarded.every(value => value.length > 0);
+    const clientIndex = forwarded.length - trustedProxyHops;
+    const candidate = completeChain && clientIndex >= 0
+      ? forwarded[clientIndex]
+      : null;
+    const trustedSuffix = candidate ? forwarded.slice(clientIndex) : [];
+
+    // Empty/malformed chain segments can shift the hop count and are rejected.
+    // Left-side caller-supplied entries do not affect the right-side hop lookup.
+    // Every selected/right-side hop must parse as an IP address.
+    if (candidate && trustedSuffix.every(value => isIP(value) !== 0)) return candidate;
   }
 
   return req.socket?.remoteAddress || "unknown";

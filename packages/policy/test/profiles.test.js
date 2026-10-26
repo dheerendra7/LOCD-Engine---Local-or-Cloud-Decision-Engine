@@ -30,11 +30,13 @@ test("request policy can override preset fields without losing default weights",
   assert.equal(policy.weights.latency, 0.30);
 });
 
-test("unknown profiles fail clearly", () => {
-  assert.throws(
-    () => getPolicyProfile("does-not-exist"),
-    /unknown policy profile/
-  );
+test("unknown profiles fail clearly, including inherited object property names", () => {
+  for (const id of ["does-not-exist", "constructor", "toString", "__proto__"]) {
+    assert.throws(
+      () => getPolicyProfile(id),
+      /unknown policy profile/
+    );
+  }
 });
 
 test("resolvePolicy applies matching rules in deterministic priority order", () => {
@@ -79,6 +81,29 @@ test("non-matching policy rules do not mutate resolved policy", () => {
   assert.deepEqual(resolved.matchedRules, []);
 });
 
+test("resolvePolicy rejects invalid root policy controls", () => {
+  assert.equal(
+    resolvePolicy({ profile: "privacyFirst", sensitiveDataMode: null }).sensitiveDataMode,
+    "private-only"
+  );
+  assert.deepEqual(
+    resolvePolicy({ profile: "privacyFirst", allowedModes: null }).allowedModes,
+    ["local", "private", "cloud", "hybrid"]
+  );
+  assert.throws(
+    () => resolvePolicy({ sensitiveDataMode: "cloud-only" }),
+    /policy.sensitiveDataMode must be one of/
+  );
+  assert.throws(
+    () => resolvePolicy({ maxHeartbeatAgeMs: -1 }),
+    /policy.maxHeartbeatAgeMs must be >= 0/
+  );
+  assert.throws(
+    () => resolvePolicy({ maxHeartbeatAgeMs: " " }),
+    /policy.maxHeartbeatAgeMs must be >= 0/
+  );
+});
+
 test("invalid policy rule shapes fail before decision evaluation", () => {
   assert.throws(
     () => resolvePolicy({
@@ -89,9 +114,52 @@ test("invalid policy rule shapes fail before decision evaluation", () => {
 
   assert.throws(
     () => resolvePolicy({
+      rules: [{ id: "array-when", when: [], set: { sensitiveDataMode: "balanced" } }]
+    }),
+    /policy rule when must be an object/
+  );
+
+  assert.throws(
+    () => resolvePolicy({
+      rules: [{ id: "array-set", when: {}, set: [] }]
+    }),
+    /policy rule set must be an object/
+  );
+
+  assert.throws(
+    () => resolvePolicy({
       rules: [{ id: "bad-priority", priority: 1.5, set: { sensitiveDataMode: "balanced" } }]
     }, { workload: { type: "x" } }),
     /priority must be an integer/
+  );
+
+  assert.throws(
+    () => resolvePolicy({
+      rules: [{ id: "blank-priority", priority: " ", set: { sensitiveDataMode: "balanced" } }]
+    }, { workload: { type: "x" } }),
+    /priority must be an integer/
+  );
+
+  assert.throws(
+    () => resolvePolicy({
+      rules: [{ id: "blank-freshness", priority: 1, set: { maxHeartbeatAgeMs: " " } }]
+    }, { workload: { type: "x" } }),
+    /policy rule maxHeartbeatAgeMs must be >= 0/
+  );
+
+  assert.throws(
+    () => resolvePolicy({ weights: { cost: null } }, { workload: { type: "x" } }),
+    /policy weight must be between 0 and 1: cost/
+  );
+  assert.throws(
+    () => resolvePolicy({ weights: { latency: " " } }, { workload: { type: "x" } }),
+    /policy weight must be between 0 and 1: latency/
+  );
+  assert.throws(
+    () => resolvePolicy({
+      rules: [{ id: "blank-weight", priority: 1, set: { weights: { cost: " " } } }]
+    }, { workload: { type: "x" } }),
+    /policy weight must be between 0 and 1: cost/
   );
 });
 

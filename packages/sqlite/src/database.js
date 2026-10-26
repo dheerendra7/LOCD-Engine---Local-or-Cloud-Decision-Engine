@@ -1,9 +1,11 @@
 import * as sqlite from "node:sqlite";
+import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 const { DatabaseSync } = sqlite;
 const nativeBackup = sqlite.backup;
 import path from "node:path";
-import { access, mkdir, rename, rm } from "node:fs/promises";
+import { access, link, mkdir, rename, rm } from "node:fs/promises";
 import { mkdirSync } from "node:fs";
 import { createDecisionStore, normalizeDecisionEvent } from "../../../packages/telemetry/src/store.js";
 import { createPolicyStore } from "../../../packages/policy-store/src/index.js";
@@ -61,7 +63,8 @@ export async function backupSQLiteDatabase({
     }
   }
 
-  const temporary = destination + ".tmp-" + process.pid + "-" + Date.now();
+  // Independent backups may run concurrently; timestamps alone can collide.
+  const temporary = destination + ".tmp-" + process.pid + "-" + randomUUID();
   if (typeof nativeBackup !== "function") {
     throw new Error("SQLite online backup requires Node.js 22.16 or newer");
   }
@@ -83,10 +86,24 @@ export async function backupSQLiteDatabase({
     }
 
     if (overwrite) {
-      await rm(destination, { force: true });
+      // Replace the previous backup only after the new file has been verified.
+      // POSIX rename atomically replaces the destination after verification.
+      await rename(temporary, destination);
+    } else {
+      // Atomically publish without replacing a destination created by a
+      // concurrent backup process after the earlier existence check.
+      try {
+        await link(temporary, destination);
+      } catch (error) {
+        if (error?.code === "EEXIST") {
+          throw new Error("backup destination already exists", { cause: error });
+        }
+        throw error;
+      }
+      // Publication already succeeded; temp cleanup must not report failure
+      // after a valid destination has been created.
+      await rm(temporary, { force: true }).catch(() => {});
     }
-
-    await rename(temporary, destination);
     return {
       destination,
       pages
@@ -541,8 +558,13 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
   ]);
 
   function validateTtl(ttlMs) {
-    if (ttlMs == null) return;
+    if (ttlMs == null) return null;
     if (!Number.isFinite(ttlMs) || ttlMs < 1) throw new Error("ttlMs must be >= 1");
+    const expiresAt = Math.ceil(Date.now() + ttlMs);
+    if (!Number.isSafeInteger(expiresAt)) {
+      throw new Error("ttlMs exceeds supported expiry range");
+    }
+    return expiresAt;
   }
 
   function getValue(key) {
@@ -564,9 +586,8 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
     },
 
     async set(key, value, { ttlMs = null } = {}) {
-      validateTtl(ttlMs);
+      const expiresAt = validateTtl(ttlMs);
       purgeExpired(db);
-      const expiresAt = ttlMs == null ? null : Date.now() + ttlMs;
       db.prepare(`
         INSERT INTO coordination_kv(key, value, expires_at)
         VALUES (?, ?, ?)
@@ -578,9 +599,8 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
     },
 
     async setIfAbsent(key, value, { ttlMs = null } = {}) {
-      validateTtl(ttlMs);
+      const expiresAt = validateTtl(ttlMs);
       purgeExpired(db);
-      const expiresAt = ttlMs == null ? null : Date.now() + ttlMs;
       const result = db.prepare(
         "INSERT OR IGNORE INTO coordination_kv(key, value, expires_at) VALUES (?, ?, ?)"
       ).run(String(key), JSON.stringify(value), expiresAt);
@@ -593,27 +613,85 @@ export function createSQLiteCoordinationStore({ filePath, database = null } = {}
       return result.changes === 1;
     },
 
+    async deleteIfValue(key, expectedValue) {
+      if (expectedValue === undefined) return false;
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        purgeExpired(db);
+        const normalized = String(key);
+        const row = db.prepare("SELECT value FROM coordination_kv WHERE key = ?").get(normalized);
+        if (!row || !isDeepStrictEqual(JSON.parse(row.value), expectedValue)) {
+          db.exec("COMMIT");
+          return false;
+        }
+
+        const result = db.prepare("DELETE FROM coordination_kv WHERE key = ? AND value = ?")
+          .run(normalized, row.value);
+        db.exec("COMMIT");
+        return result.changes === 1;
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
+
+    async setIfValue(key, expectedValue, value, { ttlMs = null } = {}) {
+      const requestedExpiry = validateTtl(ttlMs);
+      if (expectedValue === undefined) return false;
+      const next = JSON.stringify(value);
+      if (next === undefined) return false;
+
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        purgeExpired(db);
+        const normalized = String(key);
+        const row = db.prepare("SELECT value FROM coordination_kv WHERE key = ?").get(normalized);
+        if (!row || !isDeepStrictEqual(JSON.parse(row.value), expectedValue)) {
+          db.exec("COMMIT");
+          return false;
+        }
+
+        const expiresAt = requestedExpiry;
+        const result = db.prepare(
+          "UPDATE coordination_kv SET value = ?, expires_at = ? WHERE key = ? AND value = ?"
+        ).run(next, expiresAt, normalized, row.value);
+        db.exec("COMMIT");
+        return result.changes === 1;
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
+
     async incr(key, { ttlMs = null } = {}) {
-      validateTtl(ttlMs);
+      const requestedExpiry = validateTtl(ttlMs);
       db.exec("BEGIN IMMEDIATE");
       try {
         purgeExpired(db);
         const normalized = String(key);
         const row = db.prepare(
-          "SELECT value FROM coordination_kv WHERE key = ?"
+          "SELECT value, expires_at FROM coordination_kv WHERE key = ?"
         ).get(normalized);
 
         let next;
         if (!row) {
           next = 1;
-          const expiresAt = ttlMs == null ? null : Date.now() + ttlMs;
+          const expiresAt = requestedExpiry;
           db.prepare(
             "INSERT INTO coordination_kv(key, value, expires_at) VALUES (?, ?, ?)"
           ).run(normalized, JSON.stringify(next), expiresAt);
         } else {
-          next = Number(row.value) + 1;
+          const current = JSON.parse(row.value);
+          if (!Number.isSafeInteger(current) || current < 0) {
+            throw new Error("coordination counter must be a non-negative safe integer");
+          }
+          next = current + 1;
           if (!Number.isSafeInteger(next)) throw new Error("coordination counter overflow");
-          db.prepare("UPDATE coordination_kv SET value = ? WHERE key = ?").run(JSON.stringify(next), normalized);
+          const expiresAt = requestedExpiry !== null && row.expires_at == null
+            ? requestedExpiry
+            : row.expires_at;
+          db.prepare("UPDATE coordination_kv SET value = ?, expires_at = ? WHERE key = ?")
+            .run(JSON.stringify(next), expiresAt, normalized);
         }
 
         db.exec("COMMIT");

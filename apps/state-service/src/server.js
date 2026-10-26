@@ -321,7 +321,8 @@ export function createStateServiceServer({
 
       if (req.method === "GET" && pathname.startsWith("/v1/state/kv/")) {
         const key = decodeKey(pathname, "/v1/state/kv/");
-        if (key.endsWith("/set-if-absent")) {
+        if (["/set-if-absent", "/set-if-value", "/delete-if-value", "/incr"]
+          .some(suffix => key.endsWith(suffix))) {
           sendJson(res, 404, { error: "not_found" });
           return;
         }
@@ -347,6 +348,51 @@ export function createStateServiceServer({
           { ttlMs: body.ttlMs ?? null }
         );
         sendJson(res, 200, { claimed });
+        return;
+      }
+
+      if (req.method === "POST" && pathname.startsWith("/v1/state/kv/") && pathname.endsWith("/set-if-value")) {
+        const key = decodeKey(pathname, "/v1/state/kv/", "/set-if-value");
+        const body = await readJsonBody(req, maxBodyBytes);
+        if (
+          !body ||
+          typeof body !== "object" ||
+          Array.isArray(body) ||
+          !Object.hasOwn(body, "expectedValue") ||
+          !Object.hasOwn(body, "value")
+        ) {
+          sendJson(res, 400, { error: "expected_value_and_value_required" });
+          return;
+        }
+        if (typeof stores.coordination.setIfValue !== "function") {
+          sendJson(res, 501, { error: "conditional_set_not_supported" });
+          return;
+        }
+        const updated = await stores.coordination.setIfValue(
+          key, body.expectedValue, body.value, { ttlMs: body.ttlMs ?? null }
+        );
+        sendJson(res, 200, { updated });
+        return;
+      }
+
+      if (req.method === "POST" && pathname.startsWith("/v1/state/kv/") && pathname.endsWith("/delete-if-value")) {
+        const key = decodeKey(pathname, "/v1/state/kv/", "/delete-if-value");
+        const body = await readJsonBody(req, maxBodyBytes);
+        if (
+          !body ||
+          typeof body !== "object" ||
+          Array.isArray(body) ||
+          !Object.hasOwn(body, "expectedValue")
+        ) {
+          sendJson(res, 400, { error: "expected_value_required" });
+          return;
+        }
+        if (typeof stores.coordination.deleteIfValue !== "function") {
+          sendJson(res, 501, { error: "conditional_delete_not_supported" });
+          return;
+        }
+        const deleted = await stores.coordination.deleteIfValue(key, body.expectedValue);
+        sendJson(res, 200, { deleted });
         return;
       }
 
