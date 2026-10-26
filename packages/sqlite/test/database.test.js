@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -122,7 +122,10 @@ test("sqlite records component schema versions", async () => {
       "SELECT component, version FROM locd_schema_migrations ORDER BY component"
     ).all();
 
-    assert.deepEqual(rows, [
+    assert.deepEqual(rows.map(row => ({
+      component: row.component,
+      version: row.version
+    })), [
       { component: "coordination_kv", version: 1 },
       { component: "decision_events", version: 1 },
       { component: "policy_records", version: 1 }
@@ -389,7 +392,8 @@ test("sqlite migrates legacy decision tables without tenant columns", async () =
     const migration = store.database.prepare(
       "SELECT component, version FROM locd_schema_migrations WHERE component = ?"
     ).get("decision_events");
-    assert.deepEqual(migration, { component: "decision_events", version: 1 });
+    assert.equal(migration.component, "decision_events");
+    assert.equal(migration.version, 1);
     store.close();
   } finally {
     await rm(dir, { recursive: true, force: true });

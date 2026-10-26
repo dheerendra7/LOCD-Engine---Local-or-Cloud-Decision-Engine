@@ -3,206 +3,342 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="LOCD Engine control plane for local, private, cloud and hybrid workload placement.">
-  <title>LOCD Engine — Decision Console</title>
-  <style>
-    :root {
-      color-scheme: dark;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-    * { box-sizing: border-box; }
-    body { margin: 0; background: #080b14; color: #f4f7ff; }
-    main { max-width: 1240px; margin: 0 auto; padding: 28px 20px 64px; }
-    header { display: flex; justify-content: space-between; gap: 18px; align-items: end; margin-bottom: 20px; }
-    .eyebrow { color: #8ab4ff; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; }
-    h1 { margin: 6px 0 0; font-size: clamp(32px, 6vw, 58px); letter-spacing: -.04em; }
-    h2, h3 { margin-top: 0; }
-    .muted { color: #9da8c2; line-height: 1.65; }
-    .grid { display: grid; gap: 18px; }
-    .grid.two { grid-template-columns: minmax(300px, .82fr) minmax(360px, 1.18fr); }
-    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .card { background: #111728; border: 1px solid #27314a; border-radius: 18px; padding: 20px; }
-    .toolbar { display: flex; gap: 10px; justify-content: space-between; align-items: center; flex-wrap: wrap; }
-    label { display: grid; gap: 7px; color: #c9d1e5; font-size: 13px; margin-bottom: 14px; }
-    input, select, button, textarea {
-      width: 100%; border-radius: 10px; border: 1px solid #35415f;
-      background: #0c1220; color: #f4f7ff; padding: 11px 12px; font: inherit;
-    }
-    button { cursor: pointer; background: #1d4ed8; border-color: #2563eb; font-weight: 700; }
-    button.secondary { background: #172036; border-color: #35415f; }
-    button.danger { background: #32151c; border-color: #72303e; }
-    button:disabled { opacity: .55; cursor: not-allowed; }
-    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .metrics { margin-top: 8px; }
-    .metric { padding: 12px; border: 1px solid #27314a; border-radius: 12px; background: #0c1220; }
-    .metric strong { display: block; font-size: 20px; margin-top: 4px; }
-    .result { min-height: 420px; }
-    .route { font-size: 44px; font-weight: 800; letter-spacing: -.04em; text-transform: uppercase; }
-    .score { color: #9da8c2; }
-    .pill { display: inline-flex; border: 1px solid #35415f; border-radius: 999px; padding: 5px 9px; margin: 4px 4px 0 0; font-size: 12px; }
-    .target-list { display: grid; gap: 10px; }
-    .target { border: 1px solid #27314a; border-radius: 12px; padding: 12px; background: #0c1220; }
-    .target-head { display: flex; gap: 10px; justify-content: space-between; align-items: center; }
-    .target-meta { margin-top: 6px; color: #9da8c2; font-size: 12px; line-height: 1.6; }
-    .status { font-size: 12px; color: #9da8c2; }
-    ul { padding-left: 18px; color: #bac4db; line-height: 1.7; }
-    pre { overflow: auto; background: #0a0f1c; border: 1px solid #27314a; border-radius: 12px; padding: 14px; font-size: 12px; }
-    .full { grid-column: 1 / -1; }
-    .diff-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
-    .diff-grid .metric strong { font-size: 18px; }
-    .change { margin-top: 14px; padding: 12px; border: 1px solid #27314a; border-radius: 12px; background: #0c1220; }
-    .change-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-    @media (max-width: 920px) {
-      header { display: block; }
-      .grid.two, .grid.three { grid-template-columns: 1fr; }
-      .diff-grid, .change-grid { grid-template-columns: 1fr; }
-    }
-  </style>
+  <meta name="description" content="LOCD Engine control plane for explainable local, private, cloud and hybrid workload placement.">
+  <meta name="theme-color" content="#f6f8fb">
+  <title>LOCD Engine — Control Plane</title>
+  <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <main>
-    <header>
-      <div>
-        <div class="eyebrow">Local · Private · Cloud · Hybrid</div>
-        <h1>Decision Console</h1>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Primary navigation">
+      <a class="brand" href="#overview" aria-label="LOCD Engine overview" style="text-decoration:none">
+        <span class="brand-mark" aria-hidden="true">L.</span>
+        <span>
+          <span class="brand-name">LOCD Engine</span>
+          <span class="brand-caption" style="display:block">Decision control plane</span>
+        </span>
+      </a>
+      <div class="nav-caption">Workspace</div>
+      <nav class="nav-list" aria-label="Workspace">
+        <a class="nav-link active" href="#overview" data-nav="overview">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="3" y="3" width="7" height="8" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="11" width="7" height="10" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>Overview
+        </a>
+        <a class="nav-link" href="#decision-lab" data-nav="decision-lab">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4M11 7v8M7 11h8"/></svg>Decision lab
+        </a>
+        <a class="nav-link" href="#target-registry" data-nav="target-registry">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01M11 7h6M11 17h6"/></svg>Targets
+        </a>
+        <a class="nav-link" href="#policy-workbench" data-nav="policy-workbench">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M12 3 19 6v5c0 4.5-3 7.5-7 10-4-2.5-7-5.5-7-10V6l7-3Z"/><path d="m9 12 2 2 4-4"/></svg>Policies
+        </a>
+        <a class="nav-link" href="#hybrid-planner" data-nav="hybrid-planner">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 6h7a5 5 0 0 1 5 5M5 8v8a2 2 0 0 0 2 2h10"/></svg>Hybrid planner
+        </a>
+        <a class="nav-link" href="#telemetry" data-nav="telemetry">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M3 3v18h18"/><path d="m7 14 4-4 3 3 6-7"/></svg>Telemetry
+        </a>
+      </nav>
+      <div class="nav-caption" style="margin-top:20px">Configuration</div>
+      <nav class="nav-list" aria-label="Configuration">
+        <a class="nav-link" href="#system-settings" data-nav="system-settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.2.9-1.2 2.1-1.4-.6a7.7 7.7 0 0 1-1.5.9l-.2 1.5h-2.5l-.3-1.5a7.7 7.7 0 0 1-1.5-.9l-1.4.6-1.2-2.1 1.2-.9a6.8 6.8 0 0 1 0-1.8l-1.2-.9 1.2-2.1 1.4.6a7.7 7.7 0 0 1 1.5-.9l.3-1.5h2.5l.2 1.5a7.7 7.7 0 0 1 1.5.9l1.4-.6 1.2 2.1-1.2.9a6.8 6.8 0 0 1-.1 1.7Z"/></svg>System & access
+        </a>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <div class="sidebar-footer">
+        <div class="environment-label">Runtime</div>
+        <div class="environment-value"><span class="environment-icon" id="environmentDot"></span><span id="environmentLabel">Checking service…</span></div>
+        <div class="sidebar-footnote">Decisions are evaluated by the LOCD API. Provider credentials remain server-side.</div>
       </div>
-      <div class="muted">The browser talks to the server-side control plane. Provider credentials never belong in this page.</div>
-    </header>
+    </aside>
 
-    <section class="card" style="margin-bottom:18px">
-      <div class="toolbar">
-        <div>
-          <div class="eyebrow">Control plane</div>
-          <div id="systemStatus" class="status">Connecting…</div>
+    <div class="workspace">
+      <header class="topbar">
+        <div class="breadcrumbs"><span>Workspace</span><span aria-hidden="true">/</span><strong id="breadcrumbCurrent">Overview</strong></div>
+        <div class="topbar-actions">
+          <span class="connection-pill" id="connectionPill" data-state="checking"><span class="connection-dot"></span><span id="connectionText">Checking API</span></span>
+          <button class="btn btn-secondary" id="refreshAll" type="button" title="Refresh data from the control plane">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9A7 7 0 0 1 18 6l2 6M4 12l2 6a7 7 0 0 0 12.4-3"/></svg>Refresh
+          </button>
         </div>
-        <button id="refreshAll" class="secondary" style="width:auto">Refresh</button>
-      </div>
-      <div class="grid three metrics">
-        <div class="metric"><span class="status">Registered targets</span><strong id="targetCount">—</strong></div>
-        <div class="metric"><span class="status">Decisions</span><strong id="decisionCount">—</strong></div>
-        <div class="metric"><span class="status">Success rate</span><strong id="successRate">—</strong></div>
-      </div>
-      <div id="metrics" class="status" style="margin-top:10px"></div>
-    </section>
+      </header>
 
-    <div class="grid two">
-      <section class="card">
-        <h2>Workload</h2>
-        <label>
-          Type
-          <input id="workloadType" value="llm-inference">
-        </label>
-        <label>
-          Sensitivity
-          <select id="sensitivity">
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high" selected>High</option>
-          </select>
-        </label>
-        <label>
-          Policy profile
-          <select id="policyProfile">
-            <option value="balanced">Balanced</option>
-          </select>
-        </label>
-        <label>
-          Privacy mode override
-          <select id="privacyMode">
-            <option value="">Use profile default</option>
-            <option value="balanced">Balanced</option>
-            <option value="prefer-local">Prefer local</option>
-            <option value="local-only">Local only</option>
-            <option value="private-only">Private boundary only</option>
-          </select>
-        </label>
-        <label>
-          Latency budget (ms)
-          <input id="latency" type="number" value="800" min="0">
-        </label>
-        <label>
-          Maximum cost (USD)
-          <input id="cost" type="number" value="0.05" min="0" step="0.001">
-        </label>
-        <label>
-          API key
-          <input id="apiKey" type="password" autocomplete="off" placeholder="Required when API auth is enabled">
-        </label>
-        <button id="decide">Evaluate registered targets</button>
-      </section>
-
-      <section class="card result" aria-live="polite">
-        <div class="eyebrow">Engine output</div>
-        <div id="output" class="muted">Ready. Register or load targets, then evaluate a workload.</div>
-      </section>
-
-      <section class="card full" aria-live="polite">
-        <div class="toolbar">
-          <div>
-            <div class="eyebrow">Policy what-if</div>
-            <h2 style="margin:4px 0 0">Simulate a policy change safely</h2>
+      <main class="content">
+        <section id="overview" class="page-section">
+          <div class="page-heading">
+            <div>
+              <div class="page-kicker">Local · Private · Cloud · Hybrid</div>
+              <h1>Decision overview</h1>
+              <p>See where your workloads can run, evaluate policy constraints, and understand every routing decision from one control plane.</p>
+            </div>
+            <div class="button-row">
+              <a class="btn btn-primary" href="#decision-lab">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg>Evaluate workload
+              </a>
+            </div>
           </div>
-          <div id="simulationStatus" class="status">Read-only · no execution</div>
-        </div>
-        <p class="muted">Compares the current and candidate policy against the same workload and registered targets. The simulator never executes a provider or records decision telemetry.</p>
-        <div class="grid three">
-          <label>
-            Current policy
-            <select id="simulationCurrentPolicy">
-              <option value="balanced">Balanced</option>
-            </select>
-          </label>
-          <label>
-            Candidate policy
-            <select id="simulationCandidatePolicy">
-              <option value="balanced">Balanced</option>
-            </select>
-          </label>
-          <div style="display:flex;align-items:end">
-            <button id="simulatePolicy">Compare policies</button>
-          </div>
-        </div>
-        <div id="simulationOutput" class="muted" style="margin-top:14px">Choose two policies and run a what-if comparison.</div>
-      </section>
 
-      <section class="card full">
-        <div class="toolbar">
-          <div>
-            <div class="eyebrow">Target registry</div>
-            <h2 style="margin:4px 0 0">Live execution candidates</h2>
+          <div class="stats-grid" aria-label="Control plane summary">
+            <article class="stat-card">
+              <div class="stat-topline"><span>Registered targets</span><span class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/></svg></span></div>
+              <div class="stat-value" id="targetCount">—</div><div class="stat-note">Eligible runtime destinations</div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-topline"><span>Decisions evaluated</span><span class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M4 19V5M4 19h17"/><path d="m7 15 4-4 3 3 6-7"/></svg></span></div>
+              <div class="stat-value" id="decisionCount">—</div><div class="stat-note">Recorded by this tenant</div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-topline"><span>Observed success rate</span><span class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16.5 9"/></svg></span></div>
+              <div class="stat-value" id="successRate">—</div><div class="stat-note">Based on reported outcomes</div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-topline"><span>Average estimated latency</span><span class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span></div>
+              <div class="stat-value" id="avgLatency">—</div><div class="stat-note">Across recorded decisions</div>
+            </article>
           </div>
-          <div id="targetStatus" class="status">Not loaded</div>
-        </div>
-        <div id="targets" class="target-list" style="margin-top:14px">
-          <div class="muted">No targets loaded.</div>
-        </div>
-      </section>
 
-      <section class="card full">
-        <div class="eyebrow">Register a target snapshot</div>
-        <p class="muted">Use this for static/local/private target metadata. Provider URLs and API secrets stay server-side in provider configuration.</p>
-        <div class="grid three">
-          <label>ID <input id="targetId" placeholder="local-gpu"></label>
-          <label>Mode
-            <select id="targetMode">
-              <option value="local">Local</option>
-              <option value="private">Private</option>
-              <option value="cloud">Cloud</option>
-              <option value="hybrid">Hybrid</option>
-            </select>
-          </label>
-          <label>Health <input id="targetHealth" type="number" min="0" max="1" step="0.01" value="1"></label>
-          <label>Capacity <input id="targetCapacity" type="number" min="0" max="1" step="0.01" value="0.2"></label>
-          <label>Privacy <input id="targetPrivacy" type="number" min="0" max="1" step="0.01" value="1"></label>
-          <label>Latency (ms) <input id="targetLatency" type="number" min="0" value="100"></label>
-          <label>Cost (USD) <input id="targetCost" type="number" min="0" step="0.000001" value="0"></label>
-          <label>Regions <input id="targetRegions" placeholder="local, ap-south-1"></label>
-          <label>Capabilities <input id="targetCapabilities" value="text-generation" placeholder="text-generation, vision"></label>
-        </div>
-        <button id="registerTarget">Register target</button>
-      </section>
+          <section class="panel">
+            <div class="section-heading">
+              <div><div class="section-label">Control plane</div><h2>Service & state overview</h2><p>These indicators come from the running API. Unavailable checks remain unavailable; this page does not infer service health.</p></div>
+              <span class="state-badge" id="healthState">Checking health</span>
+            </div>
+            <div class="system-grid">
+              <div class="system-item"><span>API readiness</span><strong id="readinessState">Checking…</strong></div>
+              <div class="system-item"><span>Service version</span><strong id="runtimeVersion">—</strong></div>
+              <div class="system-item"><span>Target probes</span><strong id="probeCount">—</strong></div>
+              <div class="system-item"><span>Telemetry storage</span><strong id="telemetryBackend">—</strong></div>
+              <div class="system-item"><span>Policy storage</span><strong id="policyBackend">—</strong></div>
+              <div class="system-item"><span>Execution adapters</span><strong id="executionAdapters">—</strong></div>
+            </div>
+            <div class="status" id="metrics" style="margin-top:15px">Loading telemetry summary…</div>
+            <div class="status" id="systemStatus" style="margin-top:8px">Connecting to the control plane…</div>
+            <div class="status" id="readinessChecks" style="margin-top:8px">Checking runtime readiness…</div>
+          </section>
+        </section>
+
+        <section id="decision-lab" class="page-section">
+          <div class="section-heading">
+            <div><div class="section-label">Decisioning</div><h2>Workload decision lab</h2><p>Send a workload through the deterministic engine with explicit latency, cost and privacy constraints.</p></div>
+            <span class="state-badge blue">Read-only evaluation</span>
+          </div>
+          <div class="panel-grid">
+            <section class="panel">
+              <div class="section-heading"><div><h2>Workload inputs</h2><p>Strict budgets are enforced as hard constraints.</p></div></div>
+              <div class="form-grid">
+                <label>Workload type
+                  <input id="workloadType" value="llm-inference" autocomplete="off" placeholder="llm-inference">
+                  <span class="help-text">A short workload category used by policy rules.</span>
+                </label>
+                <label>Data sensitivity
+                  <select id="sensitivity"><option value="low">Low</option><option value="medium">Medium</option><option value="high" selected>High</option></select>
+                </label>
+                <label>Policy profile
+                  <select id="policyProfile"><option value="balanced">Balanced</option></select>
+                </label>
+                <label>Privacy override
+                  <select id="privacyMode"><option value="">Use profile default</option><option value="balanced">Balanced</option><option value="prefer-local">Prefer local</option><option value="local-only">Local only</option><option value="private-only">Private boundary only</option></select>
+                </label>
+                <label>Latency budget <span class="help-text">Milliseconds</span>
+                  <input id="latency" type="number" value="800" min="0" step="1">
+                </label>
+                <label>Maximum estimated cost <span class="help-text">USD per workload</span>
+                  <input id="cost" type="number" value="0.05" min="0" step="0.001">
+                </label>
+              </div>
+              <div class="inline-note" style="margin-bottom:16px">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+                <span>Evaluation uses registered targets unless a request explicitly supplies targets. The browser never calls provider APIs directly.</span>
+              </div>
+              <button class="btn btn-primary" id="decide" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16M4 12h10M4 19h7"/><circle cx="18" cy="16" r="3"/><path d="m20.2 18.2 1.3 1.3"/></svg>Evaluate registered targets
+              </button>
+            </section>
+            <section class="panel" aria-live="polite">
+              <div class="section-heading"><div><div class="section-label">Engine output</div><h2>Decision explanation</h2><p>Selected route, confidence, alternatives and rejection reasons.</p></div></div>
+              <div id="output">
+                <div class="output-empty"><span class="output-empty-mark"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.7"><path d="M4 5h16M4 12h10M4 19h7"/><circle cx="18" cy="16" r="3"/></svg></span><strong>Ready to evaluate</strong><p>Configure a workload and run the decision engine to see a traceable recommendation here.</p></div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section id="target-registry" class="page-section">
+          <div class="section-heading">
+            <div><div class="section-label">Infrastructure</div><h2>Target registry</h2><p>Manage the destinations that LOCD evaluates. Estimates and availability reflect registered metadata, not live guarantees.</p></div>
+            <span class="state-badge" id="targetStatus">Not loaded</span>
+          </div>
+          <section class="panel">
+            <div class="section-heading"><div><h2>Registered destinations</h2><p>Probe a target when supported, or remove a stale destination from this tenant's registry.</p></div></div>
+            <div id="targets" class="target-list"><div class="empty-state"><strong>No target data loaded</strong>Refresh the registry or check API access.</div></div>
+          </section>
+          <section class="panel">
+            <details class="register-details">
+              <summary>Register a target</summary>
+              <p class="status" style="margin:12px 0 16px">Register static or locally managed metadata. Provider endpoints and secrets belong in server-side configuration, never in this form.</p>
+              <div class="form-grid three">
+                <label>Target ID<input id="targetId" placeholder="local-gpu" autocomplete="off"></label>
+                <label>Execution mode<select id="targetMode"><option value="local">Local</option><option value="private">Private</option><option value="cloud">Cloud</option><option value="hybrid">Hybrid</option></select></label>
+                <label>Health score<input id="targetHealth" type="number" min="0" max="1" step="0.01" value="1"></label>
+                <label>Capacity score<input id="targetCapacity" type="number" min="0" max="1" step="0.01" value="0.2"></label>
+                <label>Privacy score<input id="targetPrivacy" type="number" min="0" max="1" step="0.01" value="1"></label>
+                <label>Estimated latency (ms)<input id="targetLatency" type="number" min="0" step="1" value="100"></label>
+                <label>Estimated cost (USD)<input id="targetCost" type="number" min="0" step="0.000001" value="0"></label>
+                <label>Regions <input id="targetRegions" placeholder="local, ap-south-1"></label>
+                <label>Capabilities <input id="targetCapabilities" value="text-generation" placeholder="text-generation, vision"></label>
+              </div>
+              <div class="button-row"><button class="btn btn-primary" id="registerTarget" type="button">Register target</button><span class="status" id="registerTargetHelp">Values are validated by the API before saving.</span></div>
+            </details>
+          </section>
+        </section>
+
+        <section id="policy-workbench" class="page-section">
+          <div class="section-heading">
+            <div><div class="section-label">Governance</div><h2>Policy workbench</h2><p>Inspect built-in profiles, manage tenant-scoped policy documents, and compare a candidate change before rolling it out.</p></div>
+            <span class="state-badge blue">Simulation does not execute providers</span>
+          </div>
+          <section class="panel">
+            <div class="section-heading">
+              <div><h2>Policy catalog</h2><p>Built-in profiles are read-only. Custom policies can be versioned and rolled back.</p></div>
+              <span id="policyManagerStatus" class="status">Loading policies…</span>
+            </div>
+            <div id="policyCards" class="policy-grid"><div class="empty-state">Loading policy catalog…</div></div>
+            <details style="margin-top:18px">
+              <summary>Create or update a custom policy</summary>
+              <p class="status" style="margin:12px 0 15px">Use a unique lowercase ID. Weights must be between 0 and 1; rule documents are validated on the server before persistence.</p>
+              <form id="policyForm">
+                <div class="form-grid">
+                  <label>Policy ID<input id="newPolicyId" required pattern="[a-z0-9][a-z0-9._-]{0,62}" placeholder="team-latency-first" autocomplete="off"></label>
+                  <label>Display name<input id="newPolicyName" required placeholder="Team latency first"></label>
+                  <label>Base profile<select id="newPolicyBase"><option value="balanced">Balanced</option><option value="localFirst">Local First</option><option value="privacyFirst">Privacy First</option><option value="latencyFirst">Latency First</option><option value="costFirst">Cost First</option><option value="strictLocalSensitive">Strict Local Sensitive</option></select></label>
+                  <label>Description<input id="newPolicyDescription" placeholder="When this policy should be used"></label>
+                  <label class="field-full">Weight overrides <span class="help-text">JSON object; omit any weight you do not want to override.</span>
+                    <textarea id="newPolicyWeights" spellcheck="false">{}</textarea>
+                  </label>
+                  <label class="field-full">Policy rules <span class="help-text">JSON array. Rules may conditionally set sensitiveDataMode, weights, allowed/blocked modes, regions, or heartbeat age.</span>
+                    <textarea id="newPolicyRules" spellcheck="false">[]</textarea>
+                  </label>
+                </div>
+                <div class="button-row"><button class="btn btn-primary" type="submit" id="savePolicy">Save custom policy</button><button class="btn btn-secondary" type="reset">Reset form</button><span class="status" id="policyFormStatus"></span></div>
+              </form>
+            </details>
+            <div id="policyHistoryPanel" class="hidden" style="margin-top:18px;padding-top:18px;border-top:1px solid var(--line)">
+              <div class="section-heading"><div><div class="section-label">Version history</div><h2 id="policyHistoryTitle">Policy versions</h2></div><button class="btn btn-secondary btn-small" id="closePolicyHistory" type="button">Close</button></div>
+              <div id="policyHistory" class="policy-history"></div>
+            </div>
+          </section>
+
+          <section class="panel" id="policy-simulator">
+            <div class="section-heading">
+              <div><div class="section-label">Read-only analysis</div><h2>Simulate a policy change safely</h2><p>Compare current and candidate policies against the same workload and registered targets. This operation does not execute a provider or write decision telemetry.</p></div>
+              <span id="simulationStatus" class="state-badge">Read-only · no execution</span>
+            </div>
+            <div class="form-grid three">
+              <label>Current policy<select id="simulationCurrentPolicy"><option value="balanced">Balanced</option></select></label>
+              <label>Candidate policy<select id="simulationCandidatePolicy"><option value="balanced">Balanced</option></select></label>
+              <label class="field-full"><span>Action</span><button class="btn btn-primary" id="simulatePolicy" type="button">Compare policies</button></label>
+            </div>
+            <div id="simulationOutput" class="status" style="margin-top:14px">Choose two policies and run a what-if comparison.</div>
+          </section>
+        </section>
+
+        <section id="hybrid-planner" class="page-section">
+          <div class="section-heading">
+            <div><div class="section-label">Multi-stage workloads</div><h2>Hybrid execution planner</h2><p>Check whether a sequence of stages can span multiple targets while keeping workload sensitivity, routing policy and total budgets in bounds.</p></div>
+            <span class="state-badge blue">Planning only</span>
+          </div>
+          <section class="panel">
+            <div class="grid two">
+              <div>
+                <div class="section-heading"><div><h2>Plan inputs</h2><p>At least two steps and two distinct target destinations are required.</p></div></div>
+                <div class="form-grid">
+                  <label>Workload type<input id="hybridWorkloadType" value="llm-inference"></label>
+                  <label>Data sensitivity<select id="hybridSensitivity"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></label>
+                  <label>Policy profile<select id="hybridPolicyProfile"><option value="balanced">Balanced</option></select></label>
+                  <label>Maximum total latency (ms)<input id="hybridLatency" type="number" min="0" value="1000"></label>
+                  <label>Maximum total cost (USD)<input id="hybridCost" type="number" min="0" step="0.001" value="0.05"></label>
+                </div>
+              </div>
+              <div>
+                <div class="section-heading"><div><h2>Pipeline stages</h2><p>Choose a target per stage. A valid plan is not an execution.</p></div><button class="btn btn-secondary btn-small" type="button" id="addHybridStep">+ Add stage</button></div>
+                <div id="hybridStepRows"><div class="empty-state">Loading registered targets for stage selection…</div></div>
+                <button class="btn btn-primary" type="button" id="planHybrid">Validate hybrid plan</button>
+                <span id="hybridStatus" class="status" style="margin-left:10px">Ready when targets are loaded.</span>
+              </div>
+            </div>
+            <div id="hybridOutput" style="margin-top:20px"><div class="output-empty"><strong>No plan evaluated</strong><p>Build a multi-stage request to view aggregate estimates and per-stage validation results.</p></div></div>
+          </section>
+          <section class="panel">
+            <div class="section-heading"><div><div class="section-label">Guarded operation</div><h2>Dry-run execution</h2><p>Run the latest valid plan through configured server-side adapters in dry-run mode only. Live execution is intentionally not exposed here.</p></div><span class="state-badge warn">Dry-run only</span></div>
+            <div class="inline-note" style="margin-bottom:14px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 20 7v5c0 4.5-3 7.5-8 9-5-1.5-8-4.5-8-9V7l8-4Z"/><path d="M12 8v4M12 16h.01"/></svg><span>The server remains the enforcement boundary. This control sends <code>mode: "dry-run"</code> only. If API authentication is enabled, the key must include the <code>execute</code> scope; the API still checks adapter availability and execution safety.</span></div>
+            <button class="btn btn-secondary" type="button" id="executeDryRun" disabled>Run last valid plan · dry-run</button>
+            <div id="executionOutput" class="status" style="margin-top:12px">Validate a hybrid plan first.</div>
+          </section>
+        </section>
+
+        <section id="telemetry" class="page-section">
+          <div class="section-heading">
+            <div><div class="section-label">Observability</div><h2>Decision activity</h2><p>Review recent decision metadata and optionally submit actual outcomes to improve latency and cost calibration.</p></div>
+            <span id="activityStatus" class="status">Loading history…</span>
+          </div>
+          <section class="panel">
+            <div class="section-heading"><div><h2>Recent decisions</h2><p>History is scoped by the API key's tenant. Inputs and prompts are not shown here.</p></div></div>
+            <form id="outcomeForm">
+              <div class="feedback-form">
+                <label>Decision ID<input id="outcomeDecisionId" placeholder="Select a decision below" required autocomplete="off"></label>
+                <label>Reported outcome<select id="outcomeType"><option value="success">Success</option><option value="failure">Failure</option></select></label>
+                <label>Actual latency (ms)<input id="actualLatencyMs" type="number" min="0" step="1" placeholder="Optional"></label>
+                <label>Actual cost (USD)<input id="actualCostUsd" type="number" min="0" step="0.000001" placeholder="Optional"></label>
+                <div class="button-row"><button class="btn btn-primary" id="recordOutcome" type="submit">Record outcome</button><span id="outcomeStatus" class="status"></span></div>
+              </div>
+            </form>
+            <div class="data-table-wrap">
+              <table class="data-table">
+                <thead><tr><th>Time</th><th>Workload</th><th>Route</th><th>Target</th><th>Estimate</th><th>Outcome</th><th></th></tr></thead>
+                <tbody id="activityTableBody"><tr><td colspan="7" class="table-empty">Loading decision history…</td></tr></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="panel">
+            <div class="section-heading"><div><h2>Calibration observations</h2><p>Calibration adjusts estimates only after sufficient measured samples. Values below are current API state, not a forecast.</p></div><span id="calibrationStatus" class="status">Loading calibration…</span></div>
+            <div class="calibration-grid" id="calibrationCards"><div class="empty-state">Loading calibration data…</div></div>
+            <div class="data-table-wrap" style="margin-top:14px">
+              <table class="data-table">
+                <thead><tr><th>Target</th><th>Workload</th><th>Utilization band</th><th>Samples</th><th>Latency factor</th><th>Cost factor</th></tr></thead>
+                <tbody id="calibrationRows"><tr><td colspan="6" class="table-empty">Loading observations…</td></tr></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section id="system-settings" class="page-section">
+          <div class="section-heading"><div><div class="section-label">Configuration</div><h2>System & access</h2><p>Inspect runtime capabilities and provide a scoped API key when the control plane requires authentication.</p></div></div>
+          <section class="panel">
+            <div class="section-heading"><div><h2>API access</h2><p>The key is kept in this page's memory only. It is not saved to local storage, sent to analytics, or embedded in URLs.</p></div><span class="state-badge">Tenant-scoped</span></div>
+            <label>LOCD API key
+              <input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Enter a scoped key when API authentication is enabled">
+              <span class="help-text">Sent as an Authorization: Bearer header to this same origin. Never paste provider credentials here.</span>
+            </label>
+            <div class="button-row"><button class="btn btn-primary" type="button" id="applyApiKey">Apply key & refresh</button><button class="btn btn-secondary" type="button" id="clearApiKey">Clear key</button><span class="status" id="accessStatus">No API key stored in this page.</span></div>
+            <div class="inline-note" style="margin-top:14px">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+              <span>Access scopes: <code>read</code> loads the console; <code>decide</code> runs decisions, simulations and hybrid validation; <code>targets</code> manages targets; <code>telemetry</code> records outcomes; <code>execute</code> submits dry-runs; <code>admin</code> saves, edits, deletes or rolls back custom policies. Keys need <code>read</code> plus the matching action scope, or <code>admin</code>, which covers every API operation. The API enforces all permissions server-side.</span>
+            </div>
+          </section>
+          <section class="panel">
+            <div class="section-heading"><div><h2>Runtime capabilities</h2><p>Capability flags reflect the API's current status response. They do not imply that providers are reachable unless a probe confirms it.</p></div></div>
+            <div class="system-grid" id="capabilities">
+              <div class="system-item"><span>Status</span><strong>Waiting for API response</strong></div>
+            </div>
+            <div class="footer-note">LOCD provides explainable placement decisions. Validate privacy, capacity, price and provider availability in the target environment before production use.</div>
+          </section>
+        </section>
+
+        <footer class="footer-note">LOCD Engine · Local-or-Cloud Decision Engine · Deterministic decisions, visible constraints, explainable routes.</footer>
+      </main>
     </div>
-  </main>
-  <script src="/app.js"></script>
+  </div>
+  <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="false"></div>
+  <script src="/app.js" defer></script>
 </body>
 </html>

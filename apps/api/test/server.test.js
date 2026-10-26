@@ -1,7 +1,7 @@
 import http from "node:http";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { checkReadiness, createConfiguredExecutionRegistry, createConfiguredProbeScheduler, createConfiguredTargetRegistry, createGracefulShutdown, createServer } from "../src/server.js";
+import { checkReadiness, readBody, createConfiguredExecutionRegistry, createConfiguredProbeScheduler, createConfiguredTargetRegistry, createGracefulShutdown, createServer } from "../src/server.js";
 import { createDecisionStore, createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { createCalibrator } from "../../../packages/calibration/src/index.js";
 import { createPolicyStore } from "../../../packages/policy-store/src/index.js";
@@ -163,7 +163,7 @@ test("readBody enforces the limit across streamed chunks", async () => {
 
 test("API replaces unsafe caller request IDs with a generated ID", async () => {
   const response = await fetch(baseUrl + "/health", {
-    headers: { "x-request-id": "trace\nforged" }
+    headers: { "x-request-id": "trace id forged" }
   });
 
   assert.equal(response.status, 200);
@@ -189,6 +189,222 @@ test("API responses include browser security headers", async () => {
     page.headers.get("content-security-policy") || "",
     /script-src 'self'/
   );
+});
+
+test("light dashboard serves its real stylesheet and script under the browser CSP", async () => {
+  const pageResponse = await fetch(baseUrl + "/");
+  assert.equal(pageResponse.status, 200);
+  const page = await pageResponse.text();
+  assert.match(page, /href="\/styles\.css"/);
+  assert.match(page, /<script src="\/app\.js" defer><\/script>/);
+
+  const stylesheetResponse = await fetch(baseUrl + "/styles.css");
+  assert.equal(stylesheetResponse.status, 200);
+  assert.match(stylesheetResponse.headers.get("content-type") || "", /^text\/css/);
+  assert.match(stylesheetResponse.headers.get("content-security-policy") || "", /style-src 'self'/);
+  assert.match(await stylesheetResponse.text(), /color-scheme:\s*light/);
+
+  const scriptResponse = await fetch(baseUrl + "/app.js");
+  assert.equal(scriptResponse.status, 200);
+  assert.match(scriptResponse.headers.get("content-type") || "", /^text\/javascript/);
+  assert.match(scriptResponse.headers.get("content-security-policy") || "", /script-src 'self'/);
+  const script = await scriptResponse.text();
+  for (const endpoint of [
+    "/v1/decide", "/v1/targets", "/v1/policies", "/v1/policies/simulate",
+    "/v1/hybrid-plan", "/v1/execute", "/v1/decisions?limit=25",
+    "/v1/outcomes", "/v1/calibration", "/v1/status", "/v1/metrics"
+  ]) {
+    assert.ok(script.includes(endpoint), "dashboard is missing API endpoint " + endpoint);
+  }
+  assert.doesNotMatch(script, /fetch\(["']\/v1\//);
+});
+
+test("dashboard API workflow connects target management, decision, simulation, feedback, policy history and hybrid dry-run", async () => {
+  const targetRegistry = await createConfiguredTargetRegistry({ targetFile: null, providerFile: null });
+  const decisionStore = createDecisionStore({ maxEntries: 50 });
+  const policyStore = createPolicyStore();
+  const calibrator = createCalibrator({ minSamples: 1 });
+  const workflowServer = createServer({
+    targetRegistry,
+    decisionStore,
+    policyStore,
+    calibrator,
+    calibrationEnabled: true,
+    authorizer: createScopedAuthorizer()
+  });
+
+  await new Promise(resolve => workflowServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + workflowServer.address().port;
+  const json = (route, body, extraHeaders = {}) => fetch(url + route, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...extraHeaders },
+    body: JSON.stringify(body)
+  });
+  const localId = "ui-workflow-local";
+  const cloudId = "ui-workflow-cloud";
+  const targetPayloads = [
+    {
+      id: localId,
+      mode: "local",
+      available: true,
+      health: 1,
+      capacity: 0.15,
+      privacy: 1,
+      regions: ["local"],
+      capabilities: ["text-generation"],
+      estimatedLatencyMs: 60,
+      estimatedCostUsd: 0.01
+    },
+    {
+      id: cloudId,
+      mode: "cloud",
+      available: true,
+      health: 0.99,
+      capacity: 0.2,
+      privacy: 0.5,
+      regions: ["ap-south-1"],
+      capabilities: ["text-generation"],
+      estimatedLatencyMs: 35,
+      estimatedCostUsd: 0.025
+    }
+  ];
+
+  try {
+    for (const route of [
+      "/health", "/ready", "/v1/status", "/v1/metrics", "/v1/targets",
+      "/v1/policies", "/v1/decisions?limit=25", "/v1/calibration"
+    ]) {
+      const response = await fetch(url + route);
+      assert.equal(response.status, 200, "dashboard read endpoint failed: " + route);
+      await response.arrayBuffer();
+    }
+
+    for (const target of targetPayloads) {
+      const response = await json("/v1/targets", target);
+      assert.equal(response.status, 201);
+      assert.equal((await response.json()).id, target.id);
+    }
+
+    const registeredResponse = await fetch(url + "/v1/targets");
+    const registered = await registeredResponse.json();
+    assert.equal(registered.targets.length, 2);
+
+    const decisionResponse = await json("/v1/decide", {
+      workload: {
+        type: "ui-workflow-inference",
+        sensitivity: "low",
+        requiredCapabilities: ["text-generation"]
+      },
+      constraints: {
+        latencyBudgetMs: 500,
+        maxCostUsd: 0.1,
+        strictLatency: true,
+        strictCost: true
+      },
+      policy: { profile: "balanced" }
+    });
+    assert.equal(decisionResponse.status, 200);
+    const decision = await decisionResponse.json();
+    assert.ok(decision.decisionId);
+    assert.ok([localId, cloudId].includes(decision.targetId));
+
+    const activityResponse = await fetch(url + "/v1/decisions?limit=25");
+    const activity = await activityResponse.json();
+    assert.equal(activity.decisions.some(item => item.id === decision.decisionId), true);
+
+    const outcomeResponse = await json("/v1/outcomes", {
+      decisionId: decision.decisionId,
+      outcome: "success",
+      actualLatencyMs: 55,
+      actualCostUsd: 0.012
+    });
+    assert.equal(outcomeResponse.status, 200);
+    assert.equal((await outcomeResponse.json()).outcome, "success");
+
+    const metricsResponse = await fetch(url + "/v1/metrics");
+    const metrics = await metricsResponse.json();
+    assert.equal(metrics.totalDecisions, 1);
+    assert.equal(metrics.successRate, 1);
+
+    const calibrationResponse = await fetch(url + "/v1/calibration");
+    const calibration = await calibrationResponse.json();
+    assert.equal(calibration.enabled, true);
+    assert.equal(calibration.entries.length >= 1, true);
+
+    const simulationResponse = await json("/v1/policies/simulate", {
+      workload: { type: "ui-workflow-inference", sensitivity: "low" },
+      constraints: { latencyBudgetMs: 500, maxCostUsd: 0.1 },
+      targets: registered.targets,
+      currentPolicy: { profile: "balanced", allowedModes: ["cloud"] },
+      candidatePolicy: { profile: "balanced", allowedModes: ["local"] }
+    });
+    assert.equal(simulationResponse.status, 200);
+    const simulation = await simulationResponse.json();
+    assert.equal(simulation.mutatedState, false);
+    assert.equal(simulation.executedProvider, false);
+    assert.equal(simulation.current.targetId, cloudId);
+    assert.equal(simulation.candidate.targetId, localId);
+
+    const policyId = "ui-workflow-policy";
+    const policyCreate = await json("/v1/policies", {
+      id: policyId,
+      name: "UI workflow policy",
+      description: "Integration verification",
+      baseProfile: "balanced",
+      weights: {},
+      rules: []
+    });
+    assert.equal(policyCreate.status, 201);
+    const policyList = await fetch(url + "/v1/policies");
+    assert.equal((await policyList.json()).policies.some(item => item.id === policyId), true);
+
+    const historyResponse = await fetch(url + "/v1/policies/" + policyId + "/history");
+    assert.equal(historyResponse.status, 200);
+    assert.equal((await historyResponse.json()).versions.length, 1);
+
+    const rollbackResponse = await json("/v1/policies/" + policyId + "/rollback", { version: 1 });
+    assert.equal(rollbackResponse.status, 200);
+    assert.equal((await rollbackResponse.json()).rolledBackFromVersion, 1);
+    const policyDelete = await fetch(url + "/v1/policies/" + policyId, { method: "DELETE" });
+    assert.equal(policyDelete.status, 200);
+    assert.equal((await policyDelete.json()).removed, policyId);
+
+    const hybridResponse = await json("/v1/hybrid-plan", {
+      workload: { type: "ui-workflow-inference", sensitivity: "low" },
+      constraints: {
+        maxLatencyMs: 500,
+        maxCostUsd: 0.1,
+        strictLatency: true,
+        strictCost: true
+      },
+      policy: { profile: "balanced" },
+      steps: [
+        { id: "prepare", purpose: "Pre-process", targetId: localId, dataSensitivity: "low" },
+        { id: "infer", purpose: "Model inference", targetId: cloudId, dataSensitivity: "low" }
+      ],
+      targets: registered.targets
+    });
+    assert.equal(hybridResponse.status, 200);
+    const plan = await hybridResponse.json();
+    assert.equal(plan.valid, true);
+    assert.equal(plan.steps.length, 2);
+
+    const dryRunResponse = await json("/v1/execute", { plan, mode: "dry-run" });
+    assert.equal(dryRunResponse.status, 200);
+    const dryRun = await dryRunResponse.json();
+    assert.equal(dryRun.mode, "dry-run");
+    assert.equal(dryRun.status, "completed");
+    assert.equal(dryRun.completedSteps, 2);
+    assert.equal(dryRun.receipts.every(item => item.status === "completed"), true);
+
+    for (const id of [localId, cloudId]) {
+      const removed = await fetch(url + "/v1/targets/" + encodeURIComponent(id), { method: "DELETE" });
+      assert.equal(removed.status, 200);
+      assert.equal((await removed.json()).removed, id);
+    }
+  } finally {
+    await new Promise(resolve => workflowServer.close(resolve));
+  }
 });
 
 test("health endpoint reports service readiness", async () => {
@@ -235,11 +451,9 @@ test("readiness probe reports dependency health", async () => {
 });
 
 test("ready endpoint returns 503 when a dependency is unavailable", async () => {
-  const degradedServer = createServer({
-    decisionStore: {
-      summary: async () => { throw new Error("telemetry unavailable"); }
-    }
-  });
+  const decisionStore = createDecisionStore({ maxEntries: 20 });
+  decisionStore.summary = async () => { throw new Error("telemetry unavailable"); };
+  const degradedServer = createServer({ decisionStore });
 
   await new Promise(resolve => degradedServer.listen(0, "127.0.0.1", resolve));
   const address = degradedServer.address();
@@ -452,7 +666,7 @@ test("unexpected dependency failures return a generic 500 without leaking intern
     const body = await response.json();
     assert.equal(body.error, "internal_server_error");
     assert.equal(body.requestId, "error-contract-test");
-    assert.equal("database credential leaked in internal failure" in JSON.stringify(body), false);
+    assert.equal(JSON.stringify(body).includes("database credential leaked in internal failure"), false);
   } finally {
     await new Promise(resolve => failingServer.close(resolve));
   }
@@ -2362,7 +2576,13 @@ test("readiness endpoint reports public service readiness", async () => {
   assert.deepEqual(await response.json(), {
     status: "ready",
     service: "locd-api",
-    version: "0.1.0"
+    version: "0.1.0",
+    checks: {
+      telemetry: "ok",
+      targets: "ok",
+      policies: "ok",
+      coordination: "not_configured"
+    }
   });
 });
 

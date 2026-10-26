@@ -77,6 +77,6 @@ export function createLogger({ level = "info", sink = console.log, clock = () =>
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/~-]{0,127}$/;
 
 export function createRequestId(value) {
-  const supplied = String(value || "").trim();
+  const supplied = String(value || "");
   return REQUEST_ID_PATTERN.test(supplied) ? supplied : randomUUID();
 }

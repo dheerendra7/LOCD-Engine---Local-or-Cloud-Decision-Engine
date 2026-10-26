@@ -167,13 +167,16 @@ test("HTTP policy client maps tenant-scoped CRUD and rollback", async () => {
     { id: "acme-policy", baseProfile: "balanced" },
     { updatedBy: "admin" }
   )).version, 2);
-  assert.equal((await store.rollback("acme", "acme-policy", 1, { updatedBy: "rollback" })).version, 2);
+  const rolledBack = await store.rollback("acme", "acme-policy", 1, { updatedBy: "rollback" });
+  assert.equal(rolledBack.version, 3);
+  assert.equal(rolledBack.rolledBackFromVersion, 1);
   assert.equal(await store.remove("acme", "acme-policy"), true);
 
   assert.equal(calls.every(call => call.options.headers.authorization === "Bearer secret"), true);
   assert.equal(calls[0].options.headers["x-locd-tenant-id"], "acme");
   assert.match(calls[2].url, /\/history$/);
-  assert.match(calls[4].url, /\/acme-policy$/);
+  assert.match(calls[4].url, /\/acme-policy\/rollback$/);
+  assert.match(calls[5].url, /\/acme-policy$/);
 });
 
 test("HTTP state client surfaces non-2xx errors", async () => {

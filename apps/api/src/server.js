@@ -154,7 +154,7 @@ async function serveWeb(res, pathname) {
     const type = types[extension] || "text/plain";
     res.writeHead(200, {
       ...SECURITY_HEADERS,
-      "content-security-policy": "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self';",
+      "content-security-policy": "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self';",
       "content-type": type + "; charset=utf-8",
       "cache-control": "no-store"
     });
@@ -916,7 +916,11 @@ export function createServer({
           if (!candidate.profile) return candidate;
 
           const custom = await policyStore.get(tenantId, candidate.profile);
-          if (!custom) return candidate;
+          if (!custom) {
+            const builtIn = listPolicyProfiles().some(profile => profile.id === candidate.profile);
+            if (!builtIn) throw new Error("unknown_policy_profile");
+            return candidate;
+          }
 
           return {
             ...custom.policy,
@@ -1345,6 +1349,10 @@ export function createServer({
     } catch (error) {
       const message = error instanceof Error ? error.message : "internal_server_error";
 
+      if (message === "unknown_policy_profile") {
+        sendJson(res, 400, { error: "unknown policy profile" });
+        return;
+      }
       if (message === "idempotency_key_reused") {
         sendJson(res, 409, { error: message });
         return;
