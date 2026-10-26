@@ -21,7 +21,7 @@ test("decision console exposes policy simulator controls", async () => {
 
 test("decision console calls the read-only simulator endpoint", async () => {
   const script = await readFile(new URL("app.js", webRoot), "utf8");
-  assert.match(script, /fetch\("\/v1\/policies\/simulate"/);
+  assert.match(script, /portalFetch\("\/v1\/policies\/simulate",\s*portalJsonOptions\(body\)\)/);
   assert.match(script, /idempotency-key/);
   assert.match(script, /mutatedState === false/);
   assert.match(script, /executedProvider === false/);
@@ -153,7 +153,7 @@ test("hybrid planner rejects incomplete stages and single-target plans before ca
   assert.match(script, /Stage IDs must be unique/);
   assert.match(script, /Choose a registered target for every stage/);
   assert.match(script, /Choose at least two distinct registered targets across the stages/);
-  assert.match(script, /new Set\(body\.steps\.map\(step => String\(step\.targetId\)\)\)\.size < 2/);
+  assert.match(script, /new Set\(steps\.map\(step => String\(step\.targetId\)\)\)\.size < 2/);
 });
 
 test("changing the policy catalog invalidates a previously validated hybrid plan", async () => {
