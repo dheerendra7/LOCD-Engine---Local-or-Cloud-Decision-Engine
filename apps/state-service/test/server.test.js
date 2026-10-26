@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { checkReadiness, createGracefulShutdown, createStateServiceServer } from "../src/server.js";
+import { checkReadiness, readBody, createGracefulShutdown, createStateServiceServer } from "../src/server.js";
 import { createSQLiteStateStores } from "../../../packages/sqlite/src/index.js";
 
 async function startServer(apiKey = "state-secret") {
@@ -109,6 +109,7 @@ test("state service graceful shutdown force-closes active connections after its 
 
 test("state service applies HTTP resource guards", () => {
   const guarded = createStateServiceServer({
+    apiKey: "state-secret",
     stores: {
       telemetry: {},
       coordination: {},
@@ -151,27 +152,28 @@ test("state service rejects invalid HTTP resource guard configuration", () => {
   };
 
   assert.throws(
-    () => createStateServiceServer({ stores, requestTimeoutMs: 0 }),
+    () => createStateServiceServer({ stores, apiKey: "state-secret", requestTimeoutMs: 0 }),
     /requestTimeoutMs must be >= 1/
   );
   assert.throws(
-    () => createStateServiceServer({ stores, headersTimeoutMs: 0 }),
+    () => createStateServiceServer({ stores, apiKey: "state-secret", headersTimeoutMs: 0 }),
     /headersTimeoutMs must be >= 1/
   );
   assert.throws(
     () => createStateServiceServer({
       stores,
+      apiKey: "state-secret",
       requestTimeoutMs: 5_000,
       headersTimeoutMs: 5_001
     }),
     /headersTimeoutMs must be <= requestTimeoutMs/
   );
   assert.throws(
-    () => createStateServiceServer({ stores, keepAliveTimeoutMs: -1 }),
+    () => createStateServiceServer({ stores, apiKey: "state-secret", keepAliveTimeoutMs: -1 }),
     /keepAliveTimeoutMs must be >= 0/
   );
   assert.throws(
-    () => createStateServiceServer({ stores, maxRequestsPerSocket: 1.5 }),
+    () => createStateServiceServer({ stores, apiKey: "state-secret", maxRequestsPerSocket: 1.5 }),
     /maxRequestsPerSocket must be a non-negative integer/
   );
 });
