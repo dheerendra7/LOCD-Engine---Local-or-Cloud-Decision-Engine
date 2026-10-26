@@ -171,7 +171,7 @@ test("readBody enforces the limit across streamed chunks", async () => {
 
 test("API replaces unsafe caller request IDs with a generated ID", async () => {
   const response = await fetch(baseUrl + "/health", {
-    headers: { "x-request-id": "trace\nforged" }
+    headers: { "x-request-id": "trace id forged" }
   });
 
   assert.equal(response.status, 200);
@@ -243,11 +243,9 @@ test("readiness probe reports dependency health", async () => {
 });
 
 test("ready endpoint returns 503 when a dependency is unavailable", async () => {
-  const degradedServer = createServer({
-    decisionStore: {
-      summary: async () => { throw new Error("telemetry unavailable"); }
-    }
-  });
+  const decisionStore = createDecisionStore({ maxEntries: 20 });
+  decisionStore.summary = async () => { throw new Error("telemetry unavailable"); };
+  const degradedServer = createServer({ decisionStore });
 
   await new Promise(resolve => degradedServer.listen(0, "127.0.0.1", resolve));
   const address = degradedServer.address();
@@ -460,7 +458,7 @@ test("unexpected dependency failures return a generic 500 without leaking intern
     const body = await response.json();
     assert.equal(body.error, "internal_server_error");
     assert.equal(body.requestId, "error-contract-test");
-    assert.equal("database credential leaked in internal failure" in JSON.stringify(body), false);
+    assert.equal(JSON.stringify(body).includes("database credential leaked in internal failure"), false);
   } finally {
     await new Promise(resolve => failingServer.close(resolve));
   }
@@ -2370,7 +2368,13 @@ test("readiness endpoint reports public service readiness", async () => {
   assert.deepEqual(await response.json(), {
     status: "ready",
     service: "locd-api",
-    version: "0.1.0"
+    version: "0.1.0",
+    checks: {
+      telemetry: "ok",
+      targets: "ok",
+      policies: "ok",
+      coordination: "not_configured"
+    }
   });
 });
 

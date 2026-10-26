@@ -308,7 +308,7 @@ test("state service hides unexpected storage failures behind a generic 500", asy
       error: "internal_server_error",
       requestId: "state-error-contract"
     });
-    assert.equal("internal sqlite password should never reach the client" in JSON.stringify(body), false);
+    assert.equal(JSON.stringify(body).includes("internal sqlite password should never reach the client"), false);
   } finally {
     instance.stores.telemetry.record = originalRecord;
     await instance.cleanup();

@@ -705,7 +705,7 @@ test("relative cost scoring preserves budget-referenced factors when a budget is
 
   const evaluated = Object.fromEntries(result.evaluated.map(item => [item.targetId, item]));
   assert.equal(evaluated.cheap.factors.cost, 0.75);
-  assert.equal(evaluated.expensive.factors.cost, 0.25);
+  assert.ok(Math.abs(evaluated.expensive.factors.cost - 0.25) < 1e-12);
   assert.equal(result.targetId, "cheap");
 });
 

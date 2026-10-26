@@ -940,7 +940,11 @@ export function createServer({
           if (!candidate.profile) return candidate;
 
           const custom = await policyStore.get(tenantId, candidate.profile);
-          if (!custom) return candidate;
+          if (!custom) {
+            const builtIn = listPolicyProfiles().some(profile => profile.id === candidate.profile);
+            if (!builtIn) throw new Error("unknown_policy_profile");
+            return candidate;
+          }
 
           return {
             ...custom.policy,
@@ -1369,6 +1373,10 @@ export function createServer({
     } catch (error) {
       const message = error instanceof Error ? error.message : "internal_server_error";
 
+      if (message === "unknown_policy_profile") {
+        sendJson(res, 400, { error: "unknown policy profile" });
+        return;
+      }
       if (message === "idempotency_key_reused") {
         sendJson(res, 409, { error: message });
         return;

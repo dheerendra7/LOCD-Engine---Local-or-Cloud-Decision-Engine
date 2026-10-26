@@ -102,9 +102,9 @@ test("CLI backup command creates a database copy", async () => {
     assert.equal(JSON.parse(output[0]).destination, path.resolve(destination));
 
     const restored = new DatabaseSync(destination);
-    assert.deepEqual(
-      restored.prepare("SELECT value FROM data WHERE key = ?").get("k"),
-      { value: "v" }
+    assert.equal(
+      restored.prepare("SELECT value FROM data WHERE key = ?").get("k").value,
+      "v"
     );
     restored.close();
   } finally {
