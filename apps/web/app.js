@@ -1044,7 +1044,38 @@ function renderReliability(data) {
   const timelineRoot = document.querySelector("#reliabilityTimeline");
   const providerBody = document.querySelector("#reliabilityProviderBody");
   const eventBody = document.querySelector("#reliabilityEventsBody");
+  const sloBadge = document.querySelector("#sloStateBadge");
+  const sloAlertsBody = document.querySelector("#sloAlertsBody");
+  const slo = data?.slo;
+  const sloStateLabels = {
+    healthy: "Healthy",
+    warning: "Warning",
+    critical: "Critical",
+    insufficient_data: "Insufficient data",
+    incomplete_data: "Incomplete data"
+  };
+  const sloStateClass = state =>
+    state === "healthy" ? "good" :
+      state === "warning" ? "warn" :
+        state === "critical" ? "bad" :
+          state === "incomplete_data" ? "warn" : "";
+  const renderSloUnavailable = () => {
+    if (sloBadge) {
+      sloBadge.textContent = "Unavailable";
+      sloBadge.className = "state-badge";
+    }
+    setText("sloAvailability", "—");
+    setText("sloBudgetConsumed", "—");
+    setText("sloBudgetRemaining", "—");
+    setText("sloBurnRate", "—");
+    setText("sloSamples", "—");
+    setText("sloPolicyText", "Availability SLO configuration is unavailable.");
+    setText("sloDataQuality", "SLO status cannot be evaluated from this API response.");
+    if (sloAlertsBody) sloAlertsBody.innerHTML =
+      '<tr><td colspan="5" class="table-empty">SLO alerts are unavailable.</td></tr>';
+  };
   if (!data || data.available !== true) {
+    renderSloUnavailable();
     if (summaryRoot) summaryRoot.innerHTML =
       '<article class="stat-card"><div class="stat-topline">Provider attempts</div><div class="stat-value">—</div></article>' +
       '<article class="stat-card"><div class="stat-topline">Successes</div><div class="stat-value">—</div></article>' +
@@ -1078,6 +1109,70 @@ function renderReliability(data) {
   setText("reliabilityRecoveryLegend", "Recovery attempts: " + safeCount(summary.recoveryAttempts) +
     " · Completed recoveries: " + safeCount(summary.recoveries));
 
+  if (!slo || !slo.overall || !slo.policy) {
+    renderSloUnavailable();
+  } else {
+    const overall = slo.overall;
+    const label = sloStateLabels[overall.status] || "Unknown";
+    if (sloBadge) {
+      sloBadge.textContent = label;
+      sloBadge.className = "state-badge " + sloStateClass(overall.status);
+    }
+    const percent = value => Number.isFinite(value) && value >= 0 && value <= 1
+      ? formatPercent(value)
+      : "—";
+    const budget = value => Number.isFinite(value) && value >= 0
+      ? Number(value.toFixed(1)) + "%"
+      : "—";
+    const burn = value => Number.isFinite(value) && value >= 0
+      ? Number(value.toFixed(2)) + "×"
+      : "—";
+    setText("sloAvailability", percent(overall.availability));
+    setText("sloBudgetConsumed", budget(overall.errorBudgetConsumedPercent));
+    setText("sloBudgetRemaining", budget(overall.errorBudgetRemainingPercent));
+    setText("sloBurnRate", burn(overall.errorBudgetBurnRate));
+    setText("sloSamples", safeCount(overall.attempts) + " / " + safeCount(overall.sampleThreshold));
+
+    const sloPolicy = slo.policy;
+    setText("sloPolicyText",
+      "Target " + percent(sloPolicy.availabilityTarget) +
+      " · warning " + burn(sloPolicy.warningBurnRate) +
+      " · critical " + burn(sloPolicy.criticalBurnRate) +
+      " · minimum " + safeCount(sloPolicy.minimumSamples) + " outcomes");
+    const quality = slo.dataQuality || {};
+    const qualityParts = [
+      quality.complete === true ? "History complete" : "History incomplete",
+      quality.truncated === true ? "retention truncated" : "no retention truncation",
+      safeCount(quality.historyWriteFailures) + " history write gaps"
+    ];
+    if (overall.status === "insufficient_data") qualityParts.push("minimum sample threshold not reached");
+    if (overall.status === "incomplete_data") qualityParts.push("SLO assertions suppressed until data is complete");
+    setText("sloDataQuality", qualityParts.join(" · "));
+
+    const alerts = Array.isArray(slo.alerts) ? slo.alerts : [];
+    if (sloAlertsBody) {
+      sloAlertsBody.innerHTML = alerts.length
+        ? alerts.map(alert => {
+            const item = alert && typeof alert === "object" ? alert : {};
+            const severity = item.severity === "critical" ? "critical" : "warning";
+            const scope = item.scope === "provider" ? "Provider · " + (item.targetId || "Unknown") : "Overall";
+            const alertBurn = burn(item.errorBudgetBurnRate);
+            return '<tr><td><span class="state-badge ' + sloStateClass(severity) + '">' +
+              (severity === "critical" ? "Critical" : "Warning") +
+              "</span></td><td>" + escapeHtml(scope) + "</td><td>" +
+              escapeHtml(item.message || item.code || "SLO threshold exceeded") + "</td><td>" +
+              escapeHtml(alertBurn) + "</td><td>" + safeCount(item.attempts) + "</td></tr>";
+          }).join("")
+        : '<tr><td colspan="5" class="table-empty">' +
+          (overall.status === "insufficient_data"
+            ? "No actionable alerts: minimum sample threshold not reached."
+            : overall.status === "incomplete_data"
+              ? "No actionable alerts: reliability history is incomplete."
+              : "No SLO threshold alerts in the selected time window.") +
+          "</td></tr>";
+    }
+  }
+
   const timeline = Array.isArray(data.timeline) ? data.timeline : [];
   if (timelineRoot) {
     const maxVolume = Math.max(1, ...timeline.map(bucket =>
@@ -1104,6 +1199,8 @@ function renderReliability(data) {
   }
 
   const providers = Array.isArray(data.providers) ? data.providers : [];
+  const providerSlo = new Map((Array.isArray(slo?.providers) ? slo.providers : [])
+    .map(item => [item.targetId, item]));
   if (providerBody) {
     providerBody.innerHTML = providers.length
       ? providers.map(provider => {
@@ -1111,13 +1208,20 @@ function renderReliability(data) {
           const recoveryDuration = Number.isFinite(item.averageRecoveryDurationMs)
             ? formatCircuitDuration(Math.round(item.averageRecoveryDurationMs))
             : null;
+          const sloItem = providerSlo.get(item.targetId);
+          const sloLabel = sloItem ? (sloStateLabels[sloItem.status] || "Unknown") : "—";
+          const sloClass = sloItem ? sloStateClass(sloItem.status) : "";
+          const sloBurn = sloItem && Number.isFinite(sloItem.errorBudgetBurnRate)
+            ? Number(sloItem.errorBudgetBurnRate.toFixed(2)) + "×"
+            : "—";
           return "<tr><td><strong>" + escapeHtml(item.targetId || "Unknown provider") + "</strong></td>" +
             "<td>" + safeCount(item.attempts) + "</td><td>" + safeCount(item.successes) +
             "</td><td>" + safeCount(item.failures) + "</td><td>" + escapeHtml(rate(item.failureRate)) +
-            "</td><td>" + safeCount(item.recoveries) + "</td><td>" +
+            '</td><td><span class="state-badge ' + sloClass + '">' + escapeHtml(sloLabel) + "</span></td><td>" +
+            escapeHtml(sloBurn) + "</td><td>" + safeCount(item.recoveries) + "</td><td>" +
             escapeHtml(recoveryDuration || "—") + "</td></tr>";
         }).join("")
-      : '<tr><td colspan="7" class="table-empty">No provider outcomes in the selected time window.</td></tr>';
+      : '<tr><td colspan="9" class="table-empty">No provider outcomes in the selected time window.</td></tr>';
   }
 
   const labels = {

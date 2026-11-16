@@ -219,3 +219,11 @@ Use LOCD_COORDINATION_URL instead when you need shared rate limiting/idempotency
 The circuit breaker also maintains a bounded, tenant-scoped operational event history. Defaults are seven days and 2,000 events per tenant. Configure with `LOCD_CIRCUIT_BREAKER_HISTORY_RETENTION_MS` and `LOCD_CIRCUIT_BREAKER_HISTORY_MAX_ENTRIES`. Events contain provider identifiers, timestamps, operation source, success/failure and circuit transitions only; workload payloads and credentials are excluded.
 
 When SQLite or the network State Service provides shared atomic coordination, history is shared across API instances and survives API restarts within the configured retention. With process-local coordination it is isolated to the process and is lost on restart. Treat this bounded history as operational analytics, not as a permanent compliance or audit record. The authenticated `GET /v1/reliability` endpoint exposes time-window summaries, provider breakdowns and recent events.
+
+## Availability SLO and error-budget alerts
+
+LOCD evaluates provider availability from the bounded success/failure history. Defaults are a 99.9% availability target, 20 minimum outcomes before evaluation, warning at 2× the permitted error-budget burn rate and critical at 5×. Configure these with `LOCD_RELIABILITY_SLO_TARGET`, `LOCD_RELIABILITY_SLO_MIN_SAMPLES`, `LOCD_RELIABILITY_SLO_WARNING_BURN_RATE` and `LOCD_RELIABILITY_SLO_CRITICAL_BURN_RATE`.
+
+The selected API history window defines the measurement period. Error-budget consumption is observed failures divided by the failures permitted by that objective for the same window; burn rate may exceed 100% of budget. Low sample volume yields `insufficient_data`. Any known history truncation or write gap yields `incomplete_data` and suppresses threshold alerts to avoid false confidence.
+
+Alerts are deterministic, tenant-scoped API/dashboard signals only. This implementation does not deliver notifications or trigger provider routing changes. Configure history retention to cover the operational SLO window you need; the default seven-day history is not a 30-day SLO store.

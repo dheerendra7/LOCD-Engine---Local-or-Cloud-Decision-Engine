@@ -849,7 +849,9 @@ test("provider reliability trends render safe aggregates, buckets, providers and
   const script = await readFile(new URL("app.js", webRoot), "utf8");
   for (const id of [
     "reliabilityWindow", "reliabilityStatus", "reliabilitySummary",
-    "reliabilityTimeline", "reliabilityProviderBody", "reliabilityEventsBody"
+    "reliabilityTimeline", "reliabilityProviderBody", "reliabilityEventsBody",
+    "sloStateBadge", "sloPolicyText", "sloAvailability", "sloBudgetConsumed",
+    "sloBudgetRemaining", "sloBurnRate", "sloSamples", "sloDataQuality", "sloAlertsBody"
   ]) {
     assert.match(html, new RegExp('id="' + id + '"'), "missing reliability field: " + id);
   }
@@ -862,8 +864,11 @@ test("provider reliability trends render safe aggregates, buckets, providers and
     "#reliabilitySummary": { innerHTML: "" },
     "#reliabilityTimeline": { innerHTML: "" },
     "#reliabilityProviderBody": { innerHTML: "" },
-    "#reliabilityEventsBody": { innerHTML: "" }
+    "#reliabilityEventsBody": { innerHTML: "" },
+    "#sloStateBadge": { textContent: "", className: "" },
+    "#sloAlertsBody": { innerHTML: "" }
   };
+  const textValues = {};
   const runtime = new Function(
     "document", "setText", "escapeHtml", "formatPercent",
     "formatCircuitTimestamp", "formatCircuitDuration",
@@ -871,7 +876,7 @@ test("provider reliability trends render safe aggregates, buckets, providers and
   );
   const render = runtime(
     { querySelector: selector => nodes[selector] || null },
-    () => {},
+    (id, value) => { textValues[id] = String(value); },
     value => String(value ?? "")
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
@@ -901,7 +906,31 @@ test("provider reliability trends render safe aggregates, buckets, providers and
       type: "provider_failure",
       source: "manual_probe",
       transition: "opened"
-    }]
+    }],
+    slo: {
+      policy: {
+        availabilityTarget: 0.99,
+        minimumSamples: 20,
+        warningBurnRate: 2,
+        criticalBurnRate: 5
+      },
+      overall: {
+        status: "warning", attempts: 100, successes: 98, failures: 2,
+        availability: 0.98, errorBudgetBurnRate: 2,
+        errorBudgetConsumedPercent: 200, errorBudgetRemainingPercent: 0,
+        sampleThreshold: 20
+      },
+      dataQuality: { complete: true, truncated: false, historyWriteFailures: 0 },
+      providers: [{
+        targetId: '<img src=x onerror="alert(1)">',
+        status: "critical", attempts: 100, errorBudgetBurnRate: 8
+      }],
+      alerts: [
+        { severity: "warning", scope: "overall", message: "Overall burn exceeded", errorBudgetBurnRate: 2, attempts: 100 },
+        { severity: "critical", scope: "provider", targetId: '<img src=x onerror="alert(1)">', message: "Provider <img> burn exceeded", errorBudgetBurnRate: 8, attempts: 100 }
+      ],
+      alertCount: 2
+    }
   });
 
   assert.match(nodes["#reliabilitySummary"].innerHTML, /Provider attempts/);
@@ -914,7 +943,22 @@ test("provider reliability trends render safe aggregates, buckets, providers and
   assert.match(nodes["#reliabilityEventsBody"].innerHTML, /Manual probe/);
   assert.match(nodes["#reliabilityEventsBody"].innerHTML, /opened/);
   assert.match(nodes["#reliabilityEventsBody"].innerHTML, /&lt;img/);
+  assert.equal(nodes["#sloStateBadge"].textContent, "Warning");
+  assert.equal(nodes["#sloStateBadge"].className, "state-badge warn");
+  assert.equal(textValues.sloAvailability, "98%");
+  assert.equal(textValues.sloBudgetConsumed, "200%");
+  assert.equal(textValues.sloBudgetRemaining, "0%");
+  assert.equal(textValues.sloBurnRate, "2×");
+  assert.equal(textValues.sloSamples, "100 / 20");
+  assert.match(nodes["#reliabilityProviderBody"].innerHTML, /Critical/);
+  assert.match(nodes["#reliabilityProviderBody"].innerHTML, /8×/);
+  assert.match(nodes["#sloAlertsBody"].innerHTML, /Overall burn exceeded/);
+  assert.match(nodes["#sloAlertsBody"].innerHTML, /Critical/);
+  assert.match(nodes["#sloAlertsBody"].innerHTML, /&lt;img/);
+  assert.doesNotMatch(nodes["#sloAlertsBody"].innerHTML, /<img/);
 
   render(null);
   assert.match(nodes["#reliabilityEventsBody"].innerHTML, /unavailable/);
+  assert.equal(nodes["#sloStateBadge"].textContent, "Unavailable");
+  assert.match(nodes["#sloAlertsBody"].innerHTML, /unavailable/);
 });

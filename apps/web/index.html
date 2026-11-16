@@ -155,6 +155,33 @@
               </label>
             </div>
             <div id="reliabilityStatus" class="status" role="status" aria-live="polite">Loading provider reliability history…</div>
+            <section class="slo-panel" aria-labelledby="reliabilitySloHeading">
+              <div class="section-heading slo-heading">
+                <div>
+                  <div class="section-label">Service level objective</div>
+                  <h3 id="reliabilitySloHeading">Availability SLO & error budget</h3>
+                  <p id="sloPolicyText">Evaluating provider availability against the configured objective…</p>
+                </div>
+                <span id="sloStateBadge" class="state-badge" role="status" aria-live="polite">Checking SLO</span>
+              </div>
+              <div class="system-grid slo-metrics" aria-label="Availability SLO measurements">
+                <div class="system-item"><span>Observed availability</span><strong id="sloAvailability">—</strong></div>
+                <div class="system-item"><span>Error budget consumed</span><strong id="sloBudgetConsumed">—</strong></div>
+                <div class="system-item"><span>Error budget remaining</span><strong id="sloBudgetRemaining">—</strong></div>
+                <div class="system-item"><span>Budget burn rate</span><strong id="sloBurnRate">—</strong></div>
+                <div class="system-item"><span>Eligible samples</span><strong id="sloSamples">—</strong></div>
+              </div>
+              <div id="sloDataQuality" class="status" style="margin-top:10px">Checking reliability data completeness…</div>
+              <div class="slo-alerts">
+                <div class="section-heading"><div><h4>Threshold alerts</h4><p>Read-only evaluations; no notifications are dispatched.</p></div></div>
+                <div class="data-table-wrap">
+                  <table class="data-table" aria-label="Availability SLO threshold alerts">
+                    <thead><tr><th>Severity</th><th>Scope</th><th>Signal</th><th>Burn</th><th>Samples</th></tr></thead>
+                    <tbody id="sloAlertsBody"><tr><td colspan="5" class="table-empty">Evaluating SLO thresholds…</td></tr></tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
             <div id="reliabilitySummary" class="stats-grid reliability-stat-grid" aria-label="Provider reliability summary">
               <article class="stat-card"><div class="stat-topline">Provider attempts</div><div class="stat-value">—</div></article>
               <article class="stat-card"><div class="stat-topline">Successes</div><div class="stat-value">—</div></article>
@@ -174,8 +201,8 @@
               <div class="section-heading"><div><h3>Provider breakdown</h3><p>Outcome rates and circuit recovery history per provider.</p></div></div>
               <div class="data-table-wrap">
                 <table class="data-table" aria-label="Provider reliability breakdown">
-                  <thead><tr><th>Provider</th><th>Attempts</th><th>Successes</th><th>Failures</th><th>Failure rate</th><th>Recoveries</th><th>Avg. recovery</th></tr></thead>
-                  <tbody id="reliabilityProviderBody"><tr><td colspan="7" class="table-empty">Loading provider breakdown…</td></tr></tbody>
+                  <thead><tr><th>Provider</th><th>Attempts</th><th>Successes</th><th>Failures</th><th>Failure rate</th><th>SLO state</th><th>Burn</th><th>Recoveries</th><th>Avg. recovery</th></tr></thead>
+                  <tbody id="reliabilityProviderBody"><tr><td colspan="9" class="table-empty">Loading provider breakdown…</td></tr></tbody>
                 </table>
               </div>
             </div>

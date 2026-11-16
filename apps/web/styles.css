@@ -319,3 +319,17 @@ summary { color: #53627a; cursor: pointer; font-size: 11px; font-weight: 700; }
   .reliability-range { width: 100%; margin-top: 10px; }
   .reliability-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+.slo-panel { border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin: 14px 0 16px; background: var(--surface-soft); }
+.slo-heading { align-items: flex-start; }
+.slo-heading h3 { margin: 0; font-size: 13px; }
+.slo-heading p { margin: 4px 0 0; font-size: 10px; color: var(--muted); }
+.slo-metrics { margin-top: 12px; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.slo-metrics .system-item { background: var(--surface); }
+.slo-alerts { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; }
+.slo-alerts .section-heading { margin-bottom: 8px; }
+.slo-alerts h4 { font-size: 11px; margin: 0; }
+.slo-alerts p { color: var(--muted); font-size: 10px; margin: 3px 0 0; }
+@media (max-width: 800px) {
+  .slo-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

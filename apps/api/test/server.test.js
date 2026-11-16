@@ -4271,3 +4271,59 @@ test("reliability history is tenant-isolated and accessible with read scope", as
     await new Promise(resolve => reliabilityServer.close(resolve));
   }
 });
+
+
+test("reliability endpoint evaluates tenant-scoped SLO burn and read-only alerts", async () => {
+  const circuitBreaker = createCircuitBreaker({
+    store: createInMemoryCoordinationStore(),
+    failureThreshold: 1,
+    failureWindowMs: 60_000,
+    cooldownMs: 30_000
+  });
+  await circuitBreaker.recordFailure("slo-tenant", "failed-provider-a");
+  await circuitBreaker.recordFailure("slo-tenant", "failed-provider-b");
+  for (let index = 0; index < 8; index++) {
+    await circuitBreaker.recordSuccess("slo-tenant", "healthy-provider-" + index);
+  }
+
+  const authorizer = createScopedAuthorizer({
+    keys: [{
+      id: "slo-reader",
+      secret: "slo-read-secret",
+      tenantId: "slo-tenant",
+      scopes: ["read"]
+    }]
+  });
+  const sloServer = createServer({
+    circuitBreaker,
+    authorizer,
+    reliabilitySloAvailabilityTarget: 0.9,
+    reliabilitySloMinimumSamples: 10,
+    reliabilitySloWarningBurnRate: 2,
+    reliabilitySloCriticalBurnRate: 5
+  });
+  await new Promise(resolve => sloServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + sloServer.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/reliability?windowMs=3600000", {
+      headers: { authorization: "Bearer slo-read-secret" }
+    });
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.equal(data.summary.attempts, 10);
+    assert.equal(data.summary.failures, 2);
+    assert.equal(data.slo.policy.availabilityTarget, 0.9);
+    assert.equal(data.slo.overall.status, "warning");
+    assert.equal(data.slo.overall.errorBudgetBurnRate, 2);
+    assert.equal(data.slo.overall.errorBudgetConsumedPercent, 200);
+    assert.equal(data.slo.overall.errorBudgetRemainingPercent, 0);
+    assert.equal(data.slo.alertCount, 1);
+    assert.equal(data.slo.alerts[0].scope, "overall");
+    assert.equal(data.slo.alerts[0].severity, "warning");
+    assert.equal(data.slo.alerts[0].code, "availability_slo_burn_high");
+    assert.equal(data.slo.dataQuality.complete, true);
+  } finally {
+    await new Promise(resolve => sloServer.close(resolve));
+  }
+});

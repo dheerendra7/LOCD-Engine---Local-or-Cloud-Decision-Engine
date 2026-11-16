@@ -18,6 +18,7 @@ import {
   createInMemoryCoordinationStore
 } from "../../../packages/coordination/src/index.js";
 import { createCircuitBreaker } from "../../../packages/resilience/src/index.js";
+import { createReliabilitySloEvaluator } from "../../../packages/reliability/src/slo.js";
 import { createProbeScheduler } from "../../../packages/probing/src/index.js";
 import {
   createDryRunExecutionAdapter,
@@ -513,6 +514,10 @@ export function createServer({
   circuitBreakerProbeLeaseMs = Number(process.env.LOCD_CIRCUIT_BREAKER_PROBE_LEASE_MS || 60_000),
   circuitBreakerHistoryRetentionMs = Number(process.env.LOCD_CIRCUIT_BREAKER_HISTORY_RETENTION_MS || 604_800_000),
   circuitBreakerHistoryMaxEntries = Number(process.env.LOCD_CIRCUIT_BREAKER_HISTORY_MAX_ENTRIES || 2_000),
+  reliabilitySloAvailabilityTarget = Number(process.env.LOCD_RELIABILITY_SLO_TARGET || 0.999),
+  reliabilitySloMinimumSamples = Number(process.env.LOCD_RELIABILITY_SLO_MIN_SAMPLES || 20),
+  reliabilitySloWarningBurnRate = Number(process.env.LOCD_RELIABILITY_SLO_WARNING_BURN_RATE || 2),
+  reliabilitySloCriticalBurnRate = Number(process.env.LOCD_RELIABILITY_SLO_CRITICAL_BURN_RATE || 5),
   logger = createLogger({
     level: process.env.LOCD_LOG_LEVEL || "info"
   }),
@@ -630,6 +635,13 @@ export function createServer({
       throw new Error("circuitBreaker must implement " + method + "()");
     }
   }
+  const reliabilitySloEvaluator = createReliabilitySloEvaluator({
+    availabilityTarget: reliabilitySloAvailabilityTarget,
+    minimumSamples: reliabilitySloMinimumSamples,
+    warningBurnRate: reliabilitySloWarningBurnRate,
+    criticalBurnRate: reliabilitySloCriticalBurnRate
+  });
+
   if (probeScheduler && typeof probeScheduler.setHooks === "function") {
     probeScheduler.setHooks({
       beforeProbe: async ({ targetId, tenantId: probeTenantId = "default" }) => {
@@ -1615,7 +1627,8 @@ export function createServer({
           return;
         }
         const report = await effectiveCircuitBreaker.history(tenantId, { windowMs, limit });
-        sendJson(res, 200, report);
+        const slo = reliabilitySloEvaluator.evaluate(report);
+        sendJson(res, 200, { ...report, slo });
         return;
       }
 
@@ -1656,6 +1669,8 @@ export function createServer({
             sharedCircuitBreaker: circuitBreakerBackend === "shared",
             reliabilityHistoryEnabled: typeof effectiveCircuitBreaker.history === "function",
             reliabilityHistoryBackend: circuitBreakerBackend,
+            reliabilitySloEnabled: true,
+            reliabilitySloTarget: reliabilitySloEvaluator.policy.availabilityTarget,
             sharedCoordination: Boolean(coordinationStore),
             coordinationBackend: coordinationBackend ||
               (coordinationStore ? "shared" : "process-local"),
