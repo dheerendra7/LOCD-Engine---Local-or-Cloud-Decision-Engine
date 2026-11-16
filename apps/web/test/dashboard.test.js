@@ -760,3 +760,18 @@ test("dashboard text and status colors meet WCAG AA contrast targets", async () 
   }
   assert.match(css, /:focus-visible[\s\S]*?outline:\s*3px solid var\(--blue\)/);
 });
+
+
+test("all dashboard form controls have programmatic labels", async () => {
+  const html = await readFile(new URL("index.html", webRoot), "utf8");
+  const controls = [...html.matchAll(/<(input|select|textarea)\b[^>]*\bid="([^"]+)"[^>]*>/gi)];
+  const labels = [...html.matchAll(/<label\b([^>]*)>([\s\S]*?)<\/label>/gi)];
+  assert.ok(controls.length > 0, "dashboard form controls should exist");
+
+  for (const control of controls) {
+    const id = control[2];
+    const nested = labels.some(label => label[2].includes(control[0]));
+    const explicit = labels.some(label => new RegExp("\\\\bfor=[\\"']" + id + "[\\"']").test(label[1]));
+    assert.ok(nested || explicit, "form control #" + id + " must have an associated label");
+  }
+});
