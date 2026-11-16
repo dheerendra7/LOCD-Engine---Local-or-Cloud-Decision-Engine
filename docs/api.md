@@ -275,10 +275,13 @@ When no request-scoped targets are supplied and the target registry is empty, PO
 
 Validates an explicit multi-stage hybrid execution plan against registered or request-scoped targets and policy.
 
-Each step contains a stable id, purpose and targetId. The planner returns:
+Each step contains a stable id, purpose and targetId, plus optional dataSensitivity (which defaults to the workload sensitivity). Conditional policy rules are evaluated independently for each step using its effective sensitivity, the workload type and declared required capabilities. A rule matched by at least one step is listed once in policyRulesApplied.
+
+The planner returns:
 
 - valid: whether every step satisfies hard policy/availability checks
 - steps: normalized stage information
+- policyRulesApplied: unique IDs of rules matched by one or more stages
 - estimated.latencyMs: sequential sum of stage latency estimates
 - estimated.costUsd: sum of stage cost estimates
 - rejected: stage-level and plan-level rejection reasons
