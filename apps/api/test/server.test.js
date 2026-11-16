@@ -2977,6 +2977,104 @@ test("API calibration rehydrates from durable telemetry without double counting"
 });
 
 
+test("SQLite startup hydration replays calibration by outcome time, not decision order", async () => {
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "locd-calibration-order-"));
+  const stateFile = path.join(stateDir, "state.db");
+  const stores = createSQLiteStateStores({ filePath: stateFile, maxEntries: 20 });
+  const observations = [
+    {
+      id: "decision-old",
+      timestamp: "2026-11-16T10:00:00.000Z",
+      outcomeTimestamp: "2026-11-16T10:20:00.000Z",
+      latencyRatio: 1.2
+    },
+    {
+      id: "decision-middle",
+      timestamp: "2026-11-16T10:10:00.000Z",
+      outcomeTimestamp: "2026-11-16T10:30:00.000Z",
+      latencyRatio: 1.4
+    },
+    {
+      id: "decision-new",
+      timestamp: "2026-11-16T10:15:00.000Z",
+      outcomeTimestamp: "2026-11-16T10:10:00.000Z",
+      latencyRatio: 1.8
+    }
+  ];
+
+  for (const observation of observations) {
+    stores.telemetry.record({
+      id: observation.id,
+      timestamp: observation.timestamp,
+      route: "local",
+      targetId: "hydrate-target",
+      workloadType: "hydrate-test",
+      estimatedLatencyMs: 100,
+      estimatedCostUsd: 0.01,
+      targetUtilization: 0.1,
+      confidence: 0.9
+    });
+    stores.telemetry.recordOutcome(observation.id, {
+      outcome: "success",
+      actualLatencyMs: 100 * observation.latencyRatio,
+      actualCostUsd: 0.01 * observation.latencyRatio,
+      timestamp: observation.outcomeTimestamp
+    });
+  }
+
+  const listed = stores.telemetry.list({ limit: 10 });
+  assert.deepEqual(listed.map(event => event.id), [
+    "decision-new",
+    "decision-middle",
+    "decision-old"
+  ]);
+
+  const calibrator = createCalibrator({ minSamples: 1, alpha: 0.5 });
+  const hydrationServer = createServer({
+    decisionStore: stores.telemetry,
+    calibrator,
+    calibrationEnabled: true
+  });
+  await new Promise(resolve => hydrationServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + hydrationServer.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workload: { type: "hydrate-test", sensitivity: "low" },
+        targets: [{
+          id: "hydrate-target",
+          mode: "local",
+          health: 1,
+          capacity: 0.1,
+          privacy: 1,
+          estimatedLatencyMs: 100,
+          estimatedCostUsd: 0.01
+        }]
+      })
+    });
+    assert.equal(response.status, 200);
+    const decision = await response.json();
+    assert.equal(decision.estimated.latencyMs, 145);
+    assert.equal(decision.estimated.costUsd, 0.0145);
+    assert.deepEqual(decision.calibration.adjustedTargetIds, ["hydrate-target"]);
+
+    const stateResponse = await fetch(url + "/v1/calibration");
+    assert.equal(stateResponse.status, 200);
+    const state = await stateResponse.json();
+    assert.equal(state.entries.length, 1);
+    assert.equal(state.entries[0].samples, 3);
+    assert.equal(state.entries[0].latencyFactor, 1.45);
+    assert.equal(state.entries[0].costFactor, 1.45);
+  } finally {
+    await new Promise(resolve => hydrationServer.close(resolve));
+    stores.close();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("two API instances can share coordination state through an async coordination backend", async () => {
   const coordination = createInMemoryCoordinationStore();
   const serverA = createServer({
