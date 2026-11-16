@@ -688,27 +688,32 @@ test("section navigation announces the current location to assistive technology"
   const end = script.indexOf("\n}", start) + 2;
   assert.ok(start >= 0 && end > start);
   const helper = script.slice(start, end);
-  const state = new Map();
+  const classStates = new Map();
+  const breadcrumbs = {};
   const links = navLinks.map(match => ({
     dataset: { nav: match[1] },
     textContent: match[1],
     attributes: new Map(),
-    classList: { toggle(name, enabled) { if (name === "active") state.set(match[1], enabled); } },
+    classList: { toggle(name, enabled) { if (name === "active") classStates.set(match[1], enabled); } },
     setAttribute(name, value) { this.attributes.set(name, value); },
     removeAttribute(name) { this.attributes.delete(name); }
   }));
   const runtime = new Function(
     "document", "setText", helper + "; return setActiveNavigation;"
-  )({ querySelectorAll: () => links }, (id, value) => { state.set(id, value); });
+  )({ querySelectorAll: () => links }, (id, value) => { breadcrumbs[id] = value; });
 
   runtime("hybrid-planner");
-  assert.equal(state.get("hybrid-planner"), "hybrid-planner");
+  assert.equal(classStates.get("hybrid-planner"), true);
   assert.equal(links.find(link => link.dataset.nav === "hybrid-planner").attributes.get("aria-current"), "location");
   assert.equal(links.filter(link => link.attributes.has("aria-current")).length, 1);
-  assert.equal([...state.entries()].filter(([key, value]) => key !== "breadcrumbCurrent" && value === true).length, 1);
+  assert.equal([...classStates.values()].filter(Boolean).length, 1);
+  assert.equal(breadcrumbs.breadcrumbCurrent, "hybrid-planner");
 
   runtime("system-settings");
   assert.equal(links.find(link => link.dataset.nav === "hybrid-planner").attributes.has("aria-current"), false);
+  assert.equal(classStates.get("hybrid-planner"), false);
   assert.equal(links.find(link => link.dataset.nav === "system-settings").attributes.get("aria-current"), "location");
+  assert.equal(classStates.get("system-settings"), true);
+  assert.equal(breadcrumbs.breadcrumbCurrent, "system-settings");
   assert.equal(links.filter(link => link.attributes.has("aria-current")).length, 1);
 });
