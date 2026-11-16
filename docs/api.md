@@ -307,9 +307,9 @@ Calibration fields in GET /v1/metrics include successRate, meanAbsoluteLatencyEr
 
 ## Retry safety
 
-All POST endpoints under /v1 support an optional Idempotency-Key header.
+All POST, PUT and PATCH endpoints under /v1 support an optional Idempotency-Key header.
 
-When the same key and request body are received within the bounded in-memory retention window, LOCD returns the original response and sets Idempotency-Replayed: true.
+When the same key and request body are received within the bounded retention window, LOCD returns the original response and sets Idempotency-Replayed: true. While the original request is processing, the built-in idempotency stores renew its owner-fenced lease so work that takes longer than the initial lock TTL remains protected from concurrent duplicate execution.
 
 Reusing the same key with a different request body returns HTTP 409 with error idempotency_key_reused. A concurrent duplicate that arrives while the original request is still running returns HTTP 409 with error idempotency_request_in_progress.
 

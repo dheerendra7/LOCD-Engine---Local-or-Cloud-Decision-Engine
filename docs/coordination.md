@@ -26,7 +26,9 @@ The fixed-window limiter uses an atomic increment per client/bucket. The API pre
 
 Completed POST responses can be stored in shared state and replayed by another instance. The API prefixes idempotency scopes with the authenticated tenant so an idempotency key is never replayed across tenants.
 
-A claim carries an opaque owner token. The API releases that claim when the request fails or exits without a cached result, and only commits a completed response if the same claim still owns the key. This fences stale requests whose lease expired while they were running. In-memory, SQLite and HTTP State Service implementations provide the atomic compare operations; custom distributed backends must implement them with native CAS/transactions rather than a separate GET followed by SET or DELETE.
+A claim carries an opaque owner token and a bounded lease. The built-in in-memory and coordinated idempotency stores renew that lease while the API request is still processing. Renewal uses the current owner token and, for shared stores, atomic compare-and-set; a stale owner cannot extend a replacement claim. The API releases its claim when an operation fails before producing its side effect, and only commits a completed response if the same claim still owns the key. If response caching fails after the side effect has been produced, the claim is deliberately retained until its lease expires rather than immediately allowing a duplicate operation.
+
+If an application injects a custom `idempotencyStore`, implement `renew(scope, key, body, claimToken, lockTtlMs)` with owner-token fencing to receive the same long-running request protection. Without that optional method, the custom store's claim remains bounded only by the initial `LOCD_IDEMPOTENCY_LOCK_TTL_MS` lease. In-memory, SQLite and HTTP State Service coordination backends provide the atomic compare operations; custom distributed backends must implement them with native CAS/transactions rather than a separate GET followed by SET or DELETE.
 
 ## Important boundary
 
