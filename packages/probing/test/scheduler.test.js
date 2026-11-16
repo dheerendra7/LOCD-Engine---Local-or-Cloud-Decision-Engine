@@ -206,3 +206,37 @@ test("observer failures do not change failed probe classification", async () => 
   assert.equal(results[0].status, "failed");
   assert.equal(results[0].errorClass, "provider_down");
 });
+
+
+test("beforeProbe admission skips provider calls and passes recovery context only to observers", async () => {
+  let providerCalls = 0;
+  const observed = [];
+  let allow = false;
+  const registry = makeRegistry([{ id: "gated" }], {
+    gated: async () => {
+      providerCalls++;
+      return { id: "gated", available: true };
+    }
+  });
+  const scheduler = createProbeScheduler({
+    registry,
+    intervalMs: 1000,
+    beforeProbe: async () => allow
+      ? { allowed: true, context: { probeToken: "recovery-owner" } }
+      : { allowed: false, reason: "circuit_breaker_open" },
+    onResult: event => observed.push(event)
+  });
+
+  const skipped = await scheduler.runOnce();
+  assert.equal(providerCalls, 0);
+  assert.equal(skipped[0].status, "skipped");
+  assert.equal(skipped[0].reason, "circuit_breaker_open");
+  assert.equal("probeContext" in skipped[0], false);
+
+  allow = true;
+  const recovered = await scheduler.runOnce();
+  assert.equal(providerCalls, 1);
+  assert.equal(recovered[0].status, "success");
+  assert.equal("probeContext" in recovered[0], false);
+  assert.equal(observed[1].probeContext.probeToken, "recovery-owner");
+});

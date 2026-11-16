@@ -16,6 +16,8 @@ import {
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
 import { createExecutionRegistry } from "../../../packages/execution/src/index.js";
 import { createInMemoryCoordinationStore } from "../../../packages/coordination/src/index.js";
+import { createCircuitBreaker } from "../../../packages/resilience/src/index.js";
+import { createTenantTargetRegistry } from "../../../packages/tenancy/src/index.js";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -4015,5 +4017,129 @@ test("long-running idempotent operations renew their claim and reject duplicate 
     assert.equal(recordCalls, 1);
   } finally {
     await new Promise(resolve => scopedServer.close(resolve));
+  }
+});
+
+
+test("scheduled probes open tenant circuits, skip open providers, and recover through one half-open probe", async () => {
+  let now = 1_000;
+  let providerCalls = 0;
+  let providerFails = true;
+  const targetRegistry = createTenantTargetRegistry();
+  targetRegistry.forTenant("acme").register({
+    id: "scheduled-probe-target",
+    async getSnapshot() {
+      return {
+        id: "scheduled-probe-target",
+        mode: "private",
+        available: true,
+        health: 1
+      };
+    },
+    async probe() {
+      providerCalls++;
+      if (providerFails) throw new Error("provider_probe_unavailable");
+      return {
+        id: "scheduled-probe-target",
+        mode: "private",
+        available: true,
+        health: 1
+      };
+    }
+  });
+  const circuitBreaker = createCircuitBreaker({
+    store: createInMemoryCoordinationStore(),
+    failureThreshold: 1,
+    failureWindowMs: 1_000,
+    cooldownMs: 50,
+    probeLeaseMs: 100,
+    clock: () => now
+  });
+  const probeScheduler = createConfiguredProbeScheduler({
+    registry: targetRegistry,
+    intervalMs: 1_000,
+    logger: { info() {} }
+  });
+  createServer({ targetRegistry, probeScheduler, circuitBreaker });
+
+  const failed = await probeScheduler.runOnce();
+  assert.equal(failed[0].status, "failed");
+  assert.equal((await circuitBreaker.inspect("acme", "scheduled-probe-target")).state, "open");
+  assert.equal(providerCalls, 1);
+
+  const skipped = await probeScheduler.runOnce();
+  assert.equal(skipped[0].status, "skipped");
+  assert.equal(skipped[0].reason, "circuit_breaker_open");
+  assert.equal(providerCalls, 1);
+
+  now += 50;
+  providerFails = false;
+  const recovered = await probeScheduler.runOnce();
+  assert.equal(recovered[0].status, "success");
+  assert.equal(providerCalls, 2);
+  assert.equal((await circuitBreaker.inspect("acme", "scheduled-probe-target")).state, "closed");
+});
+
+test("manual provider probes are fenced by the circuit breaker and can recover after cooldown", async () => {
+  let now = 2_000;
+  let providerCalls = 0;
+  let providerFails = true;
+  const registry = createTargetRegistry([{
+    id: "manual-probe-circuit-target",
+    async getSnapshot() {
+      return {
+        id: "manual-probe-circuit-target",
+        mode: "private",
+        available: true,
+        health: 1
+      };
+    },
+    async probe() {
+      providerCalls++;
+      if (providerFails) throw new Error("manual_provider_unavailable");
+      return {
+        id: "manual-probe-circuit-target",
+        mode: "private",
+        available: true,
+        health: 1
+      };
+    }
+  }]);
+  const circuitBreaker = createCircuitBreaker({
+    store: createInMemoryCoordinationStore(),
+    failureThreshold: 1,
+    failureWindowMs: 1_000,
+    cooldownMs: 40,
+    probeLeaseMs: 100,
+    clock: () => now
+  });
+  const probeServer = createServer({ targetRegistry: registry, circuitBreaker });
+  await new Promise(resolve => probeServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + probeServer.address().port;
+  const request = () => fetch(url + "/v1/targets/manual-probe-circuit-target/probe", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}"
+  });
+
+  try {
+    const first = await request();
+    assert.equal(first.status, 500);
+    assert.equal(providerCalls, 1);
+    assert.equal((await circuitBreaker.inspect("default", "manual-probe-circuit-target")).state, "open");
+
+    const blocked = await request();
+    assert.equal(blocked.status, 503);
+    assert.equal((await blocked.json()).error, "circuit_breaker_open");
+    assert.equal(providerCalls, 1);
+
+    now += 40;
+    providerFails = false;
+    const recovered = await request();
+    assert.equal(recovered.status, 200);
+    assert.equal(providerCalls, 2);
+    assert.equal((await circuitBreaker.inspect("default", "manual-probe-circuit-target")).state, "closed");
+  } finally {
+    await new Promise(resolve => probeServer.close(resolve));
   }
 });

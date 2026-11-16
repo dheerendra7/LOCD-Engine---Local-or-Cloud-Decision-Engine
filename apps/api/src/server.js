@@ -285,7 +285,54 @@ export function createConfiguredProbeScheduler({
   if (!registry) throw new Error("registry is required");
   if (intervalMs <= 0) return null;
 
-  if (typeof registry.forTenant === "function" && typeof registry.listTenantIds === "function") {
+  let probeHooks = {
+    beforeProbe: null,
+    onResult: null
+  };
+
+  function setHooks(hooks = {}) {
+    if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) {
+      throw new Error("probe hooks must be an object");
+    }
+    for (const name of ["beforeProbe", "onResult"]) {
+      if (hooks[name] != null && typeof hooks[name] !== "function") {
+        throw new Error(name + " probe hook must be a function");
+      }
+    }
+    probeHooks = { ...probeHooks, ...hooks };
+    return true;
+  }
+
+  function createTenantHooks(tenantId) {
+    return {
+      beforeProbe: details => probeHooks.beforeProbe
+        ? probeHooks.beforeProbe({ ...details, tenantId })
+        : null,
+      onResult: async result => {
+        try {
+          logger.info({
+            event: "target_probe",
+            tenantId,
+            targetId: result.targetId,
+            status: result.status,
+            reason: result.reason || null,
+            errorClass: result.errorClass || null,
+            available: result.snapshot?.available,
+            health: result.snapshot?.health,
+            latencyMs: result.snapshot?.estimatedLatencyMs
+          });
+        } catch {
+          // Logging must not prevent circuit-breaker result processing.
+        }
+        if (probeHooks.onResult) {
+          await probeHooks.onResult({ ...result, tenantId });
+        }
+      }
+    };
+  }
+
+  if (typeof registry.forTenant === "function" &&
+      typeof registry.listTenantIds === "function") {
     const schedulers = new Map();
 
     function syncSchedulers() {
@@ -295,18 +342,7 @@ export function createConfiguredProbeScheduler({
           registry: registry.forTenant(tenantId),
           intervalMs,
           maxConcurrent,
-          onResult: result => {
-            logger.info({
-              event: "target_probe",
-              tenantId,
-              targetId: result.targetId,
-              status: result.status,
-              errorClass: result.errorClass || null,
-              available: result.snapshot?.available,
-              health: result.snapshot?.health,
-              latencyMs: result.snapshot?.estimatedLatencyMs
-            });
-          }
+          ...createTenantHooks(tenantId)
         }));
       }
     }
@@ -323,6 +359,7 @@ export function createConfiguredProbeScheduler({
 
     return {
       runOnce: runAll,
+      setHooks,
       start() {
         if (running) return false;
         running = true;
@@ -352,22 +389,17 @@ export function createConfiguredProbeScheduler({
     };
   }
 
-  return createProbeScheduler({
+  const tenantId = registry.tenantId || "default";
+  const scheduler = createProbeScheduler({
     registry,
     intervalMs,
     maxConcurrent,
-    onResult: result => {
-      logger.info({
-        event: "target_probe",
-        targetId: result.targetId,
-        status: result.status,
-        errorClass: result.errorClass || null,
-        available: result.snapshot?.available,
-        health: result.snapshot?.health,
-        latencyMs: result.snapshot?.estimatedLatencyMs
-      });
-    }
+    ...createTenantHooks(tenantId)
   });
+  return {
+    ...scheduler,
+    setHooks
+  };
 }
 
 export async function createConfiguredTargetRegistry({
@@ -594,6 +626,56 @@ export function createServer({
       throw new Error("circuitBreaker must implement " + method + "()");
     }
   }
+  if (probeScheduler && typeof probeScheduler.setHooks === "function") {
+    probeScheduler.setHooks({
+      beforeProbe: async ({ targetId, tenantId: probeTenantId = "default" }) => {
+        const admission = await effectiveCircuitBreaker.acquire(probeTenantId, targetId);
+        return admission.allowed
+          ? {
+              allowed: true,
+              context: { probeToken: admission.probeToken ?? null }
+            }
+          : {
+              allowed: false,
+              reason: admission.reason
+            };
+      },
+      onResult: async ({
+        targetId,
+        tenantId: probeTenantId = "default",
+        status,
+        probeContext
+      }) => {
+        if (!targetId || (status !== "success" && status !== "failed")) return;
+        const options = {
+          probeToken: probeContext?.probeToken ?? null
+        };
+        try {
+          const updated = status === "success"
+            ? await effectiveCircuitBreaker.recordSuccess(probeTenantId, targetId, options)
+            : await effectiveCircuitBreaker.recordFailure(probeTenantId, targetId, options);
+          if (updated === false) {
+            logger.warn({
+              event: "probe_circuit_breaker_update_ignored",
+              tenantId: probeTenantId,
+              targetId,
+              status,
+              reason: options.probeToken ? "stale_probe_owner" : "circuit_state_changed"
+            });
+          }
+        } catch (error) {
+          logger.warn({
+            event: "probe_circuit_breaker_update_failed",
+            tenantId: probeTenantId,
+            targetId,
+            status,
+            errorClass: error instanceof Error ? error.constructor.name : "unknown_error"
+          });
+        }
+      }
+    });
+  }
+
   if (coordinationStore && !hasAtomicCircuitCoordination && !circuitBreaker) {
     logger.warn({
       event: "circuit_breaker_using_process_local_state",
@@ -1353,17 +1435,69 @@ export function createServer({
           return;
         }
 
+        if (typeof requestRegistry.get === "function") {
+          const existingTarget = await requestRegistry.get(id);
+          if (existingTarget == null) {
+            sendJson(res, 404, { error: "target_not_found" });
+            return;
+          }
+        }
+        if (typeof requestRegistry.listProbeable === "function") {
+          const probeableTargets = await requestRegistry.listProbeable();
+          if (!probeableTargets.some(target => String(target.id) === id)) {
+            sendJson(res, 501, { error: "target_does_not_support_probe" });
+            return;
+          }
+        }
+
+        const admission = await effectiveCircuitBreaker.acquire(tenantId, id);
+        if (!admission.allowed) {
+          sendJson(res, 503, {
+            error: admission.reason,
+            circuitBreaker: admission.state
+          });
+          return;
+        }
+        const breakerOptions = {
+          probeToken: admission.probeToken ?? null
+        };
+
         try {
           const snapshot = await requestRegistry.probe(id);
+          const updated = snapshot?.available === false
+            ? await effectiveCircuitBreaker.recordFailure(tenantId, id, breakerOptions)
+            : await effectiveCircuitBreaker.recordSuccess(tenantId, id, breakerOptions);
+          if (updated === false) {
+            logger.warn({
+              event: "manual_probe_circuit_breaker_update_ignored",
+              requestId,
+              tenantId,
+              targetId: id
+            });
+          }
           if (targetFile) await targetRegistry.saveToFile(targetFile);
           await rememberResponse(body, 200, snapshot);
           sendJson(res, 200, snapshot);
         } catch (error) {
-          if (error instanceof Error && error.message === "target_not_found") {
+          const message = error instanceof Error ? error.message : "probe_failed";
+          if (message !== "target_not_found" && message !== "target_does_not_support_probe") {
+            try {
+              await effectiveCircuitBreaker.recordFailure(tenantId, id, breakerOptions);
+            } catch (updateError) {
+              logger.warn({
+                event: "manual_probe_circuit_breaker_update_failed",
+                requestId,
+                tenantId,
+                targetId: id,
+                errorClass: updateError instanceof Error ? updateError.constructor.name : "unknown_error"
+              });
+            }
+          }
+          if (message === "target_not_found") {
             sendJson(res, 404, { error: "target_not_found" });
             return;
           }
-          if (error instanceof Error && error.message === "target_does_not_support_probe") {
+          if (message === "target_does_not_support_probe") {
             sendJson(res, 501, { error: "target_does_not_support_probe" });
             return;
           }
