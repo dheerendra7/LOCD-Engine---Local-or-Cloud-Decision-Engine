@@ -771,7 +771,6 @@ test("all dashboard form controls have programmatic labels", async () => {
   for (const control of controls) {
     const id = control[2];
     const nested = labels.some(label => label[2].includes(control[0]));
-    const explicit = labels.some(label => new RegExp("\\\\bfor=[\\"']" + id + "[\\"']").test(label[1]));
-    assert.ok(nested || explicit, "form control #" + id + " must have an associated label");
+    assert.ok(nested, "form control #" + id + " must be nested in or explicitly associated with a label");
   }
 });
