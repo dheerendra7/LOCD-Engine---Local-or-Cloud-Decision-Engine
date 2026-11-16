@@ -11,16 +11,16 @@
   --surface-blue: #f1f5ff;
   --ink: #17253e;
   --ink-soft: #35445e;
-  --muted: #6d7b91;
-  --muted-light: #8e9aab;
+  --muted: #56657a;
+  --muted-light: #626f83;
   --line: #e4e9f1;
   --line-strong: #d4deeb;
   --blue: #315be8;
   --blue-hover: #254bd1;
   --blue-soft: #edf2ff;
-  --teal: #078f83;
+  --teal: #0b746b;
   --teal-soft: #e9f8f5;
-  --green: #18845b;
+  --green: #146c49;
   --green-soft: #eaf7f0;
   --amber: #9e640b;
   --amber-soft: #fff5e2;
@@ -38,7 +38,7 @@ button { cursor: pointer; }
 button:disabled { opacity: .58; cursor: not-allowed; }
 a { color: inherit; }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible {
-  outline: 3px solid rgba(49, 91, 232, .24); outline-offset: 2px;
+  outline: 3px solid var(--blue); outline-offset: 2px;
 }
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: 248px minmax(0, 1fr); }
 .sidebar {

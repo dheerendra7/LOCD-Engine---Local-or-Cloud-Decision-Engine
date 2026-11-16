@@ -717,3 +717,46 @@ test("section navigation announces the current location to assistive technology"
   assert.equal(breadcrumbs.breadcrumbCurrent, "system-settings");
   assert.equal(links.filter(link => link.attributes.has("aria-current")).length, 1);
 });
+
+
+test("dashboard text and status colors meet WCAG AA contrast targets", async () => {
+  const css = await readFile(new URL("styles.css", webRoot), "utf8");
+  const root = css.match(/:root\s*\{([\s\S]*?)\}/);
+  assert.ok(root, "design tokens should be defined in :root");
+  const tokens = Object.fromEntries(
+    [...root[1].matchAll(/(--[a-z-]+)\s*:\s*(#[0-9a-fA-F]{6})/g)]
+      .map(match => [match[1], match[2]])
+  );
+  const luminance = hex => {
+    const channels = [1, 3, 5].map(index => parseInt(hex.slice(index, index + 2), 16) / 255);
+    const linear = channels.map(channel => channel <= 0.04045
+      ? channel / 12.92
+      : ((channel + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+  };
+  const contrast = (foreground, background) => {
+    const first = luminance(foreground);
+    const second = luminance(background);
+    return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+  };
+  const pairs = [
+    ["--muted", "--page"],
+    ["--muted", "--surface"],
+    ["--muted-light", "--page"],
+    ["--muted-light", "--surface"],
+    ["--teal", "--teal-soft"],
+    ["--green", "--green-soft"],
+    ["--amber", "--amber-soft"],
+    ["--red", "--red-soft"],
+    ["--blue", "--blue-soft"]
+  ];
+  for (const [foreground, background] of pairs) {
+    assert.ok(tokens[foreground] && tokens[background], "missing contrast token: " + foreground + " / " + background);
+    const ratio = contrast(tokens[foreground], tokens[background]);
+    assert.ok(
+      ratio >= 4.5,
+      foreground + " on " + background + " has " + ratio.toFixed(2) + ":1 contrast"
+    );
+  }
+  assert.match(css, /:focus-visible[\s\S]*?outline:\s*3px solid var\(--blue\)/);
+});
