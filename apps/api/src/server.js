@@ -478,7 +478,7 @@ export function createServer({
   circuitBreakerFailureThreshold = Number(process.env.LOCD_CIRCUIT_BREAKER_FAILURE_THRESHOLD || 3),
   circuitBreakerFailureWindowMs = Number(process.env.LOCD_CIRCUIT_BREAKER_FAILURE_WINDOW_MS || 30_000),
   circuitBreakerCooldownMs = Number(process.env.LOCD_CIRCUIT_BREAKER_COOLDOWN_MS || 15_000),
-  circuitBreakerProbeLeaseMs = Number(process.env.LOCD_CIRCUIT_BREAKER_PROBE_LEASE_MS || 30_000),
+  circuitBreakerProbeLeaseMs = Number(process.env.LOCD_CIRCUIT_BREAKER_PROBE_LEASE_MS || 60_000),
   logger = createLogger({
     level: process.env.LOCD_LOG_LEVEL || "info"
   }),

@@ -5,7 +5,7 @@ import { normalizeTenantId } from "../../../packages/tenancy/src/index.js";
 const DEFAULT_FAILURE_THRESHOLD = 3;
 const DEFAULT_FAILURE_WINDOW_MS = 30_000;
 const DEFAULT_COOLDOWN_MS = 15_000;
-const DEFAULT_PROBE_LEASE_MS = 30_000;
+const DEFAULT_PROBE_LEASE_MS = 60_000;
 const DEFAULT_NAMESPACE = "locd:circuit-breaker:v1";
 
 function validatePositiveInteger(value, field) {
@@ -61,6 +61,9 @@ export function createCircuitBreaker({
   }
 
   const retentionMs = failureWindowMs + cooldownMs + (probeLeaseMs * 2) + 60_000;
+  if (!Number.isSafeInteger(retentionMs)) {
+    throw new Error("circuit breaker timing configuration exceeds the supported range");
+  }
 
   function stateKey(tenantId, targetId) {
     if (targetId == null || String(targetId).trim() === "") {
@@ -222,7 +225,9 @@ export function createCircuitBreaker({
       if (probeToken) {
         if (
           current?.state !== "half-open" ||
-          current.probeToken !== probeToken
+          current.probeToken !== probeToken ||
+          !Number.isFinite(current.probeLeaseExpiresAt) ||
+          current.probeLeaseExpiresAt <= now
         ) return false;
 
         const failures = activeFailures(current, now);
@@ -280,7 +285,9 @@ export function createCircuitBreaker({
       if (probeToken) {
         if (
           current.state !== "half-open" ||
-          current.probeToken !== probeToken
+          current.probeToken !== probeToken ||
+          !Number.isFinite(current.probeLeaseExpiresAt) ||
+          current.probeLeaseExpiresAt <= readClock(clock)
         ) return false;
         if (await deleteState(key, current)) return true;
         continue;

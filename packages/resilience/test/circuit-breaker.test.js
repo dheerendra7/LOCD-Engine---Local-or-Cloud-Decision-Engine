@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { createInMemoryCoordinationStore } from "../../coordination/src/index.js";
+import { createSQLiteStateStores } from "../../sqlite/src/index.js";
 import { createCircuitBreaker } from "../src/index.js";
 
 function fixture(options = {}) {
@@ -160,6 +164,63 @@ test("expired half-open leases can be recovered and stale probe owners cannot cl
     probeToken: replacement.probeToken
   }), true);
   assert.equal((await breaker.inspect("acme", "gpu-a")).state, "closed");
+});
+
+test("expired half-open lease cannot close a circuit without a current probe owner", async () => {
+  const { breaker, advance } = fixture({
+    failureThreshold: 1,
+    cooldownMs: 100,
+    probeLeaseMs: 50
+  });
+  await breaker.recordFailure("acme", "gpu-a");
+  advance(100);
+  const expired = await breaker.acquire("acme", "gpu-a");
+  assert.equal(expired.allowed, true);
+
+  advance(51);
+  assert.equal(await breaker.recordSuccess("acme", "gpu-a", {
+    probeToken: expired.probeToken
+  }), false);
+  const state = await breaker.inspect("acme", "gpu-a");
+  assert.equal(state.state, "half-open");
+  assert.equal(state.probeInFlight, false);
+});
+
+test("SQLite coordination shares breaker state and half-open leases across instances", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-circuit-sqlite-"));
+  const file = path.join(dir, "state.db");
+  const stores = createSQLiteStateStores({ filePath: file, maxEntries: 20 });
+  let now = Date.now();
+  const options = {
+    store: stores.coordination,
+    failureThreshold: 1,
+    failureWindowMs: 1_000,
+    cooldownMs: 500,
+    probeLeaseMs: 100,
+    clock: () => now
+  };
+  const firstInstance = createCircuitBreaker(options);
+  const secondInstance = createCircuitBreaker(options);
+
+  try {
+    await firstInstance.recordFailure("acme", "sqlite-gpu");
+    assert.equal((await secondInstance.inspect("acme", "sqlite-gpu")).state, "open");
+
+    now += 500;
+    const firstProbe = await firstInstance.acquire("acme", "sqlite-gpu");
+    const secondProbe = await secondInstance.acquire("acme", "sqlite-gpu");
+    assert.equal(firstProbe.allowed, true);
+    assert.equal(secondProbe.allowed, false);
+    assert.equal(secondProbe.reason, "circuit_breaker_half_open_busy");
+
+    assert.equal(await secondInstance.recordSuccess("acme", "sqlite-gpu", {
+      probeToken: firstProbe.probeToken
+    }), true);
+    assert.equal((await firstInstance.inspect("acme", "sqlite-gpu")).state, "closed");
+  } finally {
+    stores.close();
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("breaker validates thresholds and requires atomic coordination methods", () => {

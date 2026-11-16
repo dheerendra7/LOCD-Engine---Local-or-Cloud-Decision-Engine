@@ -129,7 +129,7 @@ Live execution also requires the API rate limiter to be enabled. Set `LOCD_RATE_
 
 Registered targets use a tenant-scoped circuit breaker. After `LOCD_CIRCUIT_BREAKER_FAILURE_THRESHOLD` provider execution failures within `LOCD_CIRCUIT_BREAKER_FAILURE_WINDOW_MS`, the target is excluded from subsequent decisions and hybrid plans for `LOCD_CIRCUIT_BREAKER_COOLDOWN_MS`. The first live attempt after cooldown is a single half-open probe guarded by a lease of `LOCD_CIRCUIT_BREAKER_PROBE_LEASE_MS`.
 
-Defaults are 3 failures, a 30-second failure window, a 15-second cooldown and a 30-second probe lease. Successful live executions reset consecutive closed-state failures. Probe success closes the circuit; probe failure opens it again.
+Defaults are 3 failures, a 30-second failure window, a 15-second cooldown and a 60-second probe lease. Keep the probe lease longer than the maximum live execution timeout so stale executions cannot close or overwrite a newer half-open trial. Successful live executions reset consecutive closed-state failures. Probe success closes the circuit; probe failure opens it again.
 
 When SQLite state or the network State Service is configured, circuit state uses the same atomic coordination backend and is shared across API instances. Without an atomic shared coordination backend, the breaker is process-local; `GET /v1/status` exposes `circuitBreakerBackend` and open/half-open target counts. Use a shared backend before relying on fleet-wide failover.
 
