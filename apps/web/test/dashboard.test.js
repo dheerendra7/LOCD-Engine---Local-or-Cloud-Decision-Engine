@@ -674,3 +674,41 @@ test("metrics distinguish known and unknown estimated-cost coverage", async () =
   assert.match(metricsNode.textContent, /Unknown cost estimates: 1/);
   assert.match(metricsNode.textContent, /Recorded cost subtotal: 0.03/);
 });
+
+
+test("section navigation announces the current location to assistive technology", async () => {
+  const html = await readFile(new URL("index.html", webRoot), "utf8");
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  const navLinks = [...html.matchAll(/<a\b[^>]*data-nav="([^"]+)"[^>]*>/g)];
+  assert.ok(navLinks.length >= 6, "workspace and configuration links should be present");
+  assert.equal(navLinks.filter(match => /aria-current="location"/.test(match[0])).length, 1);
+  assert.match(script, /function setActiveNavigation\(sectionId\)/);
+
+  const start = script.indexOf("function setActiveNavigation(sectionId) {");
+  const end = script.indexOf("\n}", start) + 2;
+  assert.ok(start >= 0 && end > start);
+  const helper = script.slice(start, end);
+  const state = new Map();
+  const links = navLinks.map(match => ({
+    dataset: { nav: match[1] },
+    textContent: match[1],
+    attributes: new Map(),
+    classList: { toggle(name, enabled) { if (name === "active") state.set(match[1], enabled); } },
+    setAttribute(name, value) { this.attributes.set(name, value); },
+    removeAttribute(name) { this.attributes.delete(name); }
+  }));
+  const runtime = new Function(
+    "document", "setText", helper + "; return setActiveNavigation;"
+  )({ querySelectorAll: () => links }, (id, value) => { state.set(id, value); });
+
+  runtime("hybrid-planner");
+  assert.equal(state.get("hybrid-planner"), "hybrid-planner");
+  assert.equal(links.find(link => link.dataset.nav === "hybrid-planner").attributes.get("aria-current"), "location");
+  assert.equal(links.filter(link => link.attributes.has("aria-current")).length, 1);
+  assert.equal([...state.entries()].filter(([key, value]) => key !== "breadcrumbCurrent" && value === true).length, 1);
+
+  runtime("system-settings");
+  assert.equal(links.find(link => link.dataset.nav === "hybrid-planner").attributes.has("aria-current"), false);
+  assert.equal(links.find(link => link.dataset.nav === "system-settings").attributes.get("aria-current"), "location");
+  assert.equal(links.filter(link => link.attributes.has("aria-current")).length, 1);
+});

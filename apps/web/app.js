@@ -1338,20 +1338,29 @@ document.querySelector("#apiKey")?.addEventListener("keydown", event => {
 });
 // Refresh listener is registered above; avoid duplicate refreshes.
 
-document.querySelectorAll("[data-nav]").forEach(link => {
-  link.addEventListener("click", () => {
-    document.querySelectorAll("[data-nav]").forEach(item => item.classList.toggle("active", item === link));
-    setText("breadcrumbCurrent", link.textContent.trim());
+function setActiveNavigation(sectionId) {
+  let current = null;
+  document.querySelectorAll("[data-nav]").forEach(link => {
+    const active = link.dataset.nav === sectionId;
+    link.classList.toggle("active", active);
+    if (active) {
+      link.setAttribute("aria-current", "location");
+      current = link;
+    } else {
+      link.removeAttribute("aria-current");
+    }
   });
+  if (current) setText("breadcrumbCurrent", current.textContent.trim());
+}
+
+document.querySelectorAll("[data-nav]").forEach(link => {
+  link.addEventListener("click", () => setActiveNavigation(link.dataset.nav));
 });
 const sectionObserver = typeof IntersectionObserver === "function"
   ? new IntersectionObserver(entries => {
       const visible = entries.filter(entry => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
       if (!visible) return;
-      const id = visible.target.id;
-      document.querySelectorAll("[data-nav]").forEach(link => link.classList.toggle("active", link.dataset.nav === id));
-      const current = document.querySelector('[data-nav="' + id + '"]');
-      if (current) setText("breadcrumbCurrent", current.textContent.trim());
+      setActiveNavigation(visible.target.id);
     }, { rootMargin: "-15% 0px -70% 0px", threshold: [0, .1, .3, .5] })
   : null;
 if (sectionObserver) document.querySelectorAll(".page-section").forEach(section => sectionObserver.observe(section));
