@@ -27,6 +27,7 @@ test("decision events normalize only routing metadata", () => {
     estimatedLatencyMs: 120,
     estimatedCostUsd: 0.001,
     outcome: "pending",
+    outcomeTimestamp: null,
     actualLatencyMs: null,
     actualCostUsd: null,
     errorClass: null
