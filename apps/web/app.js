@@ -42,6 +42,7 @@ function resetTenantScopedView() {
 
   setText("readinessChecks", "Checking runtime readiness…");
   renderCircuitBreakers(null, {});
+  renderReliability(null);
   setText("probeCount", "—");
   setText("telemetryBackend", "—");
   setText("policyBackend", "—");
@@ -1038,6 +1039,146 @@ function renderCircuitBreakers(data, counts = {}) {
   }).join("");
 }
 
+function renderReliability(data) {
+  const summaryRoot = document.querySelector("#reliabilitySummary");
+  const timelineRoot = document.querySelector("#reliabilityTimeline");
+  const providerBody = document.querySelector("#reliabilityProviderBody");
+  const eventBody = document.querySelector("#reliabilityEventsBody");
+  if (!data || data.available !== true) {
+    if (summaryRoot) summaryRoot.innerHTML =
+      '<article class="stat-card"><div class="stat-topline">Provider attempts</div><div class="stat-value">—</div></article>' +
+      '<article class="stat-card"><div class="stat-topline">Successes</div><div class="stat-value">—</div></article>' +
+      '<article class="stat-card"><div class="stat-topline">Failures</div><div class="stat-value">—</div></article>' +
+      '<article class="stat-card"><div class="stat-topline">Failure rate</div><div class="stat-value">—</div></article>';
+    if (timelineRoot) timelineRoot.innerHTML = '<div class="table-empty">Reliability trend data is unavailable.</div>';
+    if (providerBody) providerBody.innerHTML = '<tr><td colspan="7" class="table-empty">Provider breakdown is unavailable.</td></tr>';
+    if (eventBody) eventBody.innerHTML = '<tr><td colspan="5" class="table-empty">Reliability event history is unavailable.</td></tr>';
+    setText("reliabilityRecoveryLegend", "Recovery attempts: —");
+    return;
+  }
+
+  const summary = data.summary || {};
+  const safeCount = value => Number.isSafeInteger(value) && value >= 0 ? value : 0;
+  const rate = value => Number.isFinite(value) && value >= 0 && value <= 1
+    ? formatPercent(value)
+    : "—";
+  const cards = [
+    ["Provider attempts", safeCount(summary.attempts), "success + failure outcomes"],
+    ["Successes", safeCount(summary.successes), "provider operations completed"],
+    ["Failures", safeCount(summary.failures), "provider operations failed"],
+    ["Failure rate", rate(summary.failureRate), safeCount(summary.circuitOpenings) + " circuit openings"]
+  ];
+  if (summaryRoot) {
+    summaryRoot.innerHTML = cards.map(([label, value, note]) =>
+      '<article class="stat-card"><div class="stat-topline">' + escapeHtml(label) +
+      '</div><div class="stat-value">' + escapeHtml(value) +
+      '</div><div class="stat-note">' + escapeHtml(note) + "</div></article>"
+    ).join("");
+  }
+  setText("reliabilityRecoveryLegend", "Recovery attempts: " + safeCount(summary.recoveryAttempts) +
+    " · Completed recoveries: " + safeCount(summary.recoveries));
+
+  const timeline = Array.isArray(data.timeline) ? data.timeline : [];
+  if (timelineRoot) {
+    const maxVolume = Math.max(1, ...timeline.map(bucket =>
+      safeCount(bucket.successes) + safeCount(bucket.failures)
+    ));
+    timelineRoot.innerHTML = timeline.length
+      ? timeline.map((bucket, index) => {
+          const successes = safeCount(bucket.successes);
+          const failures = safeCount(bucket.failures);
+          const successHeight = Math.min(100, successes / maxVolume * 100);
+          const failureHeight = Math.min(100, failures / maxVolume * 100);
+          const title = formatCircuitTimestamp(bucket.bucketStart) + ": " + successes +
+            " successes, " + failures + " failures, " + safeCount(bucket.recoveryAttempts) +
+            " recovery attempts";
+          return '<div class="reliability-bar" title="' + escapeHtml(title) + '">' +
+            '<div class="reliability-bar-stack">' +
+            '<span class="reliability-bar-success" style="height:' + successHeight + '%"></span>' +
+            '<span class="reliability-bar-failure" style="height:' + failureHeight + '%"></span>' +
+            '</div><span class="reliability-bar-label">' +
+            (index % 6 === 0 ? String(index + 1).padStart(2, "0") : "&#8203;") +
+            "</span></div>";
+        }).join("")
+      : '<div class="table-empty">No events in the selected time window.</div>';
+  }
+
+  const providers = Array.isArray(data.providers) ? data.providers : [];
+  if (providerBody) {
+    providerBody.innerHTML = providers.length
+      ? providers.map(provider => {
+          const item = provider && typeof provider === "object" ? provider : {};
+          const recoveryDuration = Number.isFinite(item.averageRecoveryDurationMs)
+            ? formatCircuitDuration(Math.round(item.averageRecoveryDurationMs))
+            : null;
+          return "<tr><td><strong>" + escapeHtml(item.targetId || "Unknown provider") + "</strong></td>" +
+            "<td>" + safeCount(item.attempts) + "</td><td>" + safeCount(item.successes) +
+            "</td><td>" + safeCount(item.failures) + "</td><td>" + escapeHtml(rate(item.failureRate)) +
+            "</td><td>" + safeCount(item.recoveries) + "</td><td>" +
+            escapeHtml(recoveryDuration || "—") + "</td></tr>";
+        }).join("")
+      : '<tr><td colspan="7" class="table-empty">No provider outcomes in the selected time window.</td></tr>';
+  }
+
+  const labels = {
+    provider_success: "Provider success",
+    provider_failure: "Provider failure",
+    recovery_attempt_started: "Recovery attempt"
+  };
+  const sources = {
+    execution: "Live execution",
+    scheduled_probe: "Scheduled probe",
+    manual_probe: "Manual probe"
+  };
+  const recentEvents = Array.isArray(data.recentEvents) ? data.recentEvents : [];
+  if (eventBody) {
+    eventBody.innerHTML = recentEvents.length
+      ? recentEvents.map(event => {
+          const item = event && typeof event === "object" ? event : {};
+          const eventLabel = labels[item.type] || "Provider event";
+          const sourceLabel = sources[item.source] || "Other";
+          const transition = item.transition || (item.stateFrom + " → " + item.stateTo);
+          return "<tr><td>" + escapeHtml(formatCircuitTimestamp(item.timestamp)) +
+            "</td><td><strong>" + escapeHtml(item.targetId || "Unknown provider") +
+            "</strong></td><td>" + escapeHtml(eventLabel) + "</td><td>" +
+            escapeHtml(sourceLabel) + "</td><td>" + escapeHtml(transition || "—") + "</td></tr>";
+        }).join("")
+      : '<tr><td colspan="5" class="table-empty">No provider events recorded in this time window.</td></tr>';
+  }
+}
+
+async function refreshReliability() {
+  const accessRevision = apiAccessRevision;
+  const status = document.querySelector("#reliabilityStatus");
+  const windowControl = document.querySelector("#reliabilityWindow");
+  const windowMs = Number(windowControl?.value || 86_400_000);
+  if (!Number.isSafeInteger(windowMs) || windowMs < 60_000) {
+    renderReliability(null);
+    if (status) status.textContent = "Choose a valid reliability time window.";
+    return;
+  }
+  if (status) status.textContent = "Loading provider outcomes and recovery history…";
+  try {
+    const data = await portalFetch("/v1/reliability?windowMs=" + windowMs + "&limit=50");
+    if (accessRevision !== apiAccessRevision) return;
+    renderReliability(data);
+    const retained = Number.isSafeInteger(data.retainedEventCount) ? data.retainedEventCount : 0;
+    const dropped = Number.isSafeInteger(data.droppedEventCount) ? data.droppedEventCount : 0;
+    const failures = Number.isSafeInteger(data.historyWriteFailures) ? data.historyWriteFailures : 0;
+    const statusParts = [
+      retained + " retained events",
+      "up to " + formatCircuitDuration(data.retentionMs),
+      (data.truncated ? "older events truncated (" + dropped + " evicted)" : "no retention truncation")
+    ];
+    if (failures > 0) statusParts.push(failures + " history write gaps on this API process");
+    if (status) status.textContent = statusParts.join(" · ");
+  } catch (error) {
+    if (accessRevision !== apiAccessRevision) return;
+    renderReliability(null);
+    if (status) status.textContent = niceError(error);
+  }
+}
+
 async function refreshStatus() {
   const accessRevision = apiAccessRevision;
   try {
@@ -1071,7 +1212,8 @@ async function refreshAll() {
   setStatus("Refreshing current tenant data…", "checking");
   const tasks = [
     refreshTargets(), refreshPolicies(), refreshMetrics(), refreshStatus(),
-    refreshActivity(), refreshCalibration(), refreshHealth(), refreshReadiness()
+    refreshActivity(), refreshCalibration(), refreshHealth(), refreshReadiness(),
+    refreshReliability()
   ];
   await Promise.allSettled(tasks);
   if (accessRevision === apiAccessRevision && button) button.disabled = false;
@@ -1298,6 +1440,8 @@ function renderHybridResult(result) {
     (rejected ? '<div class="change"><strong>Rejection reasons</strong><div class="data-table-wrap"><table class="data-table"><thead><tr><th>Scope</th><th>Reason</th></tr></thead><tbody>' + rejected + "</tbody></table></div></div>" : "") +
     '<details><summary>View raw plan JSON</summary><pre>' + escapeHtml(JSON.stringify(result, null, 2)) + "</pre></details></div>";
 }
+
+document.querySelector("#reliabilityWindow")?.addEventListener("change", refreshReliability);
 
 document.querySelector("#addHybridStep")?.addEventListener("click", () => addHybridStep());
 

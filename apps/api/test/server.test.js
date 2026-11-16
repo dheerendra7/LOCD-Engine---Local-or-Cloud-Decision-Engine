@@ -4215,3 +4215,59 @@ test("circuit-breaker status details remain isolated by authenticated tenant", a
     await new Promise(resolve => statusServer.close(resolve));
   }
 });
+
+
+test("reliability history is tenant-isolated and accessible with read scope", async () => {
+  const circuitBreaker = createCircuitBreaker({
+    store: createInMemoryCoordinationStore(),
+    failureThreshold: 1,
+    failureWindowMs: 60_000,
+    cooldownMs: 30_000
+  });
+  await circuitBreaker.recordFailure("history-alpha", "shared-target", { source: "manual_probe" });
+  await circuitBreaker.recordSuccess("history-beta", "shared-target", { source: "execution" });
+
+  const authorizer = createScopedAuthorizer({
+    keys: [
+      { id: "alpha-reader", secret: "history-alpha-read-secret", tenantId: "history-alpha", scopes: ["read"] },
+      { id: "beta-reader", secret: "history-beta-read-secret", tenantId: "history-beta", scopes: ["read"] }
+    ]
+  });
+  const reliabilityServer = createServer({ circuitBreaker, authorizer });
+  await new Promise(resolve => reliabilityServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + reliabilityServer.address().port;
+
+  try {
+    const alphaResponse = await fetch(url + "/v1/reliability?windowMs=3600000&limit=10", {
+      headers: { authorization: "Bearer history-alpha-read-secret" }
+    });
+    const betaResponse = await fetch(url + "/v1/reliability?windowMs=3600000&limit=10", {
+      headers: { authorization: "Bearer history-beta-read-secret" }
+    });
+    assert.equal(alphaResponse.status, 200);
+    assert.equal(betaResponse.status, 200);
+
+    const alpha = await alphaResponse.json();
+    const beta = await betaResponse.json();
+    assert.equal(alpha.summary.attempts, 1);
+    assert.equal(alpha.summary.failures, 1);
+    assert.equal(alpha.summary.circuitOpenings, 1);
+    assert.equal(alpha.providers[0].targetId, "shared-target");
+    assert.equal(alpha.providers[0].failureRate, 1);
+    assert.equal(alpha.recentEvents[0].source, "manual_probe");
+    assert.equal(Object.hasOwn(alpha.recentEvents[0], "tenantId"), false);
+
+    assert.equal(beta.summary.attempts, 1);
+    assert.equal(beta.summary.successes, 1);
+    assert.equal(beta.summary.failures, 0);
+    assert.equal(beta.recentEvents[0].source, "execution");
+
+    const invalidWindow = await fetch(url + "/v1/reliability?windowMs=1000", {
+      headers: { authorization: "Bearer history-alpha-read-secret" }
+    });
+    assert.equal(invalidWindow.status, 400);
+    assert.equal((await invalidWindow.json()).error.includes("windowMs"), true);
+  } finally {
+    await new Promise(resolve => reliabilityServer.close(resolve));
+  }
+});

@@ -511,6 +511,8 @@ export function createServer({
   circuitBreakerFailureWindowMs = Number(process.env.LOCD_CIRCUIT_BREAKER_FAILURE_WINDOW_MS || 30_000),
   circuitBreakerCooldownMs = Number(process.env.LOCD_CIRCUIT_BREAKER_COOLDOWN_MS || 15_000),
   circuitBreakerProbeLeaseMs = Number(process.env.LOCD_CIRCUIT_BREAKER_PROBE_LEASE_MS || 60_000),
+  circuitBreakerHistoryRetentionMs = Number(process.env.LOCD_CIRCUIT_BREAKER_HISTORY_RETENTION_MS || 604_800_000),
+  circuitBreakerHistoryMaxEntries = Number(process.env.LOCD_CIRCUIT_BREAKER_HISTORY_MAX_ENTRIES || 2_000),
   logger = createLogger({
     level: process.env.LOCD_LOG_LEVEL || "info"
   }),
@@ -614,7 +616,9 @@ export function createServer({
     failureThreshold: circuitBreakerFailureThreshold,
     failureWindowMs: circuitBreakerFailureWindowMs,
     cooldownMs: circuitBreakerCooldownMs,
-    probeLeaseMs: circuitBreakerProbeLeaseMs
+    probeLeaseMs: circuitBreakerProbeLeaseMs,
+    historyRetentionMs: circuitBreakerHistoryRetentionMs,
+    historyMaxEntries: circuitBreakerHistoryMaxEntries
   });
   const circuitBreakerBackend = circuitBreaker
     ? "custom"
@@ -629,7 +633,9 @@ export function createServer({
   if (probeScheduler && typeof probeScheduler.setHooks === "function") {
     probeScheduler.setHooks({
       beforeProbe: async ({ targetId, tenantId: probeTenantId = "default" }) => {
-        const admission = await effectiveCircuitBreaker.acquire(probeTenantId, targetId);
+        const admission = await effectiveCircuitBreaker.acquire(probeTenantId, targetId, {
+          source: "scheduled_probe"
+        });
         return admission.allowed
           ? {
               allowed: true,
@@ -648,7 +654,8 @@ export function createServer({
       }) => {
         if (!targetId || (status !== "success" && status !== "failed")) return;
         const options = {
-          probeToken: probeContext?.probeToken ?? null
+          probeToken: probeContext?.probeToken ?? null,
+          source: "scheduled_probe"
         };
         try {
           const updated = status === "success"
@@ -944,7 +951,9 @@ export function createServer({
           includeOutputs: body.includeOutputs === true,
           beforeStep: mode === "live"
             ? async ({ step }) => {
-                const admission = await effectiveCircuitBreaker.acquire(tenantId, step.targetId);
+                const admission = await effectiveCircuitBreaker.acquire(tenantId, step.targetId, {
+                  source: "execution"
+                });
                 return admission.allowed
                   ? { allowed: true, context: admission }
                   : { allowed: false, errorClass: admission.reason };
@@ -953,7 +962,8 @@ export function createServer({
           onStepResult: mode === "live"
             ? async ({ step, status, executionContext }) => {
                 const breakerOptions = {
-                  probeToken: executionContext?.probeToken ?? null
+                  probeToken: executionContext?.probeToken ?? null,
+                  source: "execution"
                 };
                 try {
                   if (status === "completed") {
@@ -1450,7 +1460,9 @@ export function createServer({
           }
         }
 
-        const admission = await effectiveCircuitBreaker.acquire(tenantId, id);
+        const admission = await effectiveCircuitBreaker.acquire(tenantId, id, {
+          source: "manual_probe"
+        });
         if (!admission.allowed) {
           sendJson(res, 503, {
             error: admission.reason,
@@ -1459,7 +1471,8 @@ export function createServer({
           return;
         }
         const breakerOptions = {
-          probeToken: admission.probeToken ?? null
+          probeToken: admission.probeToken ?? null,
+          source: "manual_probe"
         };
 
         try {
@@ -1582,6 +1595,30 @@ export function createServer({
         return;
       }
 
+      if (req.method === "GET" && pathname === "/v1/reliability") {
+        if (typeof effectiveCircuitBreaker.history !== "function") {
+          sendJson(res, 503, { error: "reliability_history_unavailable" });
+          return;
+        }
+        const query = new URL(req.url, "http://locd.invalid").searchParams;
+        const rawWindowMs = query.get("windowMs");
+        const rawLimit = query.get("limit");
+        const windowMs = rawWindowMs == null ? 86_400_000 : Number(rawWindowMs);
+        const limit = rawLimit == null ? 50 : Number(rawLimit);
+        const retentionMs = effectiveCircuitBreaker.config?.historyRetentionMs ?? 604_800_000;
+        if (!Number.isSafeInteger(windowMs) || windowMs < 60_000 || windowMs > retentionMs) {
+          sendJson(res, 400, { error: "windowMs must be between 60000 and configured history retention" });
+          return;
+        }
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+          sendJson(res, 400, { error: "limit must be between 1 and 100" });
+          return;
+        }
+        const report = await effectiveCircuitBreaker.history(tenantId, { windowMs, limit });
+        sendJson(res, 200, report);
+        return;
+      }
+
       if (req.method === "GET" && pathname === "/v1/status") {
         const rawTargets = await requestRegistry.list();
         const targets = await effectiveCircuitBreaker.annotateTargets(rawTargets, tenantId);
@@ -1617,6 +1654,8 @@ export function createServer({
             circuitBreakerEnabled: true,
             circuitBreakerBackend,
             sharedCircuitBreaker: circuitBreakerBackend === "shared",
+            reliabilityHistoryEnabled: typeof effectiveCircuitBreaker.history === "function",
+            reliabilityHistoryBackend: circuitBreakerBackend,
             sharedCoordination: Boolean(coordinationStore),
             coordinationBackend: coordinationBackend ||
               (coordinationStore ? "shared" : "process-local"),

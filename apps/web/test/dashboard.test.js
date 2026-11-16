@@ -362,7 +362,8 @@ test("in-flight API refreshes and mutations ignore responses from a previous acc
   const script = await readFile(new URL("app.js", webRoot), "utf8");
   const guardedRefreshes = [
     "refreshTargets", "refreshPolicies", "refreshMetrics", "refreshStatus",
-    "refreshActivity", "refreshCalibration", "refreshHealth", "refreshReadiness"
+    "refreshActivity", "refreshCalibration", "refreshHealth", "refreshReadiness",
+    "refreshReliability"
   ];
   for (const name of guardedRefreshes) {
     const start = script.indexOf("async function " + name + "()");
@@ -840,4 +841,80 @@ test("provider reliability panel renders breaker state safely and summarizes rec
   render(null, {});
   assert.equal(badge.textContent, "Unavailable");
   assert.match(body.innerHTML, /Circuit-breaker status is unavailable/);
+});
+
+
+test("provider reliability trends render safe aggregates, buckets, providers and event history", async () => {
+  const html = await readFile(new URL("index.html", webRoot), "utf8");
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  for (const id of [
+    "reliabilityWindow", "reliabilityStatus", "reliabilitySummary",
+    "reliabilityTimeline", "reliabilityProviderBody", "reliabilityEventsBody"
+  ]) {
+    assert.match(html, new RegExp('id="' + id + '"'), "missing reliability field: " + id);
+  }
+  assert.match(script, /portalFetch\("\/v1\/reliability\?windowMs=/);
+  const start = script.indexOf("function renderReliability(data) {");
+  const end = script.indexOf("\nasync function refreshReliability()", start);
+  assert.ok(start >= 0 && end > start, "reliability renderer should exist");
+  const rendererSource = script.slice(start, end);
+  const nodes = {
+    "#reliabilitySummary": { innerHTML: "" },
+    "#reliabilityTimeline": { innerHTML: "" },
+    "#reliabilityProviderBody": { innerHTML: "" },
+    "#reliabilityEventsBody": { innerHTML: "" }
+  };
+  const runtime = new Function(
+    "document", "setText", "escapeHtml", "formatPercent",
+    "formatCircuitTimestamp", "formatCircuitDuration",
+    rendererSource + "; return renderReliability;"
+  );
+  const render = runtime(
+    { querySelector: selector => nodes[selector] || null },
+    () => {},
+    value => String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;"),
+    value => Math.round(value * 100) + "%",
+    value => value == null ? "—" : new Date(value).toISOString(),
+    value => value == null ? null : Math.round(value) + " ms"
+  );
+
+  render({
+    available: true,
+    summary: {
+      attempts: 4, successes: 3, failures: 1, failureRate: 0.25,
+      recoveryAttempts: 1, circuitOpenings: 1, recoveries: 1
+    },
+    timeline: [{ bucketStart: 1_795_000_000_000, successes: 3, failures: 1, recoveryAttempts: 1 }],
+    providers: [{
+      targetId: '<img src=x onerror="alert(1)">',
+      attempts: 4, successes: 3, failures: 1, failureRate: 0.25,
+      recoveries: 1, averageRecoveryDurationMs: 500
+    }],
+    recentEvents: [{
+      timestamp: 1_795_000_000_000,
+      targetId: '<img src=x onerror="alert(1)">',
+      type: "provider_failure",
+      source: "manual_probe",
+      transition: "opened"
+    }]
+  });
+
+  assert.match(nodes["#reliabilitySummary"].innerHTML, /Provider attempts/);
+  assert.match(nodes["#reliabilitySummary"].innerHTML, /25%/);
+  assert.match(nodes["#reliabilityTimeline"].innerHTML, /reliability-bar-failure/);
+  assert.match(nodes["#reliabilityProviderBody"].innerHTML, /500 ms/);
+  assert.match(nodes["#reliabilityProviderBody"].innerHTML, /&lt;img/);
+  assert.doesNotMatch(nodes["#reliabilityProviderBody"].innerHTML, /<img/);
+  assert.match(nodes["#reliabilityEventsBody"].innerHTML, /Provider failure/);
+  assert.match(nodes["#reliabilityEventsBody"].innerHTML, /Manual probe/);
+  assert.match(nodes["#reliabilityEventsBody"].innerHTML, /opened/);
+  assert.match(nodes["#reliabilityEventsBody"].innerHTML, /&lt;img/);
+
+  render(null);
+  assert.match(nodes["#reliabilityEventsBody"].innerHTML, /unavailable/);
 });

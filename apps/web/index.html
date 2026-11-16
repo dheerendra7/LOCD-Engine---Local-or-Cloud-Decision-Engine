@@ -138,6 +138,57 @@
               </table>
             </div>
           </section>
+
+          <section class="panel" aria-labelledby="reliabilityHistoryHeading">
+            <div class="section-heading reliability-heading">
+              <div>
+                <div class="section-label">Provider reliability</div>
+                <h2 id="reliabilityHistoryHeading">Reliability trends & event history</h2>
+                <p>Bounded tenant-scoped operational history of provider outcomes and circuit recovery. No workload prompts or payloads are stored.</p>
+              </div>
+              <label class="reliability-range">Time window
+                <select id="reliabilityWindow">
+                  <option value="3600000">Last hour</option>
+                  <option value="86400000" selected>Last 24 hours</option>
+                  <option value="604800000">Last 7 days</option>
+                </select>
+              </label>
+            </div>
+            <div id="reliabilityStatus" class="status" role="status" aria-live="polite">Loading provider reliability history…</div>
+            <div id="reliabilitySummary" class="stats-grid reliability-stat-grid" aria-label="Provider reliability summary">
+              <article class="stat-card"><div class="stat-topline">Provider attempts</div><div class="stat-value">—</div></article>
+              <article class="stat-card"><div class="stat-topline">Successes</div><div class="stat-value">—</div></article>
+              <article class="stat-card"><div class="stat-topline">Failures</div><div class="stat-value">—</div></article>
+              <article class="stat-card"><div class="stat-topline">Failure rate</div><div class="stat-value">—</div></article>
+            </div>
+            <div class="reliability-section">
+              <div class="section-heading"><div><h3>Outcome volume</h3><p>Successes and failures bucketed over the selected time window.</p></div></div>
+              <div class="reliability-chart-wrap">
+                <div id="reliabilityTimeline" class="reliability-chart" role="img" aria-label="Provider successes and failures over time">
+                  <div class="table-empty">No reliability events loaded.</div>
+                </div>
+              </div>
+              <div class="reliability-legend"><span><i class="legend-success"></i>Successes</span><span><i class="legend-failure"></i>Failures</span><span id="reliabilityRecoveryLegend">Recovery attempts: —</span></div>
+            </div>
+            <div class="reliability-section">
+              <div class="section-heading"><div><h3>Provider breakdown</h3><p>Outcome rates and circuit recovery history per provider.</p></div></div>
+              <div class="data-table-wrap">
+                <table class="data-table" aria-label="Provider reliability breakdown">
+                  <thead><tr><th>Provider</th><th>Attempts</th><th>Successes</th><th>Failures</th><th>Failure rate</th><th>Recoveries</th><th>Avg. recovery</th></tr></thead>
+                  <tbody id="reliabilityProviderBody"><tr><td colspan="7" class="table-empty">Loading provider breakdown…</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="reliability-section">
+              <div class="section-heading"><div><h3>Recent events</h3><p>Most recent provider success, failure and recovery transitions.</p></div></div>
+              <div class="data-table-wrap">
+                <table class="data-table" aria-label="Recent provider reliability events">
+                  <thead><tr><th>Time</th><th>Provider</th><th>Event</th><th>Source</th><th>Transition</th></tr></thead>
+                  <tbody id="reliabilityEventsBody"><tr><td colspan="5" class="table-empty">Loading recent events…</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
         </section>
 
         <section id="decision-lab" class="page-section">

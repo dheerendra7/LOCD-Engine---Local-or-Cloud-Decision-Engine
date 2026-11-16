@@ -244,3 +244,96 @@ test("breaker snapshot reports open and half-open target counts", async () => {
   const halfOpen = await breaker.snapshot([{ id: "gpu-a" }], "acme");
   assert.deepEqual(halfOpen, { total: 1, open: 0, halfOpen: 1, closed: 0 });
 });
+
+
+test("reliability history aggregates outcomes and recovery transitions by time bucket", async () => {
+  const { breaker, advance, now } = fixture({ failureThreshold: 2, cooldownMs: 500 });
+  await breaker.recordFailure("acme", "gpu-a", { source: "manual_probe" });
+  advance(100);
+  await breaker.recordFailure("acme", "gpu-a", { source: "execution" });
+  advance(500);
+  const recovery = await breaker.acquire("acme", "gpu-a", { source: "manual_probe" });
+  assert.equal(recovery.allowed, true);
+  advance(100);
+  await breaker.recordSuccess("acme", "gpu-a", {
+    probeToken: recovery.probeToken,
+    source: "manual_probe"
+  });
+  advance(500);
+  await breaker.recordSuccess("acme", "gpu-a", { source: "execution" });
+
+  const report = await breaker.history("acme", { windowMs: 5_000, limit: 10 });
+  assert.equal(report.available, true);
+  assert.equal(report.summary.attempts, 4);
+  assert.equal(report.summary.successes, 2);
+  assert.equal(report.summary.failures, 2);
+  assert.equal(report.summary.failureRate, 0.5);
+  assert.equal(report.summary.recoveryAttempts, 1);
+  assert.equal(report.summary.circuitOpenings, 1);
+  assert.equal(report.summary.recoveries, 1);
+  assert.equal(report.summary.averageRecoveryDurationMs, 600);
+  assert.equal(report.providers[0].targetId, "gpu-a");
+  assert.equal(report.providers[0].failureRate, 0.5);
+  assert.equal(report.providers[0].recoveryAttempts, 1);
+  assert.equal(report.providers[0].recoveries, 1);
+  assert.equal(report.recentEvents.length, 5);
+  assert.equal(report.recentEvents[0].type, "provider_success");
+  assert.equal(report.recentEvents.at(-1).type, "provider_failure");
+  assert.equal(report.timeline.length, 24);
+  assert.equal(report.to, now());
+});
+
+test("reliability history is bounded, reports eviction and stays tenant-isolated", async () => {
+  const shared = createInMemoryCoordinationStore();
+  let now = 10_000;
+  const options = {
+    store: shared,
+    failureThreshold: 10,
+    failureWindowMs: 1_000,
+    cooldownMs: 500,
+    clock: () => now,
+    historyMaxEntries: 3
+  };
+  const first = createCircuitBreaker(options);
+  const second = createCircuitBreaker(options);
+  for (let index = 0; index < 5; index++) {
+    await first.recordFailure("acme", "gpu-" + index);
+    now += 1;
+  }
+  const report = await second.history("acme", { windowMs: 1_000, limit: 10 });
+  assert.equal(report.retainedEventCount, 3);
+  assert.equal(report.droppedEventCount, 2);
+  assert.equal(report.truncated, true);
+  assert.deepEqual(report.recentEvents.map(event => event.targetId), ["gpu-4", "gpu-3", "gpu-2"]);
+  assert.equal((await second.history("beta", { windowMs: 1_000 })).retainedEventCount, 0);
+});
+
+test("SQLite coordination persists reliability history across breaker instances", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-reliability-sqlite-"));
+  const file = path.join(dir, "state.db");
+  const stores = createSQLiteStateStores({ filePath: file, maxEntries: 20 });
+  let now = Date.now();
+  const options = {
+    store: stores.coordination,
+    failureThreshold: 1,
+    failureWindowMs: 1_000,
+    cooldownMs: 500,
+    clock: () => now
+  };
+  const first = createCircuitBreaker(options);
+  const second = createCircuitBreaker(options);
+  try {
+    await first.recordFailure("acme", "sqlite-gpu", { source: "scheduled_probe" });
+    const report = await second.history("acme", { windowMs: 60_000 });
+    assert.equal(report.summary.failures, 1);
+    assert.equal(report.recentEvents[0].source, "scheduled_probe");
+
+    const restarted = createCircuitBreaker(options);
+    const afterRestart = await restarted.history("acme", { windowMs: 60_000 });
+    assert.equal(afterRestart.summary.failures, 1);
+    assert.equal(afterRestart.providers[0].targetId, "sqlite-gpu");
+  } finally {
+    stores.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

@@ -213,3 +213,9 @@ The internal State Service requires `LOCD_STATE_SERVICE_API_KEY`. Its health end
 For multiple API instances, set LOCD_STATE_SERVICE_URL and LOCD_STATE_SERVICE_API_KEY to share telemetry and coordination through the internal State Service.
 
 Use LOCD_COORDINATION_URL instead when you need shared rate limiting/idempotency without moving decision telemetry off the API process.
+
+## Provider reliability history
+
+The circuit breaker also maintains a bounded, tenant-scoped operational event history. Defaults are seven days and 2,000 events per tenant. Configure with `LOCD_CIRCUIT_BREAKER_HISTORY_RETENTION_MS` and `LOCD_CIRCUIT_BREAKER_HISTORY_MAX_ENTRIES`. Events contain provider identifiers, timestamps, operation source, success/failure and circuit transitions only; workload payloads and credentials are excluded.
+
+When SQLite or the network State Service provides shared atomic coordination, history is shared across API instances and survives API restarts within the configured retention. With process-local coordination it is isolated to the process and is lost on restart. Treat this bounded history as operational analytics, not as a permanent compliance or audit record. The authenticated `GET /v1/reliability` endpoint exposes time-window summaries, provider breakdowns and recent events.

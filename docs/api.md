@@ -387,6 +387,17 @@ Decision responses expose policyRulesApplied and include policy_rule_applied:<id
 
 Public readiness endpoint. Returns HTTP 200 when the API process is initialized.
 
+### GET /v1/reliability
+
+Returns authenticated, tenant-scoped provider outcome and circuit-recovery analytics. The endpoint accepts:
+
+- `windowMs`: aggregation window in milliseconds (default 24 hours; maximum is the configured history retention).
+- `limit`: number of recent events to include (1–100, default 50).
+
+The response contains summary success/failure rates, 24 time buckets, per-provider breakdown and recent operational events. It records provider IDs, timestamps, operation source and circuit transitions only; prompts, request payloads, completions, provider response bodies and credentials are not stored. Event history uses the same atomic coordination backend as circuit state, so SQLite/State Service deployments share it across instances. Without a shared backend, history is process-local.
+
+History is bounded per tenant: defaults are seven days and 2,000 events, configurable with `LOCD_CIRCUIT_BREAKER_HISTORY_RETENTION_MS` and `LOCD_CIRCUIT_BREAKER_HISTORY_MAX_ENTRIES`. The endpoint reports event eviction and process-local write gaps; it is operational analytics, not a permanent audit log.
+
 ### GET /v1/status
 
 Authenticated operational snapshot for operators and dashboards. The response contains safe counts and capability flags, not credentials or workload payloads.
