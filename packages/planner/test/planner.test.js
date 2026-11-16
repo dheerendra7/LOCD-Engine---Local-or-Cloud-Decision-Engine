@@ -297,3 +297,58 @@ test("negative stage estimates remain unknown rather than becoming zero", () => 
   assert.equal(result.rejected.some(item => item.stepId === "bad" && item.reasons.includes("latency_estimate_missing")), true);
   assert.equal(result.rejected.some(item => item.stepId === "bad" && item.reasons.includes("cost_estimate_missing")), true);
 });
+
+
+test("hybrid policy rules match workload type and each stage's data sensitivity", () => {
+  const result = planHybridExecution({
+    workload: { type: "regulated-llm", sensitivity: "low" },
+    policy: {
+      rules: [{
+        id: "regulated-high-sensitivity-local-only",
+        priority: 100,
+        when: { workloadType: "regulated-llm", sensitivity: "high" },
+        set: { sensitiveDataMode: "local-only", allowedModes: ["local"] }
+      }]
+    },
+    steps: [
+      { id: "preprocess", targetId: "local-pre" },
+      { id: "inference", targetId: "cloud", dataSensitivity: "high" }
+    ],
+    targets
+  });
+
+  assert.equal(result.valid, false);
+  assert.deepEqual(result.policyRulesApplied, ["regulated-high-sensitivity-local-only"]);
+  const inferenceRejection = result.rejected.find(item => item.stepId === "inference");
+  assert.ok(inferenceRejection.reasons.includes("mode_not_allowed"));
+  assert.ok(inferenceRejection.reasons.includes("sensitive_stage_requires_local_execution"));
+});
+
+test("hybrid policy rules can match required workload capabilities", () => {
+  const result = planHybridExecution({
+    workload: {
+      type: "vision",
+      sensitivity: "low",
+      requiredCapabilities: ["vision"]
+    },
+    policy: {
+      rules: [{
+        id: "vision-workloads-private-only",
+        priority: 50,
+        when: { requiredCapability: "vision" },
+        set: { allowedModes: ["private"] }
+      }]
+    },
+    steps: [
+      { id: "prepare", targetId: "local-pre" },
+      { id: "infer", targetId: "private-infer" }
+    ],
+    targets
+  });
+
+  assert.equal(result.valid, false);
+  assert.deepEqual(result.policyRulesApplied, ["vision-workloads-private-only"]);
+  assert.ok(result.rejected.some(item =>
+    item.stepId === "prepare" && item.reasons.includes("mode_not_allowed")
+  ));
+});

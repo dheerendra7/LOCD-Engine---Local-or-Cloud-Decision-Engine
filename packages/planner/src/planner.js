@@ -46,14 +46,22 @@ function normalizePlan(input) {
     strictLatency: Boolean(input.constraints?.strictLatency),
     strictCost: Boolean(input.constraints?.strictCost)
   };
+  const workload = {
+    type: String(input.workload?.type || "unknown"),
+    sensitivity: workloadSensitivity,
+    requiredCapabilities: Array.isArray(input.workload?.requiredCapabilities)
+      ? [...new Set(input.workload.requiredCapabilities.map(String))]
+      : []
+  };
+  const policy = input.policy || {};
+  // Validate policy definitions before evaluating individual stages. Rules are
+  // then resolved again with each stage's data sensitivity in the planner loop.
+  resolvePolicy(policy, { workload });
 
   return {
-    workload: {
-      type: String(input.workload?.type || "unknown"),
-      sensitivity: workloadSensitivity
-    },
+    workload,
     constraints,
-    policy: resolvePolicy(input.policy || {}),
+    policy,
     steps: input.steps.map((step, index) => {
       const dataSensitivity = step?.dataSensitivity || workloadSensitivity;
       if (!SENSITIVITIES.has(dataSensitivity)) {
@@ -111,6 +119,7 @@ export function planHybridExecution(input) {
   const stepIds = new Set();
   const rejected = [];
   const steps = [];
+  const policyRulesApplied = new Set();
   let totalLatencyMs = 0;
   let totalCostUsd = 0;
   let totalLatencyKnown = true;
@@ -140,6 +149,16 @@ export function planHybridExecution(input) {
     }
     stepIds.add(step.id);
 
+    const stepPolicy = resolvePolicy(request.policy, {
+      workload: {
+        ...request.workload,
+        sensitivity: step.dataSensitivity
+      }
+    });
+    for (const ruleId of stepPolicy.matchedRules) {
+      policyRulesApplied.add(ruleId);
+    }
+
     const target = targetMap.get(step.targetId);
     if (!target) {
       totalLatencyKnown = false;
@@ -150,7 +169,7 @@ export function planHybridExecution(input) {
 
     const reasons = [];
     if (target.available === false) reasons.push("target_unavailable");
-    reasons.push(...policyRejects(request.policy, target, step.dataSensitivity));
+    reasons.push(...policyRejects(stepPolicy, target, step.dataSensitivity));
 
     const latency = nonNegativeOrNull(target.estimatedLatencyMs);
     const cost = nonNegativeOrNull(target.estimatedCostUsd);
@@ -211,6 +230,7 @@ export function planHybridExecution(input) {
     planVersion: "1.0",
     route: "hybrid",
     valid: rejected.length === 0,
+    policyRulesApplied: [...policyRulesApplied],
     steps,
     estimated: {
       latencyMs: totalLatencyKnown ? Number(totalLatencyMs.toFixed(2)) : null,
