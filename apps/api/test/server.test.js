@@ -3575,3 +3575,54 @@ test("failed idempotent operations release claims for immediate shared-store ret
     await new Promise(resolve => scopedServer.close(resolve));
   }
 });
+
+test("long-running idempotent operations renew their claim and reject duplicate side effects", async () => {
+  let recordCalls = 0;
+  const decisionStore = {
+    async record(event) {
+      recordCalls++;
+      await new Promise(resolve => setTimeout(resolve, 240));
+      return { ...event, id: "decision-long-running-" + recordCalls };
+    },
+    async recordOutcome() { throw new Error("not used"); },
+    async list() { return []; },
+    async summary() { return { totalDecisions: 0 }; },
+    async clear() {}
+  };
+  const scopedServer = createServer({ decisionStore, idempotencyLockTtlMs: 60 });
+  await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + scopedServer.address().port;
+  const request = () => fetch(url + "/v1/decide", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": "long-running-decision"
+    },
+    body: JSON.stringify({
+      workload: { type: "long-running", sensitivity: "low" },
+      targets: [{
+        id: "long-running-target", mode: "local", health: 1, capacity: 0.1,
+        privacy: 1, estimatedLatencyMs: 10, estimatedCostUsd: 0
+      }]
+    })
+  });
+
+  try {
+    const firstPending = request();
+    await new Promise(resolve => setTimeout(resolve, 130));
+    const duplicate = await request();
+    assert.equal(duplicate.status, 409);
+    assert.deepEqual(await duplicate.json(), { error: "idempotency_request_in_progress" });
+    const first = await firstPending;
+    assert.equal(first.status, 200);
+    const firstBody = await first.json();
+    assert.equal(recordCalls, 1);
+    const replay = await request();
+    assert.equal(replay.status, 200);
+    assert.equal(replay.headers.get("idempotency-replayed"), "true");
+    assert.equal((await replay.json()).decisionId, firstBody.decisionId);
+    assert.equal(recordCalls, 1);
+  } finally {
+    await new Promise(resolve => scopedServer.close(resolve));
+  }
+});

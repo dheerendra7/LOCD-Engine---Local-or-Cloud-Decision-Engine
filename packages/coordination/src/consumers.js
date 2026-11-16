@@ -186,6 +186,19 @@ export function createCoordinatedIdempotencyStore({
     return { claimed: false, reason: "in_progress" };
   }
 
+  async function renew(scope, key, body, claimToken, lockTtlMs = 30_000) {
+    if (!key || !claimToken) return false;
+    if (!Number.isFinite(lockTtlMs) || lockTtlMs < 1) {
+      throw new Error("idempotency_lock_ttl_invalid");
+    }
+    const storedKey = storageKey(scope, key);
+    const existing = await store.get(storedKey);
+    if (!existing || !existing.processing || existing.claimToken !== claimToken ||
+        existing.fingerprint !== fingerprint(body)) return false;
+    const renewed = { ...existing, storedAt: new Date().toISOString() };
+    return store.setIfValue(storedKey, existing, renewed, { ttlMs: lockTtlMs });
+  }
+
   async function release(scope, key, body, claimToken) {
     if (!key || !claimToken || typeof store.deleteIfValue !== "function") return false;
     const storedKey = storageKey(scope, key);
@@ -195,5 +208,5 @@ export function createCoordinatedIdempotencyStore({
     return store.deleteIfValue(storedKey, existing);
   }
 
-  return { lookup, remember, claim, release };
+  return { lookup, remember, claim, renew, release };
 }

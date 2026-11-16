@@ -149,6 +149,24 @@ export function createIdempotencyStore({
       return { claimed: true, claimToken };
     },
 
+    renew(scope, key, body, claimToken, lockTtlMs = 30_000) {
+      if (!key || !claimToken) return false;
+      if (!Number.isFinite(lockTtlMs) || lockTtlMs < 1) {
+        throw new Error("idempotency_lock_ttl_invalid");
+      }
+      purge();
+      const normalizedKey = String(key).trim();
+      if (!normalizedKey || normalizedKey.length > 256) {
+        throw new Error("idempotency_key_invalid");
+      }
+      const composite = scopedEntryKey(scope, normalizedKey);
+      const existing = entries.get(composite);
+      if (!existing || !existing.processing || existing.claimToken !== claimToken ||
+          existing.fingerprint !== fingerprint(body)) return false;
+      existing.expiresAt = clock() + lockTtlMs;
+      return true;
+    },
+
     release(scope, key, body, claimToken) {
       if (!key || !claimToken) return false;
       purge();

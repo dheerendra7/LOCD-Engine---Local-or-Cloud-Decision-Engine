@@ -576,6 +576,46 @@ export function createServer({
     let pathname = "unknown";
     let idempotencyClaim = null;
     let idempotencyResultProduced = false;
+    let idempotencyRenewalTimer = null;
+    let idempotencyRenewalPromise = null;
+
+    const stopIdempotencyRenewal = async () => {
+      if (idempotencyRenewalTimer) {
+        clearInterval(idempotencyRenewalTimer);
+        idempotencyRenewalTimer = null;
+      }
+      if (idempotencyRenewalPromise) await idempotencyRenewalPromise;
+    };
+
+    const startIdempotencyRenewal = claim => {
+      if (typeof effectiveIdempotencyStore.renew !== "function") return;
+      const intervalMs = Math.max(1, Math.floor(idempotencyLockTtlMs / 3));
+      idempotencyRenewalTimer = setInterval(() => {
+        if (idempotencyRenewalPromise || idempotencyClaim !== claim) return;
+        idempotencyRenewalPromise = (async () => {
+          try {
+            const renewed = await effectiveIdempotencyStore.renew(
+              claim.scope, claim.key, claim.body, claim.claimToken, idempotencyLockTtlMs
+            );
+            if (!renewed && idempotencyClaim === claim && !idempotencyResultProduced) {
+              if (idempotencyRenewalTimer) clearInterval(idempotencyRenewalTimer);
+              idempotencyRenewalTimer = null;
+              logger.warn({ event: "idempotency_claim_renewal_lost", requestId, method: req.method, path: pathname });
+            }
+          } catch (error) {
+            logger.warn({
+              event: "idempotency_claim_renewal_failed",
+              requestId,
+              errorClass: error instanceof Error ? error.constructor.name : "unknown_error"
+            });
+          }
+        })().finally(() => {
+          idempotencyRenewalPromise = null;
+        });
+        idempotencyRenewalPromise.catch(() => {});
+      }, intervalMs);
+      idempotencyRenewalTimer.unref?.();
+    };
 
     try {
       const url = new URL(req.url || "/", "http://localhost");
@@ -649,6 +689,7 @@ export function createServer({
               body: structuredClone(body),
               claimToken: claim.claimToken
             };
+            startIdempotencyRenewal(idempotencyClaim);
             return null;
           }
 
@@ -686,6 +727,7 @@ export function createServer({
           { status, body: responseBody },
           activeClaim?.claimToken ?? null
         );
+        if (activeClaim) await stopIdempotencyRenewal();
         idempotencyClaim = null;
       };
       const sendReplay = replay => sendJson(res, replay.status, replay.body, {
@@ -1417,6 +1459,7 @@ export function createServer({
         requestId
       });
     } finally {
+      await stopIdempotencyRenewal();
       if (idempotencyClaim && !idempotencyResultProduced &&
           typeof effectiveIdempotencyStore.release === "function") {
         try {

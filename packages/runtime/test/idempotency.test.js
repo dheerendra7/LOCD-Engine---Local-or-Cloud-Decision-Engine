@@ -278,3 +278,22 @@ test("lookup does not return a replay before the claimed request completes", () 
     { status: 201, body: { id: "created" }, replayed: true }
   );
 });
+
+test("active local idempotency leases renew only for the current owner and payload", () => {
+  let now = 1_000;
+  const store = createIdempotencyStore({ ttlMs: 1_000, clock: () => now });
+  const body = { payload: "long-running" };
+  const owner = store.claim("scope", "renew-key", body, 100);
+  assert.equal(owner.claimed, true);
+  assert.equal(store.renew("scope", "renew-key", body, owner.claimToken + "-wrong", 100), false);
+  assert.equal(store.renew("scope", "renew-key", { payload: "different" }, owner.claimToken, 100), false);
+  now = 1_090;
+  assert.equal(store.renew("scope", "renew-key", body, owner.claimToken, 100), true);
+  now = 1_189;
+  assert.equal(store.claim("scope", "renew-key", body).reason, "in_progress");
+  now = 1_191;
+  const replacement = store.claim("scope", "renew-key", body, 100);
+  assert.equal(replacement.claimed, true);
+  assert.notEqual(replacement.claimToken, owner.claimToken);
+  assert.equal(store.renew("scope", "renew-key", body, owner.claimToken, 100), false);
+});

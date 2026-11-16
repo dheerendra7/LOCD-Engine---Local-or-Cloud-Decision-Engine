@@ -277,3 +277,29 @@ test("coordinated lookup does not fake a response while a claim is processing", 
     { status: 201, body: { id: "created" }, replayed: true }
   );
 });
+
+test("coordinated idempotency renews only the current owner's lease with atomic fencing", async () => {
+  const base = createInMemoryCoordinationStore();
+  let renewalTtl = null;
+  const store = {
+    ...base,
+    async setIfValue(key, expected, replacement, options) {
+      if (replacement.claimToken === expected.claimToken && replacement.processing) {
+        renewalTtl = options.ttlMs;
+      }
+      return base.setIfValue(key, expected, replacement, options);
+    }
+  };
+  const one = createCoordinatedIdempotencyStore({ store, namespace: "renew-test" });
+  const two = createCoordinatedIdempotencyStore({ store, namespace: "renew-test" });
+  const body = { payload: "long-running" };
+  const owner = await one.claim("scope", "key", body, 30);
+  assert.equal(owner.claimed, true);
+  assert.equal(await two.renew("scope", "key", body, owner.claimToken + "-wrong", 90), false);
+  assert.equal(renewalTtl, null);
+  assert.equal(await one.renew("scope", "key", body, owner.claimToken, 90), true);
+  assert.equal(renewalTtl, 90);
+  assert.equal((await two.claim("scope", "key", body)).reason, "in_progress");
+  assert.equal(await one.remember("scope", "key", body, { status: 200, body: { ok: true } }, owner.claimToken), true);
+  assert.equal((await two.claim("scope", "key", body)).reason, "completed");
+});
