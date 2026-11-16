@@ -125,6 +125,94 @@ test("registry rejects duplicate target adapters", () => {
   );
 });
 
+test("execution admission can reject an open circuit without calling the provider", async () => {
+  let providerCalls = 0;
+  const registry = createExecutionRegistry([{
+    id: "provider",
+    targetId: "local",
+    async execute() {
+      providerCalls++;
+      return { ok: true };
+    }
+  }]);
+  let admitted = 0;
+
+  const result = await executePlan(
+    { ...plan(), steps: [plan().steps[0]] },
+    {
+      registry,
+      mode: "live",
+      beforeStep: async () => {
+        admitted++;
+        return { allowed: false, errorClass: "circuit_breaker_open" };
+      }
+    }
+  );
+
+  assert.equal(admitted, 1);
+  assert.equal(providerCalls, 0);
+  assert.equal(result.status, "failed");
+  assert.equal(result.receipts[0].errorClass, "circuit_breaker_open");
+});
+
+test("execution step callbacks receive provider success and failure exactly once", async () => {
+  const registry = createExecutionRegistry([
+    {
+      id: "success",
+      targetId: "local",
+      async execute() { return { ok: true }; }
+    },
+    {
+      id: "failure",
+      targetId: "private",
+      async execute() { throw new Error("provider_unavailable"); }
+    }
+  ]);
+  const outcomes = [];
+  const result = await executePlan(plan(), {
+    registry,
+    mode: "live",
+    failFast: false,
+    beforeStep: async ({ step }) => ({ allowed: true, context: { permitId: step.id } }),
+    onStepResult: async event => outcomes.push({
+      stepId: event.step.id,
+      status: event.status,
+      permitId: event.executionContext.permitId,
+      errorClass: event.errorClass ?? null
+    })
+  });
+
+  assert.equal(result.status, "failed");
+  assert.deepEqual(outcomes, [
+    { stepId: "pre", status: "completed", permitId: "pre", errorClass: null },
+    { stepId: "infer", status: "failed", permitId: "infer", errorClass: "provider_unavailable" }
+  ]);
+});
+
+test("execution timeout is reported to the failure callback", async () => {
+  const registry = createExecutionRegistry([{
+    id: "slow",
+    targetId: "local",
+    async execute() {
+      await new Promise(resolve => setTimeout(resolve, 30));
+    }
+  }]);
+  const outcomes = [];
+  const result = await executePlan(
+    { ...plan(), steps: [plan().steps[0]] },
+    {
+      registry,
+      mode: "live",
+      timeoutMs: 5,
+      onStepResult: event => outcomes.push(event.errorClass)
+    }
+  );
+
+  assert.equal(result.receipts[0].errorClass, "execution_timeout");
+  assert.deepEqual(outcomes, ["execution_timeout"]);
+});
+
+
 test("execution outputs are caller-scoped and omitted by default", async () => {
   const registry = createExecutionRegistry([{
     id: "provider",

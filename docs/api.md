@@ -90,8 +90,8 @@ A successful decision returns:
 - estimated: selected target latency/cost estimate.
 - reasons: positive explanations for the selected candidate.
 - alternatives: other eligible candidates ranked below the winner.
-- rejected: hard-rejected candidates and rule reasons.
-- evaluated: full candidate trace for audit/debugging.
+- rejected: hard-rejected candidates and rule reasons, including `circuit_breaker_open` and `circuit_breaker_half_open_busy`.
+- evaluated: full candidate trace for audit/debugging, including circuit state for registered targets.
 
 ### Hard-constraint behavior
 
@@ -365,6 +365,8 @@ Static target snapshots receive dry-run-only execution adapters. They cannot be 
 
 Execution receipts remain metadata-only. Caller-scoped results are not written to telemetry.
 
+For live execution, each registered target must pass circuit admission before its provider adapter is called. Targets with open circuits or an active half-open probe return failed step receipts with `circuit_breaker_open` or `circuit_breaker_half_open_busy`; no provider call is made for those steps.
+
 ## Scoped authorization
 
 The API accepts either the legacy LOCD_API_KEY or scoped credentials configured through LOCD_API_KEYS_JSON.
@@ -389,7 +391,7 @@ Public readiness endpoint. Returns HTTP 200 when the API process is initialized.
 
 Authenticated operational snapshot for operators and dashboards. The response contains safe counts and capability flags, not credentials or workload payloads.
 
-It includes target count, probeable target count, execution adapter count, decision count, execution-enabled state, persistence flags and automatic-probing state.
+It includes target count, probeable target count, execution adapter count, decision count, execution-enabled state, persistence flags, automatic-probing state, circuit-breaker backend and open/half-open target counts.
 
 ### Graceful shutdown
 

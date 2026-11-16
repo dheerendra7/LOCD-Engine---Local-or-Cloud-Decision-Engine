@@ -26,6 +26,8 @@ Possible destinations:
 - Privacy and residency controls.
 - Cost and latency budgeting.
 - Capacity and health awareness.
+- Tenant-scoped provider circuit breakers with atomic half-open probe leases.
+- Policy-aware failover across subsequent decisions when a registered provider circuit opens.
 - Optional target heartbeats with enforceable freshness policies.
 - Built-in policy profiles with per-request overrides.
 - Pure JavaScript core with no runtime dependency.

@@ -103,7 +103,9 @@ export async function executePlan(
     timeoutMs = 30000,
     failFast = true,
     includeOutputs = false,
-    clock
+    clock,
+    beforeStep = null,
+    onStepResult = null
   } = {}
 ) {
   if (!plan || typeof plan !== "object") throw new Error("execution plan is required");
@@ -117,6 +119,22 @@ export async function executePlan(
   if (!["dry-run", "live"].includes(mode)) {
     throw new Error("execution mode must be dry-run or live");
   }
+
+  if (beforeStep !== null && typeof beforeStep !== "function") {
+    throw new Error("beforeStep must be a function");
+  }
+  if (onStepResult !== null && typeof onStepResult !== "function") {
+    throw new Error("onStepResult must be a function");
+  }
+
+  const notifyStepResult = async payload => {
+    if (typeof onStepResult !== "function") return;
+    try {
+      await onStepResult(payload);
+    } catch {
+      // Breaker/observability callbacks must not rewrite provider receipts.
+    }
+  };
 
   const receipts = [];
   const results = [];
@@ -158,6 +176,45 @@ export async function executePlan(
       continue;
     }
 
+    let executionContext = null;
+    if (typeof beforeStep === "function") {
+      try {
+        const admission = await beforeStep({
+          step: { ...step },
+          adapter,
+          mode
+        });
+        if (admission?.allowed === false) {
+          receipts.push(normalizeReceipt({
+            step,
+            adapter,
+            status: "failed",
+            startedAt,
+            completedAt: nowIso(clock),
+            errorClass: admission.errorClass || "execution_admission_rejected"
+          }));
+          status = "failed";
+          failedStepId = step.id;
+          if (failFast) break;
+          continue;
+        }
+        executionContext = admission?.context ?? admission ?? null;
+      } catch {
+        receipts.push(normalizeReceipt({
+          step,
+          adapter,
+          status: "failed",
+          startedAt,
+          completedAt: nowIso(clock),
+          errorClass: "execution_admission_failed"
+        }));
+        status = "failed";
+        failedStepId = step.id;
+        if (failFast) break;
+        continue;
+      }
+    }
+
     try {
       const output = await withTimeout(
         () => adapter.execute({
@@ -167,6 +224,13 @@ export async function executePlan(
         }),
         timeoutMs
       );
+
+      await notifyStepResult({
+        step: { ...step },
+        adapter,
+        status: "completed",
+        executionContext
+      });
 
       if (includeOutputs) {
         results.push({
@@ -185,6 +249,13 @@ export async function executePlan(
       }));
     } catch (error) {
       const errorClass = error instanceof Error ? error.message : "execution_failed";
+      await notifyStepResult({
+        step: { ...step },
+        adapter,
+        status: "failed",
+        errorClass,
+        executionContext
+      });
       receipts.push(normalizeReceipt({
         step,
         adapter,

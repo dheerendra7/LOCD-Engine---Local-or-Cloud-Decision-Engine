@@ -20,7 +20,10 @@
     candidate normalization
        |
        v
-    hard-constraint filtering
+    tenant-scoped circuit overlay
+       |
+       v
+    hard policy/resource/circuit filtering
        |
        +--> no eligible target --> NO_ROUTE
        |
@@ -49,6 +52,16 @@
 - cost fit
 - capacity headroom
 - target health/reliability
+
+## Provider failure isolation
+
+The deterministic core remains side-effect free. The API overlays tenant-scoped circuit state onto registered target snapshots before decision or hybrid-plan evaluation. Circuit-open and half-open-busy targets are hard-rejected before scoring; request-scoped target arrays remain simulation inputs and do not mutate or inherit registered provider state.
+
+The live executor obtains a target admission permit before invoking an adapter. A closed circuit admits normal work. Reaching the configured failure threshold opens the circuit for a cooldown. After cooldown, a single owner-token-fenced half-open probe is admitted; success closes and clears the breaker, while failure reopens it with a fresh cooldown. Expired probe leases can be reclaimed, and stale probe owners cannot close a newer trial.
+
+Circuit state uses atomic compare-and-set operations from the configured coordination store. SQLite and the network State Service therefore share breaker state across API instances. When no atomic shared backend is configured, the API uses process-local breaker state and reports that boundary in GET /v1/status.
+
+Failover is policy-aware across subsequent decisions: once a provider is open, the normal engine re-runs capability, privacy, residency, latency, cost and health checks against the remaining candidates. LOCD does not silently replay an arbitrary failed payload to another provider inside the same execution; callers must submit a newly validated plan for another destination, preserving side-effect and data-boundary safety.
 
 ## Calibration recovery
 

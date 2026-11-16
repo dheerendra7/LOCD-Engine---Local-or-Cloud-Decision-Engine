@@ -88,6 +88,75 @@ test("malformed requests fail clearly", () => {
   assert.throws(() => decide({ workload: { type: "x" } }), /targets must be a non-empty array/);
 });
 
+test("circuit-open targets are hard rejected and alternative targets can take over", () => {
+  const input = {
+    workload: { type: "batch", sensitivity: "low" },
+    targets: [
+      {
+        id: "provider-a",
+        mode: "cloud",
+        available: true,
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 20,
+        estimatedCostUsd: 0.01,
+        circuitBreaker: {
+          state: "open",
+          failureCount: 3,
+          retryAt: 20_000,
+          probeInFlight: false
+        }
+      },
+      {
+        id: "provider-b",
+        mode: "cloud",
+        available: true,
+        health: 0.8,
+        capacity: 0.2,
+        privacy: 1,
+        estimatedLatencyMs: 40,
+        estimatedCostUsd: 0.02,
+        circuitBreaker: { state: "closed", failureCount: 0, probeInFlight: false }
+      }
+    ]
+  };
+
+  const result = decide(input);
+  assert.equal(result.targetId, "provider-b");
+  assert.equal(result.rejected[0].targetId, "provider-a");
+  assert.deepEqual(result.rejected[0].reasons, ["circuit_breaker_open"]);
+  assert.equal(
+    result.evaluated.find(item => item.targetId === "provider-a").circuitBreaker.state,
+    "open"
+  );
+});
+
+test("a half-open provider cannot be selected while its probe lease is in flight", () => {
+  const result = decide({
+    workload: { type: "batch", sensitivity: "low" },
+    targets: [{
+      id: "half-open",
+      mode: "cloud",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1,
+      estimatedLatencyMs: 10,
+      estimatedCostUsd: 0,
+      circuitBreaker: {
+        state: "half-open",
+        failureCount: 3,
+        probeInFlight: true
+      }
+    }]
+  });
+
+  assert.equal(result.route, "none");
+  assert.deepEqual(result.rejected[0].reasons, ["circuit_breaker_half_open_busy"]);
+});
+
+
 test("alternatives are returned for eligible targets", () => {
   const input = {
     workload: { type: "batch", sensitivity: "low" },

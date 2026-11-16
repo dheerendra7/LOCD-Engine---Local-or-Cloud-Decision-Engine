@@ -1394,6 +1394,162 @@ test("outcomes for no-route decisions are recorded without attempting target cal
   }
 });
 
+test("live provider failures open a tenant circuit and route subsequent decisions to a healthy alternative", async () => {
+  let failedProviderCalls = 0;
+  let healthyProviderCalls = 0;
+  const targetRegistry = createTargetRegistry([
+    {
+      id: "provider-a",
+      targetId: "provider-a",
+      async getSnapshot() {
+        return {
+          id: "provider-a",
+          mode: "cloud",
+          available: true,
+          health: 1,
+          capacity: 0.1,
+          privacy: 1,
+          estimatedLatencyMs: 20,
+          estimatedCostUsd: 0.01,
+          regions: ["ap-south-1"],
+          capabilities: ["text-generation"]
+        };
+      },
+      async execute() {
+        failedProviderCalls++;
+        throw new Error("provider_unavailable");
+      }
+    },
+    {
+      id: "provider-b",
+      targetId: "provider-b",
+      async getSnapshot() {
+        return {
+          id: "provider-b",
+          mode: "cloud",
+          available: true,
+          health: 0.6,
+          capacity: 0.7,
+          privacy: 0.4,
+          estimatedLatencyMs: 100,
+          estimatedCostUsd: 0.05,
+          regions: ["ap-south-1"],
+          capabilities: ["text-generation"]
+        };
+      },
+      async execute() {
+        healthyProviderCalls++;
+        return { status: "ok" };
+      }
+    }
+  ]);
+  const authorizer = createScopedAuthorizer({
+    keys: [{
+      id: "operator",
+      secret: "circuit-operator-secret",
+      tenantId: "acme",
+      scopes: ["admin"]
+    }]
+  });
+  const scopedServer = createServer({
+    targetRegistry,
+    authorizer,
+    executionEnabled: true,
+    rateLimitMaxRequests: 100,
+    circuitBreakerFailureThreshold: 1,
+    circuitBreakerFailureWindowMs: 5_000,
+    circuitBreakerCooldownMs: 10_000
+  });
+  await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + scopedServer.address().port;
+  const headers = {
+    authorization: "Bearer circuit-operator-secret",
+    "content-type": "application/json"
+  };
+
+  try {
+    const firstDecisionResponse = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        workload: { type: "resilient-inference", sensitivity: "low" },
+        targets: undefined
+      })
+    });
+    assert.equal(firstDecisionResponse.status, 200);
+    const firstDecision = await firstDecisionResponse.json();
+    assert.equal(firstDecision.targetId, "provider-a");
+
+    const execution = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        mode: "live",
+        timeoutMs: 1_000,
+        plan: {
+          planVersion: "1.0",
+          valid: true,
+          route: "cloud",
+          steps: [{
+            id: "provider-a-inference",
+            targetId: "provider-a",
+            purpose: "inference",
+            payload: { prompt: "example" }
+          }]
+        }
+      })
+    });
+    assert.equal(execution.status, 200);
+    const executionBody = await execution.json();
+    assert.equal(executionBody.status, "failed");
+    assert.equal(executionBody.receipts[0].errorClass, "provider_unavailable");
+    assert.equal(failedProviderCalls, 1);
+
+    const nextDecisionResponse = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        workload: { type: "resilient-inference", sensitivity: "low" }
+      })
+    });
+    assert.equal(nextDecisionResponse.status, 200);
+    const nextDecision = await nextDecisionResponse.json();
+    assert.equal(nextDecision.targetId, "provider-b");
+    assert.deepEqual(
+      nextDecision.rejected.find(item => item.targetId === "provider-a").reasons,
+      ["circuit_breaker_open"]
+    );
+
+    const hybrid = await fetch(url + "/v1/hybrid-plan", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        workload: { type: "resilient-inference", sensitivity: "low" },
+        steps: [
+          { id: "preprocess", targetId: "provider-b" },
+          { id: "inference", targetId: "provider-a" }
+        ]
+      })
+    });
+    assert.equal(hybrid.status, 200);
+    const hybridBody = await hybrid.json();
+    assert.equal(hybridBody.valid, false);
+    assert.ok(hybridBody.rejected.some(item =>
+      item.stepId === "inference" && item.reasons.includes("circuit_breaker_open")
+    ));
+
+    const status = await fetch(url + "/v1/status", { headers });
+    assert.equal(status.status, 200);
+    const statusBody = await status.json();
+    assert.equal(statusBody.capabilities.circuitBreakerEnabled, true);
+    assert.equal(statusBody.capabilities.circuitBreakerBackend, "process-local");
+    assert.equal(statusBody.counts.openCircuitTargets, 1);
+    assert.equal(healthyProviderCalls, 0);
+  } finally {
+    await new Promise(resolve => scopedServer.close(resolve));
+  }
+});
+
 test("unknown decision outcome IDs return not found", async () => {
   const response = await fetch(baseUrl + "/v1/outcomes", {
     method: "POST",

@@ -169,6 +169,34 @@ test("unavailable target rejects the step", () => {
   assert.match(result.rejected.flatMap(item => item.reasons).join(","), /target_unavailable/);
 });
 
+test("hybrid plan rejects a target with an open circuit", () => {
+  const result = planHybridExecution({
+    workload: { type: "batch", sensitivity: "low" },
+    steps: [
+      { id: "pre", targetId: "local-pre" },
+      { id: "infer", targetId: "cloud" }
+    ],
+    targets: [
+      { ...targets[0] },
+      {
+        ...targets[2],
+        circuitBreaker: {
+          state: "open",
+          failureCount: 3,
+          retryAt: 20_000,
+          probeInFlight: false
+        }
+      }
+    ]
+  });
+
+  assert.equal(result.valid, false);
+  assert.ok(result.rejected.some(item =>
+    item.stepId === "infer" && item.reasons.includes("circuit_breaker_open")
+  ));
+});
+
+
 test("invalid per-step sensitivity is rejected instead of bypassing privacy policy", () => {
   const base = {
     workload: { type: "llm-inference", sensitivity: "low" },

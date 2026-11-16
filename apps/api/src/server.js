@@ -12,7 +12,12 @@ import { createLogger, createRequestId } from "../../../packages/observability/s
 import { createCalibrator } from "../../../packages/calibration/src/index.js";
 import { createIdempotencyStore } from "../../../packages/runtime/src/index.js";
 import { createRateLimiter, getClientKey } from "./rate-limit.js";
-import { createCoordinatedFixedWindowRateLimiter, createCoordinatedIdempotencyStore } from "../../../packages/coordination/src/index.js";
+import {
+  createCoordinatedFixedWindowRateLimiter,
+  createCoordinatedIdempotencyStore,
+  createInMemoryCoordinationStore
+} from "../../../packages/coordination/src/index.js";
+import { createCircuitBreaker } from "../../../packages/resilience/src/index.js";
 import { createProbeScheduler } from "../../../packages/probing/src/index.js";
 import {
   createDryRunExecutionAdapter,
@@ -469,6 +474,11 @@ export function createServer({
   trustProxy = process.env.LOCD_TRUST_PROXY === "true",
   trustedProxyHops = Number(process.env.LOCD_TRUST_PROXY_HOPS || 1),
   idempotencyLockTtlMs = Number(process.env.LOCD_IDEMPOTENCY_LOCK_TTL_MS || 30_000),
+  circuitBreaker = null,
+  circuitBreakerFailureThreshold = Number(process.env.LOCD_CIRCUIT_BREAKER_FAILURE_THRESHOLD || 3),
+  circuitBreakerFailureWindowMs = Number(process.env.LOCD_CIRCUIT_BREAKER_FAILURE_WINDOW_MS || 30_000),
+  circuitBreakerCooldownMs = Number(process.env.LOCD_CIRCUIT_BREAKER_COOLDOWN_MS || 15_000),
+  circuitBreakerProbeLeaseMs = Number(process.env.LOCD_CIRCUIT_BREAKER_PROBE_LEASE_MS || 30_000),
   logger = createLogger({
     level: process.env.LOCD_LOG_LEVEL || "info"
   }),
@@ -560,6 +570,36 @@ export function createServer({
           maxRequests: rateLimitMaxRequests,
           windowMs: rateLimitWindowMs
         }));
+
+  const hasAtomicCircuitCoordination = coordinationStore &&
+    typeof coordinationStore.setIfValue === "function" &&
+    typeof coordinationStore.deleteIfValue === "function";
+  const circuitBreakerStore = hasAtomicCircuitCoordination
+    ? coordinationStore
+    : createInMemoryCoordinationStore();
+  const effectiveCircuitBreaker = circuitBreaker || createCircuitBreaker({
+    store: circuitBreakerStore,
+    failureThreshold: circuitBreakerFailureThreshold,
+    failureWindowMs: circuitBreakerFailureWindowMs,
+    cooldownMs: circuitBreakerCooldownMs,
+    probeLeaseMs: circuitBreakerProbeLeaseMs
+  });
+  const circuitBreakerBackend = circuitBreaker
+    ? "custom"
+    : hasAtomicCircuitCoordination
+      ? "shared"
+      : "process-local";
+  for (const method of ["annotateTargets", "acquire", "recordFailure", "recordSuccess", "snapshot"]) {
+    if (typeof effectiveCircuitBreaker?.[method] !== "function") {
+      throw new Error("circuitBreaker must implement " + method + "()");
+    }
+  }
+  if (coordinationStore && !hasAtomicCircuitCoordination && !circuitBreaker) {
+    logger.warn({
+      event: "circuit_breaker_using_process_local_state",
+      reason: "coordination_backend_missing_atomic_compare"
+    });
+  }
 
   validateProductionSafety({
     strict: productionStrict,
@@ -819,7 +859,44 @@ export function createServer({
           mode,
           timeoutMs: body.timeoutMs,
           failFast: body.failFast !== false,
-          includeOutputs: body.includeOutputs === true
+          includeOutputs: body.includeOutputs === true,
+          beforeStep: mode === "live"
+            ? async ({ step }) => {
+                const admission = await effectiveCircuitBreaker.acquire(tenantId, step.targetId);
+                return admission.allowed
+                  ? { allowed: true, context: admission }
+                  : { allowed: false, errorClass: admission.reason };
+              }
+            : null,
+          onStepResult: mode === "live"
+            ? async ({ step, status, executionContext }) => {
+                const breakerOptions = {
+                  probeToken: executionContext?.probeToken ?? null
+                };
+                try {
+                  if (status === "completed") {
+                    await effectiveCircuitBreaker.recordSuccess(
+                      tenantId,
+                      step.targetId,
+                      breakerOptions
+                    );
+                  } else {
+                    await effectiveCircuitBreaker.recordFailure(
+                      tenantId,
+                      step.targetId,
+                      breakerOptions
+                    );
+                  }
+                } catch (error) {
+                  logger.warn({
+                    event: "circuit_breaker_update_failed",
+                    requestId,
+                    targetId: step.targetId,
+                    errorClass: error instanceof Error ? error.constructor.name : "unknown_error"
+                  });
+                }
+              }
+            : null
         });
 
         await rememberResponse(body, 200, responseBody);
@@ -835,9 +912,13 @@ export function createServer({
           return;
         }
         const hasRequestTargets = Array.isArray(body.targets) && body.targets.length > 0;
-        const request = hasRequestTargets
-          ? body
-          : { ...body, targets: await requestRegistry.list() };
+        const registeredTargets = hasRequestTargets
+          ? body.targets
+          : await effectiveCircuitBreaker.annotateTargets(
+              await requestRegistry.list(),
+              tenantId
+            );
+        const request = { ...body, targets: registeredTargets };
 
         if (!request.targets.length) {
           sendJson(res, 503, { error: "no_registered_targets" });
@@ -865,6 +946,9 @@ export function createServer({
         const calibratedTargets = calibrationEnabled
           ? calibrator.apply(rawTargets, body.workload?.type || "unknown", tenantId)
           : rawTargets;
+        const decisionTargets = hasRequestTargets
+          ? calibratedTargets
+          : await effectiveCircuitBreaker.annotateTargets(calibratedTargets, tenantId);
         let policy = body.policy || {};
         if (policyStore && policy.profile) {
           const custom = await policyStore.get(tenantId, policy.profile);
@@ -876,7 +960,7 @@ export function createServer({
             };
           }
         }
-        const request = { ...body, policy, targets: calibratedTargets };
+        const request = { ...body, policy, targets: decisionTargets };
 
         if (!request.targets.length) {
           sendJson(res, 503, { error: "no_registered_targets" });
@@ -885,7 +969,7 @@ export function createServer({
 
         const decision = decide(request);
 
-        const selectedTarget = calibratedTargets.find(
+        const selectedTarget = decisionTargets.find(
           target => String(target?.id) === String(decision.targetId)
         );
 
@@ -1365,7 +1449,9 @@ export function createServer({
       }
 
       if (req.method === "GET" && pathname === "/v1/status") {
-        const targets = await requestRegistry.list();
+        const rawTargets = await requestRegistry.list();
+        const targets = await effectiveCircuitBreaker.annotateTargets(rawTargets, tenantId);
+        const circuitSummary = await effectiveCircuitBreaker.snapshot(rawTargets, tenantId);
         const probeableTargets = typeof requestRegistry.listProbeable === "function"
           ? await requestRegistry.listProbeable()
           : [];
@@ -1394,6 +1480,9 @@ export function createServer({
             ),
             automaticProbing: Boolean(probeScheduler?.isRunning?.()),
             calibrationEnabled: Boolean(calibrationEnabled),
+            circuitBreakerEnabled: true,
+            circuitBreakerBackend,
+            sharedCircuitBreaker: circuitBreakerBackend === "shared",
             sharedCoordination: Boolean(coordinationStore),
             coordinationBackend: coordinationBackend ||
               (coordinationStore ? "shared" : "process-local"),
@@ -1407,6 +1496,9 @@ export function createServer({
             customPolicies: (await policyStore.list(tenantId)).length,
             probeableTargets: probeableTargets.length,
             executionAdapters: executionAdapters.length,
+            openCircuitTargets: circuitSummary.open,
+            halfOpenCircuitTargets: circuitSummary.halfOpen,
+            closedCircuitTargets: circuitSummary.closed,
             decisions: (await decisionStore.summary({ tenantId })).totalDecisions
           }
         });

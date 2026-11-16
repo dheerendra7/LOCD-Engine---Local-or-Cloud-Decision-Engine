@@ -169,6 +169,11 @@ export function planHybridExecution(input) {
 
     const reasons = [];
     if (target.available === false) reasons.push("target_unavailable");
+    if (target.circuitBreaker?.state === "open") reasons.push("circuit_breaker_open");
+    if (target.circuitBreaker?.state === "half-open" &&
+        target.circuitBreaker.probeInFlight === true) {
+      reasons.push("circuit_breaker_half_open_busy");
+    }
     reasons.push(...policyRejects(stepPolicy, target, step.dataSensitivity));
 
     const latency = nonNegativeOrNull(target.estimatedLatencyMs);

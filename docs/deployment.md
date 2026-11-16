@@ -125,6 +125,16 @@ Rate limiting is intentionally local to a process; distributed deployments need 
 
 Live execution also requires the API rate limiter to be enabled. Set `LOCD_RATE_LIMIT_RPM` to a positive value (or supply an enabled custom limiter) before enabling live execution; otherwise `POST /v1/execute` returns HTTP 503 without invoking a provider.
 
+## Provider circuit breaker
+
+Registered targets use a tenant-scoped circuit breaker. After `LOCD_CIRCUIT_BREAKER_FAILURE_THRESHOLD` provider execution failures within `LOCD_CIRCUIT_BREAKER_FAILURE_WINDOW_MS`, the target is excluded from subsequent decisions and hybrid plans for `LOCD_CIRCUIT_BREAKER_COOLDOWN_MS`. The first live attempt after cooldown is a single half-open probe guarded by a lease of `LOCD_CIRCUIT_BREAKER_PROBE_LEASE_MS`.
+
+Defaults are 3 failures, a 30-second failure window, a 15-second cooldown and a 30-second probe lease. Successful live executions reset consecutive closed-state failures. Probe success closes the circuit; probe failure opens it again.
+
+When SQLite state or the network State Service is configured, circuit state uses the same atomic coordination backend and is shared across API instances. Without an atomic shared coordination backend, the breaker is process-local; `GET /v1/status` exposes `circuitBreakerBackend` and open/half-open target counts. Use a shared backend before relying on fleet-wide failover.
+
+Request-scoped target arrays are simulation inputs and are not overlaid with registered circuit state. Live execution still checks the registered execution target's circuit admission before invoking its provider adapter.
+
 ## HTTP security headers
 
 The API and internal State Service add `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy: no-referrer` to responses. Browser-served console assets additionally receive a restrictive Content Security Policy allowing only the local application script and inline styles already embedded in the static page.

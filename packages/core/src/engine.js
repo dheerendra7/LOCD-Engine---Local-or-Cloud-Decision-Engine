@@ -241,6 +241,11 @@ function evaluateCandidate(request, target) {
 
   if (!target.id) rejected.push("target_id_missing");
   if (target.available === false) rejected.push("target_unavailable");
+  if (target.circuitBreaker?.state === "open") rejected.push("circuit_breaker_open");
+  if (target.circuitBreaker?.state === "half-open" &&
+      target.circuitBreaker.probeInFlight === true) {
+    rejected.push("circuit_breaker_half_open_busy");
+  }
   if (!MODES.includes(target.mode)) rejected.push("invalid_target_mode");
   if (!policy.allowedModes.includes(target.mode)) rejected.push("mode_not_allowed");
   if (policy.blockedModes.includes(target.mode)) rejected.push("mode_blocked");
@@ -403,6 +408,7 @@ export function decide(input) {
         targetId: item.targetId,
         mode: item.target?.mode ?? null,
         eligible: false,
+        circuitBreaker: item.target?.circuitBreaker ?? null,
         reasons: item.rejected
       }))
     };
@@ -417,6 +423,9 @@ export function decide(input) {
     winner.factors.reliability >= 0.95 ? "high_reliability_signal" : null,
     request.policy.sensitiveDataMode === "prefer-local" && winner.target.mode === "local"
       ? "local_preference_applied"
+      : null,
+    winner.target.circuitBreaker?.state === "half-open"
+      ? "circuit_breaker_half_open_probe"
       : null,
     ...request.policy.matchedRules.map(id => "policy_rule_applied:" + id)
   ].filter(Boolean);
@@ -446,6 +455,7 @@ export function decide(input) {
       mode: item.target?.mode ?? null,
       eligible: item.eligible,
       score: item.eligible ? Number(item.score.toFixed(6)) : null,
+      circuitBreaker: item.target?.circuitBreaker ?? null,
       factors: item.eligible ? item.factors : null,
       capacity: item.eligible ? item.capacity : null,
       costEstimate: item.eligible ? item.costEstimate : null,
