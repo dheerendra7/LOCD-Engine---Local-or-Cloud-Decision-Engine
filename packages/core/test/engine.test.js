@@ -1067,3 +1067,183 @@ test("negative capacity telemetry is rejected rather than rewarded as headroom",
   assert.equal(result.route, "none");
   assert.equal(result.rejected[0].reasons.includes("invalid_capacity_telemetry"), true);
 });
+
+
+test("relative latency scoring prefers the faster eligible target when no budget is supplied", () => {
+  const result = decide({
+    workload: { type: "batch", sensitivity: "low" },
+    policy: { weights: { privacy: 0, latency: 1, cost: 0, capacity: 0, reliability: 0 } },
+    targets: [
+      {
+        id: "slow",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 200,
+        estimatedCostUsd: 0.05
+      },
+      {
+        id: "fast",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 50,
+        estimatedCostUsd: 0.05
+      }
+    ]
+  });
+
+  const evaluated = Object.fromEntries(result.evaluated.map(item => [item.targetId, item]));
+  assert.equal(result.targetId, "fast");
+  assert.equal(evaluated.fast.factors.latency, 1);
+  assert.equal(evaluated.slow.factors.latency, 0);
+});
+
+test("relative latency scoring preserves budget-referenced factors when a budget is supplied", () => {
+  const result = decide({
+    workload: { type: "batch", sensitivity: "low" },
+    constraints: { latencyBudgetMs: 200 },
+    policy: { weights: { privacy: 0, latency: 1, cost: 0, capacity: 0, reliability: 0 } },
+    targets: [
+      {
+        id: "fast",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 50,
+        estimatedCostUsd: 0.05
+      },
+      {
+        id: "slow",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 150,
+        estimatedCostUsd: 0.05
+      }
+    ]
+  });
+
+  const evaluated = Object.fromEntries(result.evaluated.map(item => [item.targetId, item]));
+  assert.equal(evaluated.fast.factors.latency, 0.75);
+  assert.equal(evaluated.slow.factors.latency, 0.25);
+  assert.equal(result.targetId, "fast");
+});
+
+test("relative latency scoring retains fallback factors when only one eligible target has a known estimate", () => {
+  const result = decide({
+    workload: { type: "batch", sensitivity: "low" },
+    policy: { weights: { privacy: 0, latency: 1, cost: 0, capacity: 0, reliability: 0 } },
+    targets: [
+      {
+        id: "known",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 100,
+        estimatedCostUsd: 0.05
+      },
+      {
+        id: "unknown",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedCostUsd: 0.05
+      }
+    ]
+  });
+
+  const evaluated = Object.fromEntries(result.evaluated.map(item => [item.targetId, item]));
+  assert.equal(evaluated.known.factors.latency, 0.5);
+  assert.equal(evaluated.unknown.factors.latency, 0);
+  assert.equal(result.targetId, "known");
+});
+
+test("relative latency scoring retains fallback factors when eligible estimates are equal", () => {
+  const result = decide({
+    workload: { type: "batch", sensitivity: "low" },
+    policy: { weights: { privacy: 0, latency: 1, cost: 0, capacity: 0, reliability: 0 } },
+    targets: [
+      {
+        id: "a",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 100,
+        estimatedCostUsd: 0.05
+      },
+      {
+        id: "b",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 100,
+        estimatedCostUsd: 0.05
+      }
+    ]
+  });
+
+  const evaluated = Object.fromEntries(result.evaluated.map(item => [item.targetId, item]));
+  assert.equal(evaluated.a.factors.latency, 0.5);
+  assert.equal(evaluated.b.factors.latency, 0.5);
+});
+
+test("relative latency normalization uses eligible measured targets and ignores unknown estimates", () => {
+  const result = decide({
+    workload: { type: "batch", sensitivity: "low" },
+    policy: { weights: { privacy: 0, latency: 1, cost: 0, capacity: 0, reliability: 0 } },
+    targets: [
+      {
+        id: "eligible-fast",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 50,
+        estimatedCostUsd: 0.05
+      },
+      {
+        id: "eligible-slow",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 150,
+        estimatedCostUsd: 0.05
+      },
+      {
+        id: "unknown-latency",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedCostUsd: 0.05
+      },
+      {
+        id: "ineligible-fastest",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 1,
+        estimatedLatencyMs: 1,
+        estimatedCostUsd: 0.05,
+        available: false
+      }
+    ]
+  });
+
+  const evaluated = Object.fromEntries(result.evaluated.map(item => [item.targetId, item]));
+  assert.equal(evaluated["eligible-fast"].factors.latency, 1);
+  assert.equal(evaluated["eligible-slow"].factors.latency, 0);
+  assert.equal(evaluated["unknown-latency"].factors.latency, 0);
+  assert.equal(evaluated["ineligible-fastest"].eligible, false);
+  assert.equal(evaluated["ineligible-fastest"].factors, null);
+});

@@ -181,6 +181,31 @@ function weightedScore(factors, weights) {
   );
 }
 
+function applyRelativeLatencyScoring(candidates, request) {
+  // An explicit budget already gives latency a meaningful absolute reference.
+  if (request.constraints.latencyBudgetMs !== null) return;
+
+  const measured = candidates.filter(candidate =>
+    Number.isFinite(candidate.estimatedLatencyMs) &&
+    candidate.estimatedLatencyMs >= 0
+  );
+  if (measured.length < 2) return;
+
+  const latencies = measured.map(candidate => candidate.estimatedLatencyMs);
+  const minimum = Math.min(...latencies);
+  const maximum = Math.max(...latencies);
+  if (maximum <= minimum) return;
+
+  // Without a budget, compare known estimates only across eligible,
+  // measured candidates. Unknown latency never distorts the scale.
+  for (const candidate of measured) {
+    candidate.factors.latency = clamp(
+      (maximum - candidate.estimatedLatencyMs) / (maximum - minimum)
+    );
+    candidate.score = weightedScore(candidate.factors, request.policy.weights);
+  }
+}
+
 function applyRelativeCostScoring(candidates, request) {
   // An explicit budget already gives cost a meaningful absolute reference.
   if (request.constraints.maxCostUsd !== null) return;
@@ -358,6 +383,7 @@ export function decide(input) {
 
   const evaluations = request.targets.map(target => evaluateCandidate(request, target));
   const eligible = evaluations.filter(item => item.eligible);
+  applyRelativeLatencyScoring(eligible, request);
   applyRelativeCostScoring(eligible, request);
   eligible.sort((a, b) => b.score - a.score || String(a.targetId).localeCompare(String(b.targetId)));
 
