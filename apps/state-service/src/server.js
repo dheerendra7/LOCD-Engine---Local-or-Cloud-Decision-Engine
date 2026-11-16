@@ -438,6 +438,10 @@ export function createStateServiceServer({
         sendJson(res, 404, { error: message });
         return;
       }
+      if (message === "decision_already_completed") {
+        sendJson(res, 409, { error: message });
+        return;
+      }
       if (message === "unsupported_media_type") {
         sendJson(res, 415, { error: message });
         return;

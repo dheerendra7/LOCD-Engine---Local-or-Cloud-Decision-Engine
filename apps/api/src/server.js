@@ -941,22 +941,28 @@ export function createServer({
 
         try {
           const event = await decisionStore.recordOutcome(body.decisionId, body, { tenantId });
-          calibrator.observe({
-            tenantId,
-            targetId: event.targetId,
-            workloadType: event.workloadType,
-            estimatedLatencyMs: event.estimatedLatencyMs,
-            actualLatencyMs: event.actualLatencyMs,
-            estimatedCostUsd: event.estimatedCostUsd,
-            actualCostUsd: event.actualCostUsd,
-            outcome: event.outcome,
-            utilization: event.targetUtilization
-          });
+          if (event.targetId != null) {
+            calibrator.observe({
+              tenantId,
+              targetId: event.targetId,
+              workloadType: event.workloadType,
+              estimatedLatencyMs: event.estimatedLatencyMs,
+              actualLatencyMs: event.actualLatencyMs,
+              estimatedCostUsd: event.estimatedCostUsd,
+              actualCostUsd: event.actualCostUsd,
+              outcome: event.outcome,
+              utilization: event.targetUtilization
+            });
+          }
           await rememberResponse(body, 200, event);
           sendJson(res, 200, event);
         } catch (error) {
           if (error instanceof Error && error.message === "decision_not_found") {
             sendJson(res, 404, { error: "decision_not_found" });
+            return;
+          }
+          if (error instanceof Error && error.message === "decision_already_completed") {
+            sendJson(res, 409, { error: "decision_already_completed" });
             return;
           }
           throw error;

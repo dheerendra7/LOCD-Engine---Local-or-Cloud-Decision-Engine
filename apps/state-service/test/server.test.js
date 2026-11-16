@@ -178,6 +178,54 @@ test("state service rejects invalid HTTP resource guard configuration", () => {
   );
 });
 
+test("state service makes decision outcome transitions write-once", async () => {
+  const instance = await startServer();
+  instance.stores.telemetry.record({
+    id: "state-outcome-once",
+    route: "cloud",
+    workloadType: "batch",
+    estimatedLatencyMs: 100,
+    outcome: "pending"
+  });
+
+  const submit = body => fetch(
+    instance.url + "/v1/state/outcomes/state-outcome-once",
+    {
+      method: "POST",
+      headers: {
+        authorization: "Bearer state-secret",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(body)
+    }
+  );
+
+  try {
+    const first = await submit({
+      outcome: "success",
+      actualLatencyMs: 120,
+      timestamp: "2026-11-16T10:00:00.000Z"
+    });
+    assert.equal(first.status, 200);
+    const firstBody = await first.json();
+    assert.equal(firstBody.outcomeTimestamp, "2026-11-16T10:00:00.000Z");
+
+    const duplicate = await submit({
+      outcome: "failure",
+      actualLatencyMs: 900,
+      errorClass: "duplicate_feedback"
+    });
+    assert.equal(duplicate.status, 409);
+    assert.deepEqual(await duplicate.json(), { error: "decision_already_completed" });
+    assert.equal(
+      instance.stores.telemetry.list({ limit: 1 })[0].actualLatencyMs,
+      120
+    );
+  } finally {
+    await instance.cleanup();
+  }
+});
+
 test("state service rejects body-bearing requests without JSON content type", async () => {
   const instance = await startServer();
 

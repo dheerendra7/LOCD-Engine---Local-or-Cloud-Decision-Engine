@@ -22,6 +22,10 @@ function nonNegative(value) {
 }
 
 function applyOutcome(event, patch) {
+  if (event.outcome !== "pending") {
+    throw new Error("decision_already_completed");
+  }
+
   const outcome = String(patch.outcome || "");
   if (!OUTCOMES.has(outcome) || outcome === "pending") {
     throw new Error("outcome must be success or failure");
@@ -54,6 +58,7 @@ export function normalizeDecisionEvent(event) {
     estimatedLatencyMs: nonNegative(event.estimatedLatencyMs),
     estimatedCostUsd: nonNegative(event.estimatedCostUsd),
     outcome,
+    outcomeTimestamp: event.outcomeTimestamp == null ? null : iso(event.outcomeTimestamp),
     actualLatencyMs: nonNegative(event.actualLatencyMs),
     actualCostUsd: nonNegative(event.actualCostUsd),
     errorClass: event.errorClass ? String(event.errorClass) : null

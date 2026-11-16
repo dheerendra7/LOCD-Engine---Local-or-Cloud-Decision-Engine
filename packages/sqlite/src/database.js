@@ -252,6 +252,7 @@ export function createSQLiteDecisionStore({ filePath, maxEntries = 5000, databas
       estimatedLatencyMs: row.estimated_latency_ms,
       estimatedCostUsd: row.estimated_cost_usd,
       outcome: row.outcome,
+      outcomeTimestamp: row.outcome_timestamp,
       actualLatencyMs: row.actual_latency_ms,
       actualCostUsd: row.actual_cost_usd,
       errorClass: row.error_class,
@@ -298,15 +299,19 @@ export function createSQLiteDecisionStore({ filePath, maxEntries = 5000, databas
       const updated = createDecisionStore({ maxEntries: 1, initialEvents: [current] })
         .recordOutcome(current.id, patch, { tenantId: current.tenantId });
 
-      db.prepare(`
+      const result = db.prepare(`
         UPDATE decision_events
         SET outcome = ?, actual_latency_ms = ?, actual_cost_usd = ?,
             error_class = ?, outcome_timestamp = ?
-        WHERE id = ?
+        WHERE id = ? AND tenant_id = ? AND outcome = 'pending'
       `).run(
         updated.outcome, updated.actualLatencyMs, updated.actualCostUsd,
-        updated.errorClass, updated.outcomeTimestamp ?? null, updated.id
+        updated.errorClass, updated.outcomeTimestamp ?? null, updated.id,
+        current.tenantId ?? "default"
       );
+      if (result.changes !== 1) {
+        throw new Error("decision_already_completed");
+      }
       return { ...updated };
     },
 

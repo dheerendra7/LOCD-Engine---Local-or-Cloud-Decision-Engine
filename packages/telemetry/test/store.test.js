@@ -118,6 +118,17 @@ test("outcome feedback updates a decision", () => {
   assert.equal(updated.actualCostUsd, 0.03);
   assert.equal(updated.errorClass, null);
   assert.equal(updated.outcomeTimestamp, "2026-09-30T00:01:00.000Z");
+  assert.equal(store.list({ limit: 1 })[0].outcomeTimestamp, updated.outcomeTimestamp);
+
+  assert.throws(
+    () => store.recordOutcome(event.id, {
+      outcome: "failure",
+      actualLatencyMs: 900,
+      errorClass: "late_duplicate"
+    }),
+    /decision_already_completed/
+  );
+  assert.equal(store.list({ limit: 1 })[0].actualLatencyMs, 350);
 });
 
 test("missing decision IDs cannot be updated", () => {

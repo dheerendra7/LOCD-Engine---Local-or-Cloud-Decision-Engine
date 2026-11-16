@@ -228,7 +228,20 @@ test("sqlite telemetry records outcomes and summaries", async () => {
 
     assert.equal(updated.outcome, "success");
     assert.equal(store.summary().meanAbsoluteLatencyErrorMs, 25);
+    assert.equal(store.list({ limit: 1 })[0].outcomeTimestamp, updated.outcomeTimestamp);
+    assert.throws(
+      () => store.recordOutcome("sqlite-outcome", {
+        outcome: "failure",
+        actualLatencyMs: 500
+      }),
+      /decision_already_completed/
+    );
+    assert.equal(store.list({ limit: 1 })[0].actualLatencyMs, 125);
     store.close();
+
+    const restored = createSQLiteDecisionStore({ filePath: file, maxEntries: 10 });
+    assert.equal(restored.list({ limit: 1 })[0].outcomeTimestamp, updated.outcomeTimestamp);
+    restored.close();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

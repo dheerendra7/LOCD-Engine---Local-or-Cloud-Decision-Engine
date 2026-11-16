@@ -1323,10 +1323,75 @@ test("decision outcome endpoint closes the prediction feedback loop", async () =
   assert.equal(outcomeBody.outcome, "success");
   assert.equal(outcomeBody.actualLatencyMs, 90);
 
+  const duplicateOutcome = await fetch(baseUrl + "/v1/outcomes", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      decisionId: decisionBody.decisionId,
+      outcome: "failure",
+      actualLatencyMs: 900,
+      errorClass: "duplicate_feedback"
+    })
+  });
+  assert.equal(duplicateOutcome.status, 409);
+  assert.deepEqual(await duplicateOutcome.json(), { error: "decision_already_completed" });
+
   const metrics = await fetch(baseUrl + "/v1/metrics");
   const metricsBody = await metrics.json();
   assert.equal(metricsBody.successRate > 0, true);
   assert.equal(metricsBody.meanAbsoluteLatencyErrorMs >= 0, true);
+});
+
+test("outcomes for no-route decisions are recorded without attempting target calibration", async () => {
+  const decisionStore = createDecisionStore({ maxEntries: 10 });
+  const calibrator = createCalibrator({ minSamples: 1 });
+  const scopedServer = createServer({
+    decisionStore,
+    calibrator,
+    calibrationEnabled: true
+  });
+  await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + scopedServer.address().port;
+
+  try {
+    const decisionResponse = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workload: { type: "regulated", sensitivity: "high" },
+        policy: { sensitiveDataMode: "local-only" },
+        targets: [{
+          id: "cloud-only",
+          mode: "cloud",
+          health: 1,
+          capacity: 0.1,
+          privacy: 1,
+          estimatedLatencyMs: 20,
+          estimatedCostUsd: 0.01
+        }]
+      })
+    });
+    assert.equal(decisionResponse.status, 200);
+    const decision = await decisionResponse.json();
+    assert.equal(decision.route, "none");
+    assert.equal(decision.targetId, null);
+
+    const outcomeResponse = await fetch(url + "/v1/outcomes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decisionId: decision.decisionId,
+        outcome: "failure",
+        errorClass: "no_eligible_target"
+      })
+    });
+    assert.equal(outcomeResponse.status, 200);
+    assert.equal((await outcomeResponse.json()).outcome, "failure");
+    assert.equal(calibrator.snapshot().length, 0);
+    assert.equal(decisionStore.summary().outcomes.failure, 1);
+  } finally {
+    await new Promise(resolve => scopedServer.close(resolve));
+  }
 });
 
 test("unknown decision outcome IDs return not found", async () => {

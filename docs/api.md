@@ -305,6 +305,8 @@ Supported outcomes are success and failure. The event is matched by decisionId.
 
 POST /v1/decide now returns decisionId so callers can correlate predicted and observed execution metadata.
 
+Outcome feedback is a write-once transition from pending to success or failure. A second update for an already completed decision returns HTTP 409 with `decision_already_completed`; send an Idempotency-Key when retrying the same feedback request so the original response is replayed instead of attempting a second transition.
+
 Calibration fields in GET /v1/metrics include successRate, meanAbsoluteLatencyErrorMs and meanAbsoluteCostErrorUsd when enough observed data exists.
 
 
