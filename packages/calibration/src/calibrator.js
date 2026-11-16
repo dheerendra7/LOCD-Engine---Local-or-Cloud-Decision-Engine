@@ -228,9 +228,28 @@ export function createCalibrator(options = {}) {
         );
       }
       if (item.costFactor != null && finite(target.estimatedCostUsd) != null) {
+        // An explicit per-target estimate remains authoritative over pricing metadata.
         adjusted.estimatedCostUsd = Number(
           (Number(target.estimatedCostUsd) * item.costFactor).toFixed(6)
         );
+      } else if (item.costFactor != null && target.pricing &&
+          typeof target.pricing === "object" && !Array.isArray(target.pricing)) {
+        // When the estimate is derived from provider rates, calibrate the rates
+        // so the costing engine can still apply the request's actual usage.
+        const pricingFields = {
+          flat: ["flatUsd"],
+          "per-request": ["requestUsd"],
+          "per-1k-tokens": ["inputUsdPer1kTokens", "outputUsdPer1kTokens"]
+        }[target.pricing.unit] || [];
+        const pricing = { ...target.pricing };
+        let pricingAdjusted = false;
+        for (const field of pricingFields) {
+          const value = finite(pricing[field]);
+          if (value === null || value < 0) continue;
+          pricing[field] = Number((value * item.costFactor).toFixed(6));
+          pricingAdjusted = true;
+        }
+        if (pricingAdjusted) adjusted.pricing = pricing;
       }
       return adjusted;
     });

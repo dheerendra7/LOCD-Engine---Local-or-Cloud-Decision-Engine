@@ -907,7 +907,8 @@ export function createServer({
             .filter((target, index) => {
               const original = rawTargets[index];
               return target.estimatedLatencyMs !== original.estimatedLatencyMs ||
-                target.estimatedCostUsd !== original.estimatedCostUsd;
+                target.estimatedCostUsd !== original.estimatedCostUsd ||
+                JSON.stringify(target.pricing) !== JSON.stringify(original.pricing);
             })
             .map(target => target.id)
           : [];

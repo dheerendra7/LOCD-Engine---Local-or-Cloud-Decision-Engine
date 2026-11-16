@@ -403,7 +403,7 @@ Calibration waits for a configurable minimum sample count before changing estima
 
 GET /v1/calibration returns the current calibration configuration and in-memory model state.
 
-When durable telemetry is enabled, the API rebuilds calibration state from retained completed decision events at startup.
+When durable telemetry is enabled, the API rebuilds calibration state from retained completed decision events at startup, replaying feedback in outcome-time order. Calibrated cost factors adjust either explicit target estimates or the active rate fields for flat, per-request and per-1k-token pricing.
 
 ## Cost estimation
 

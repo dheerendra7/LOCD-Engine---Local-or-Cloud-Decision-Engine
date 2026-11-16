@@ -214,6 +214,47 @@ test("hydrate uses the decision timestamp for legacy events without outcome time
   assert.equal(recovered.get("cloud", "batch").latencyFactor, 1.4);
 });
 
+test("calibration adjusts flat, per-request and token pricing when no explicit estimate exists", () => {
+  const calibrator = createCalibrator({ minSamples: 1, alpha: 1 });
+  const targets = [
+    { id: "flat", pricing: { unit: "flat", flatUsd: 0.05 } },
+    { id: "request", pricing: { unit: "per-request", requestUsd: 0.01 } },
+    {
+      id: "tokens",
+      pricing: {
+        unit: "per-1k-tokens",
+        inputUsdPer1kTokens: 0.003,
+        outputUsdPer1kTokens: 0.012
+      }
+    },
+    {
+      id: "explicit",
+      estimatedCostUsd: 0.01,
+      pricing: { unit: "per-request", requestUsd: 0.05 }
+    }
+  ];
+
+  for (const target of targets) {
+    calibrator.observe({
+      targetId: target.id,
+      workloadType: "llm",
+      estimatedCostUsd: 0.01,
+      actualCostUsd: 0.02,
+      outcome: "success"
+    });
+  }
+
+  const adjusted = calibrator.apply(targets, "llm");
+  assert.equal(adjusted[0].pricing.flatUsd, 0.1);
+  assert.equal(adjusted[1].pricing.requestUsd, 0.02);
+  assert.equal(adjusted[2].pricing.inputUsdPer1kTokens, 0.006);
+  assert.equal(adjusted[2].pricing.outputUsdPer1kTokens, 0.024);
+  assert.equal(adjusted[3].estimatedCostUsd, 0.02);
+  assert.equal(adjusted[3].pricing.requestUsd, 0.05);
+  assert.equal(targets[0].pricing.flatUsd, 0.05);
+  assert.equal(targets[2].pricing.inputUsdPer1kTokens, 0.003);
+});
+
 test("invalid calibration configuration fails clearly", () => {
   assert.throws(
     () => createCalibrator({ alpha: 0 }),

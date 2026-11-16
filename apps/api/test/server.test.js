@@ -2931,6 +2931,78 @@ test("API calibration improves estimates after observed outcomes", async () => {
   }
 });
 
+test("API calibration adjusts provider pricing when cost is derived from rates", async () => {
+  const calibrator = createCalibrator({ minSamples: 1, alpha: 1 });
+  const calibrationServer = createServer({
+    calibrator,
+    calibrationEnabled: true
+  });
+  await new Promise(resolve => calibrationServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + calibrationServer.address().port;
+
+  try {
+    const request = {
+      workload: {
+        type: "pricing-calibration-test",
+        sensitivity: "low",
+        requests: 1
+      },
+      targets: [{
+        id: "pricing-calibration-target",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 0.8,
+        estimatedLatencyMs: 100,
+        pricing: {
+          unit: "per-request",
+          requestUsd: 0.01
+        }
+      }]
+    };
+
+    const first = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request)
+    });
+    assert.equal(first.status, 200);
+    const firstDecision = await first.json();
+    assert.equal(firstDecision.estimated.costUsd, 0.01);
+    assert.deepEqual(firstDecision.calibration.adjustedTargetIds, []);
+
+    const outcome = await fetch(url + "/v1/outcomes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decisionId: firstDecision.decisionId,
+        outcome: "success",
+        actualCostUsd: 0.02
+      })
+    });
+    assert.equal(outcome.status, 200);
+
+    const second = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request)
+    });
+    assert.equal(second.status, 200);
+    const secondDecision = await second.json();
+    assert.equal(secondDecision.estimated.costUsd, 0.02);
+    assert.deepEqual(secondDecision.calibration.adjustedTargetIds, [
+      "pricing-calibration-target"
+    ]);
+
+    const state = await fetch(url + "/v1/calibration");
+    const calibration = await state.json();
+    assert.equal(calibration.entries[0].costFactor, 2);
+    assert.equal(calibration.entries[0].samples, 1);
+  } finally {
+    await new Promise(resolve => calibrationServer.close(resolve));
+  }
+});
+
 test("API calibration rehydrates from durable telemetry without double counting", async () => {
   const telemetryDir = await mkdtemp(path.join(os.tmpdir(), "locd-calibration-hydrate-"));
   const telemetryFile = path.join(telemetryDir, "events.json");
