@@ -143,6 +143,77 @@ test("hydrate reconstructs calibration from completed telemetry events", () => {
   assert.equal(state.costFactor, 1.5);
 });
 
+test("hydrate replays reverse-ordered telemetry chronologically by outcome time", () => {
+  const older = {
+    targetId: "cloud",
+    workloadType: "classification",
+    estimatedLatencyMs: 100,
+    actualLatencyMs: 125,
+    estimatedCostUsd: 0.01,
+    actualCostUsd: 0.0125,
+    outcome: "success",
+    timestamp: "2026-11-16T10:00:00.000Z",
+    outcomeTimestamp: "2026-11-16T10:05:00.000Z"
+  };
+  const newer = {
+    ...older,
+    actualLatencyMs: 150,
+    actualCostUsd: 0.015,
+    timestamp: "2026-11-16T10:01:00.000Z",
+    outcomeTimestamp: "2026-11-16T10:10:00.000Z"
+  };
+  const latestFirst = [newer, older];
+  const originalOrder = latestFirst.map(event => event.outcomeTimestamp);
+
+  const recovered = createCalibrator({ minSamples: 1, alpha: 0.5 });
+  recovered.hydrate(latestFirst);
+
+  const continuous = createCalibrator({ minSamples: 1, alpha: 0.5 });
+  continuous.observe({
+    targetId: older.targetId,
+    workloadType: older.workloadType,
+    estimatedLatencyMs: older.estimatedLatencyMs,
+    actualLatencyMs: older.actualLatencyMs,
+    estimatedCostUsd: older.estimatedCostUsd,
+    actualCostUsd: older.actualCostUsd,
+    outcome: older.outcome
+  });
+  continuous.observe({
+    targetId: newer.targetId,
+    workloadType: newer.workloadType,
+    estimatedLatencyMs: newer.estimatedLatencyMs,
+    actualLatencyMs: newer.actualLatencyMs,
+    estimatedCostUsd: newer.estimatedCostUsd,
+    actualCostUsd: newer.actualCostUsd,
+    outcome: newer.outcome
+  });
+
+  assert.deepEqual(recovered.snapshot(), continuous.snapshot());
+  assert.equal(recovered.get("cloud", "classification").latencyFactor, 1.375);
+  assert.equal(recovered.get("cloud", "classification").costFactor, 1.375);
+  assert.deepEqual(latestFirst.map(event => event.outcomeTimestamp), originalOrder);
+});
+
+test("hydrate uses the decision timestamp for legacy events without outcome timestamps", () => {
+  const older = {
+    targetId: "cloud",
+    workloadType: "batch",
+    estimatedLatencyMs: 100,
+    actualLatencyMs: 120,
+    outcome: "success",
+    timestamp: "2026-11-16T10:00:00.000Z"
+  };
+  const newer = {
+    ...older,
+    actualLatencyMs: 160,
+    timestamp: "2026-11-16T10:10:00.000Z"
+  };
+  const recovered = createCalibrator({ minSamples: 1, alpha: 0.5 });
+  recovered.hydrate([newer, older]);
+
+  assert.equal(recovered.get("cloud", "batch").latencyFactor, 1.4);
+});
+
 test("invalid calibration configuration fails clearly", () => {
   assert.throws(
     () => createCalibrator({ alpha: 0 }),

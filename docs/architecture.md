@@ -50,6 +50,10 @@
 - capacity headroom
 - target health/reliability
 
+## Calibration recovery
+
+Calibration observations are replayed in ascending observation time during startup hydration. Completed telemetry uses `outcomeTimestamp` because that is when feedback became available; legacy records fall back to the original decision `timestamp`. The replay is stable for equal timestamps and does not mutate the telemetry list. This preserves the same EWMA result after restart even when activity APIs return newest-first events.
+
 The future executor should remain outside the core:
 
     Decision -> Executor -> Provider Adapter
