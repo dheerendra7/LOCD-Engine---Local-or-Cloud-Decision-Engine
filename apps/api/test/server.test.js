@@ -1546,6 +1546,17 @@ test("live provider failures open a tenant circuit and route subsequent decision
     assert.equal(statusBody.capabilities.circuitBreakerEnabled, true);
     assert.equal(statusBody.capabilities.circuitBreakerBackend, "process-local");
     assert.equal(statusBody.counts.openCircuitTargets, 1);
+    assert.equal(statusBody.circuitBreakers.policy.failureThreshold, 1);
+    const openCircuit = statusBody.circuitBreakers.targets.find(item => item.targetId === "provider-a");
+    assert.equal(openCircuit.state, "open");
+    assert.equal(openCircuit.failureCount, 1);
+    assert.equal(Number.isFinite(openCircuit.openedAt), true);
+    assert.equal(Number.isFinite(openCircuit.retryAt), true);
+    assert.equal(openCircuit.probeInFlight, false);
+    assert.equal(Object.hasOwn(openCircuit, "probeToken"), false);
+    const healthyCircuit = statusBody.circuitBreakers.targets.find(item => item.targetId === "provider-b");
+    assert.equal(healthyCircuit.state, "closed");
+    assert.equal(healthyCircuit.failureCount, 0);
     assert.equal(healthyProviderCalls, 0);
   } finally {
     await new Promise(resolve => scopedServer.close(resolve));
@@ -4141,5 +4152,66 @@ test("manual provider probes are fenced by the circuit breaker and can recover a
     assert.equal((await circuitBreaker.inspect("default", "manual-probe-circuit-target")).state, "closed");
   } finally {
     await new Promise(resolve => probeServer.close(resolve));
+  }
+});
+
+
+test("circuit-breaker status details remain isolated by authenticated tenant", async () => {
+  const targetRegistry = createTenantTargetRegistry();
+  for (const tenantId of ["tenant-alpha", "tenant-beta"]) {
+    await targetRegistry.forTenant(tenantId).register({
+      id: "shared-provider-id",
+      mode: "cloud",
+      available: true,
+      health: 0.9,
+      capacity: 0.5,
+      privacy: 0.4,
+      estimatedLatencyMs: 50,
+      estimatedCostUsd: 0.01,
+      regions: ["ap-south-1"],
+      capabilities: ["text-generation"]
+    });
+  }
+
+  const circuitBreaker = createCircuitBreaker({
+    store: createInMemoryCoordinationStore(),
+    failureThreshold: 1,
+    failureWindowMs: 60_000,
+    cooldownMs: 30_000
+  });
+  await circuitBreaker.recordFailure("tenant-alpha", "shared-provider-id");
+
+  const authorizer = createScopedAuthorizer({
+    keys: [
+      { id: "alpha-admin", secret: "alpha-status-secret", tenantId: "tenant-alpha", scopes: ["admin"] },
+      { id: "beta-admin", secret: "beta-status-secret", tenantId: "tenant-beta", scopes: ["admin"] }
+    ]
+  });
+  const statusServer = createServer({ targetRegistry, circuitBreaker, authorizer });
+  await new Promise(resolve => statusServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + statusServer.address().port;
+
+  try {
+    const alphaResponse = await fetch(url + "/v1/status", {
+      headers: { authorization: "Bearer alpha-status-secret" }
+    });
+    const betaResponse = await fetch(url + "/v1/status", {
+      headers: { authorization: "Bearer beta-status-secret" }
+    });
+    assert.equal(alphaResponse.status, 200);
+    assert.equal(betaResponse.status, 200);
+
+    const alpha = await alphaResponse.json();
+    const beta = await betaResponse.json();
+    assert.deepEqual(alpha.circuitBreakers.targets.map(item => item.targetId), ["shared-provider-id"]);
+    assert.deepEqual(beta.circuitBreakers.targets.map(item => item.targetId), ["shared-provider-id"]);
+    assert.equal(alpha.circuitBreakers.targets[0].state, "open");
+    assert.equal(alpha.circuitBreakers.targets[0].failureCount, 1);
+    assert.equal(beta.circuitBreakers.targets[0].state, "closed");
+    assert.equal(beta.circuitBreakers.targets[0].failureCount, 0);
+    assert.equal(alpha.counts.openCircuitTargets, 1);
+    assert.equal(beta.counts.openCircuitTargets, 0);
+  } finally {
+    await new Promise(resolve => statusServer.close(resolve));
   }
 });

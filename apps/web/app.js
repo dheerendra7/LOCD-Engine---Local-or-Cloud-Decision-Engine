@@ -41,6 +41,7 @@ function resetTenantScopedView() {
   if (calibrationRows) calibrationRows.innerHTML = '<tr><td colspan="6" class="table-empty">Loading observations…</td></tr>';
 
   setText("readinessChecks", "Checking runtime readiness…");
+  renderCircuitBreakers(null, {});
   setText("probeCount", "—");
   setText("telemetryBackend", "—");
   setText("policyBackend", "—");
@@ -927,12 +928,113 @@ function renderCapabilities(caps) {
     policyBackend: "Policy backend",
     coordinationBackend: "Coordination backend",
     rateLimitMode: "Rate limiting",
-    idempotencyMode: "Idempotency"
+    idempotencyMode: "Idempotency",
+    circuitBreakerBackend: "Circuit-breaker coordination",
+    sharedCircuitBreaker: "Shared circuit state"
   };
   root.innerHTML = Object.entries(labels).map(([key, label]) => {
     const value = caps[key];
     let shown = typeof value === "boolean" ? (value ? "Enabled" : "Disabled") : (value == null ? "Not reported" : String(value));
     return '<div class="system-item"><span>' + escapeHtml(label) + '</span><strong>' + escapeHtml(shown) + "</strong></div>";
+  }).join("");
+}
+
+function formatCircuitTimestamp(value) {
+  const timestamp = Number(value);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return "—";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(new Date(timestamp));
+}
+
+function formatCircuitDuration(value) {
+  if (!Number.isSafeInteger(value) || value < 0) return null;
+  return value >= 1000
+    ? Number((value / 1000).toFixed(1)) + " s"
+    : value + " ms";
+}
+
+function renderCircuitBreakers(data, counts = {}) {
+  const body = document.querySelector("#circuitBreakersBody");
+  const badge = document.querySelector("#circuitBreakerState");
+  if (!data || !Array.isArray(data.targets)) {
+    if (badge) {
+      badge.textContent = "Unavailable";
+      badge.className = "state-badge bad";
+    }
+    setText("openCircuitCount", "—");
+    setText("halfOpenCircuitCount", "—");
+    setText("closedCircuitCount", "—");
+    setText("circuitBreakerPolicy", "Circuit-breaker diagnostics are unavailable for this API access.");
+    if (body) body.innerHTML = '<tr><td colspan="5" class="table-empty">Circuit-breaker status is unavailable.</td></tr>';
+    return;
+  }
+
+  const targets = data.targets;
+  const count = (key, state) => Number.isSafeInteger(counts[key]) && counts[key] >= 0
+    ? counts[key]
+    : targets.filter(item => item?.state === state).length;
+  const open = count("openCircuitTargets", "open");
+  const halfOpen = count("halfOpenCircuitTargets", "half-open");
+  const closed = count("closedCircuitTargets", "closed");
+
+  setText("openCircuitCount", open);
+  setText("halfOpenCircuitCount", halfOpen);
+  setText("closedCircuitCount", closed);
+
+  if (badge) {
+    badge.textContent = !targets.length
+      ? "No providers"
+      : open > 0
+        ? "Open circuit"
+        : halfOpen > 0
+          ? "Recovery active"
+          : "All circuits closed";
+    badge.className = "state-badge " + (open > 0 ? "bad" : halfOpen > 0 ? "warn" : targets.length ? "good" : "");
+  }
+
+  const policy = data.policy || {};
+  const policyParts = [];
+  if (Number.isSafeInteger(policy.failureThreshold) && policy.failureThreshold > 0) {
+    const window = formatCircuitDuration(policy.failureWindowMs);
+    policyParts.push("Opens at " + policy.failureThreshold + " failures" + (window ? " within " + window : ""));
+  }
+  const cooldown = formatCircuitDuration(policy.cooldownMs);
+  const lease = formatCircuitDuration(policy.probeLeaseMs);
+  if (cooldown) policyParts.push("Cooldown " + cooldown);
+  if (lease) policyParts.push("Recovery probe lease " + lease);
+  setText("circuitBreakerPolicy", policyParts.length
+    ? policyParts.join(" · ")
+    : "Circuit-breaker policy details not reported by this backend.");
+
+  if (!body) return;
+  if (!targets.length) {
+    body.innerHTML = '<tr><td colspan="5" class="table-empty">No providers are registered for the current tenant.</td></tr>';
+    return;
+  }
+
+  body.innerHTML = targets.map(target => {
+    const item = target && typeof target === "object" ? target : {};
+    const state = item.state === "open" || item.state === "half-open" ? item.state : "closed";
+    const label = state === "half-open" ? "Half-open" : state === "open" ? "Open" : "Closed";
+    const style = state === "open" ? "bad" : state === "half-open" ? "warn" : "good";
+    const failures = Number.isSafeInteger(item.failureCount) && item.failureCount >= 0 ? item.failureCount : 0;
+    const threshold = Number.isSafeInteger(policy.failureThreshold) && policy.failureThreshold > 0
+      ? " / " + policy.failureThreshold
+      : "";
+    let recovery = "Admitting requests";
+    if (state === "open") {
+      const retryAt = formatCircuitTimestamp(item.retryAt);
+      recovery = retryAt === "—" ? "Cooldown active" : "Retry after " + retryAt;
+    } else if (state === "half-open") {
+      recovery = item.probeInFlight ? "Recovery probe in progress" : "Waiting for recovery probe slot";
+    }
+    return '<tr><td><strong>' + escapeHtml(item.targetId || "Unknown provider") + "</strong></td>" +
+      '<td><span class="state-badge ' + style + '">' + label + "</span></td>" +
+      "<td>" + failures + escapeHtml(threshold) + "</td>" +
+      "<td>" + escapeHtml(recovery) + "</td>" +
+      "<td>" + escapeHtml(formatCircuitTimestamp(item.openedAt)) + "</td></tr>";
   }).join("");
 }
 
@@ -949,6 +1051,7 @@ async function refreshStatus() {
     setText("policyBackend", caps.policyBackend || "Not reported");
     setText("executionAdapters", counts.executionAdapters == null ? "Not reported" : counts.executionAdapters);
     renderCapabilities(caps);
+    renderCircuitBreakers(data.circuitBreakers, counts);
   } catch (error) {
     if (accessRevision !== apiAccessRevision) return;
     setStatus(niceError(error), "error");
@@ -957,6 +1060,7 @@ async function refreshStatus() {
     setText("policyBackend", "Unavailable");
     setText("executionAdapters", "—");
     renderCapabilities({});
+    renderCircuitBreakers(null, {});
   }
 }
 

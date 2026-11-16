@@ -1625,6 +1625,38 @@ export function createServer({
             rateLimitMode: coordinationStore ? "shared" : "process-local",
             idempotencyMode: coordinationStore ? "shared" : "process-local"
           },
+          circuitBreakers: {
+            policy: {
+              failureThreshold: Number.isSafeInteger(effectiveCircuitBreaker.config?.failureThreshold)
+                ? effectiveCircuitBreaker.config.failureThreshold
+                : null,
+              failureWindowMs: Number.isSafeInteger(effectiveCircuitBreaker.config?.failureWindowMs)
+                ? effectiveCircuitBreaker.config.failureWindowMs
+                : null,
+              cooldownMs: Number.isSafeInteger(effectiveCircuitBreaker.config?.cooldownMs)
+                ? effectiveCircuitBreaker.config.cooldownMs
+                : null,
+              probeLeaseMs: Number.isSafeInteger(effectiveCircuitBreaker.config?.probeLeaseMs)
+                ? effectiveCircuitBreaker.config.probeLeaseMs
+                : null
+            },
+            targets: targets.map(target => {
+              const breaker = target.circuitBreaker || {};
+              const state = breaker.state === "open" || breaker.state === "half-open"
+                ? breaker.state
+                : "closed";
+              return {
+                targetId: target.id,
+                state,
+                failureCount: Number.isSafeInteger(breaker.failureCount) && breaker.failureCount >= 0
+                  ? breaker.failureCount
+                  : 0,
+                openedAt: Number.isFinite(breaker.openedAt) ? breaker.openedAt : null,
+                retryAt: Number.isFinite(breaker.retryAt) ? breaker.retryAt : null,
+                probeInFlight: breaker.probeInFlight === true
+              };
+            })
+          },
           counts: {
             targets: targets.length,
             customPolicies: (await policyStore.list(tenantId)).length,

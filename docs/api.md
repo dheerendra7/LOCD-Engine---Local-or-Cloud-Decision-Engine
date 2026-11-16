@@ -391,7 +391,7 @@ Public readiness endpoint. Returns HTTP 200 when the API process is initialized.
 
 Authenticated operational snapshot for operators and dashboards. The response contains safe counts and capability flags, not credentials or workload payloads.
 
-It includes target count, probeable target count, execution adapter count, decision count, execution-enabled state, persistence flags, automatic-probing state, circuit-breaker backend and open/half-open target counts.
+It includes target count, probeable target count, execution adapter count, decision count, execution-enabled state, persistence flags, automatic-probing state, circuit-breaker backend and open/half-open/closed target counts. The additive `circuitBreakers` object contains the effective failure threshold, failure window, cooldown and probe-lease durations, plus one safe detail row per registered target (`targetId`, `state`, `failureCount`, `openedAt`, `retryAt` and `probeInFlight`). It never returns internal probe ownership tokens. Target details and counts are evaluated against the authenticated tenant's registry and breaker namespace.
 
 ### Graceful shutdown
 

@@ -115,6 +115,29 @@
             <div class="status" id="systemStatus" style="margin-top:8px">Connecting to the control plane…</div>
             <div class="status" id="readinessChecks" style="margin-top:8px">Checking runtime readiness…</div>
           </section>
+
+          <section class="panel" aria-labelledby="circuitBreakerHeading">
+            <div class="section-heading">
+              <div>
+                <div class="section-label">Provider reliability</div>
+                <h2 id="circuitBreakerHeading">Circuit-breaker posture</h2>
+                <p>Tenant-scoped provider admission and recovery state. This panel is read-only; it does not trigger probes or change circuit state.</p>
+              </div>
+              <span class="state-badge" id="circuitBreakerState" role="status" aria-live="polite">Checking circuits</span>
+            </div>
+            <div class="system-grid circuit-summary" aria-label="Circuit-breaker counts">
+              <div class="system-item"><span>Open circuits</span><strong id="openCircuitCount">—</strong></div>
+              <div class="system-item"><span>Half-open circuits</span><strong id="halfOpenCircuitCount">—</strong></div>
+              <div class="system-item"><span>Closed circuits</span><strong id="closedCircuitCount">—</strong></div>
+            </div>
+            <div class="status" id="circuitBreakerPolicy" style="margin-top:12px">Loading circuit-breaker policy…</div>
+            <div class="data-table-wrap circuit-table">
+              <table class="data-table" aria-label="Provider circuit-breaker status">
+                <thead><tr><th>Provider</th><th>State</th><th>Recent failures</th><th>Recovery</th><th>Opened at</th></tr></thead>
+                <tbody id="circuitBreakersBody"><tr><td colspan="5" class="table-empty">Loading provider reliability…</td></tr></tbody>
+              </table>
+            </div>
+          </section>
         </section>
 
         <section id="decision-lab" class="page-section">

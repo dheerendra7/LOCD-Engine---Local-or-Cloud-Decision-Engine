@@ -774,3 +774,70 @@ test("all dashboard form controls have programmatic labels", async () => {
     assert.ok(nested, "form control #" + id + " must be nested in or explicitly associated with a label");
   }
 });
+
+
+test("provider reliability panel renders breaker state safely and summarizes recovery policy", async () => {
+  const html = await readFile(new URL("index.html", webRoot), "utf8");
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  for (const id of [
+    "circuitBreakerState", "openCircuitCount", "halfOpenCircuitCount",
+    "closedCircuitCount", "circuitBreakerPolicy", "circuitBreakersBody"
+  ]) {
+    assert.match(html, new RegExp('id="' + id + '"'), "missing circuit-breaker panel field: " + id);
+  }
+  assert.match(html, /aria-label="Provider circuit-breaker status"/);
+  assert.match(script, /renderCircuitBreakers\(data\.circuitBreakers, counts\)/);
+  assert.match(script, /renderCircuitBreakers\(null, \{\}\)/);
+
+  const start = script.indexOf("function formatCircuitTimestamp(value)");
+  const end = script.indexOf("\nasync function refreshStatus()", start);
+  assert.ok(start >= 0 && end > start, "circuit-breaker rendering helpers should exist");
+  const rendererSource = script.slice(start, end);
+  const badge = { textContent: "", className: "" };
+  const body = { innerHTML: "" };
+  const textValues = {};
+  const runtime = new Function(
+    "document", "setText", "escapeHtml",
+    rendererSource + "; return renderCircuitBreakers;"
+  );
+  const render = runtime(
+    {
+      querySelector(selector) {
+        if (selector === "#circuitBreakerState") return badge;
+        if (selector === "#circuitBreakersBody") return body;
+        return null;
+      }
+    },
+    (id, value) => { textValues[id] = String(value); },
+    value => String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;")
+  );
+
+  render({
+    policy: { failureThreshold: 3, failureWindowMs: 30_000, cooldownMs: 15_000, probeLeaseMs: 60_000 },
+    targets: [
+      { targetId: "provider-a", state: "open", failureCount: 3, openedAt: 1794850000000, retryAt: 1794850015000, probeInFlight: false },
+      { targetId: '<img src=x onerror="alert(1)">', state: "closed", failureCount: 0, openedAt: null, retryAt: null, probeInFlight: false }
+    ]
+  }, { openCircuitTargets: 1, halfOpenCircuitTargets: 0, closedCircuitTargets: 1 });
+
+  assert.equal(badge.textContent, "Open circuit");
+  assert.equal(badge.className, "state-badge bad");
+  assert.equal(textValues.openCircuitCount, "1");
+  assert.equal(textValues.closedCircuitCount, "1");
+  assert.match(textValues.circuitBreakerPolicy, /3 failures/);
+  assert.match(textValues.circuitBreakerPolicy, /Cooldown 15 s/);
+  assert.match(body.innerHTML, /provider-a/);
+  assert.match(body.innerHTML, /Retry after/);
+  assert.match(body.innerHTML, /3 \/ 3/);
+  assert.match(body.innerHTML, /&lt;img/);
+  assert.doesNotMatch(body.innerHTML, /<img/);
+
+  render(null, {});
+  assert.equal(badge.textContent, "Unavailable");
+  assert.match(body.innerHTML, /Circuit-breaker status is unavailable/);
+});
