@@ -247,7 +247,11 @@ test("breaker snapshot reports open and half-open target counts", async () => {
 
 
 test("reliability history aggregates outcomes and recovery transitions by time bucket", async () => {
-  const { breaker, advance, now } = fixture({ failureThreshold: 2, cooldownMs: 500 });
+  const { breaker, advance, now } = fixture({
+    failureThreshold: 2,
+    cooldownMs: 500,
+    probeLeaseMs: 1_000
+  });
   await breaker.recordFailure("acme", "gpu-a", { source: "manual_probe" });
   advance(100);
   await breaker.recordFailure("acme", "gpu-a", { source: "execution" });
