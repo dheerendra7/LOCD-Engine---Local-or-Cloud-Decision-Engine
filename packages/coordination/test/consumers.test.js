@@ -6,6 +6,20 @@ import {
   createInMemoryCoordinationStore
 } from "../src/index.js";
 
+test("coordinated consumers preserve the backing store capability contract", () => {
+  const store = createInMemoryCoordinationStore();
+  const limiter = createCoordinatedFixedWindowRateLimiter({
+    store,
+    maxRequests: 5
+  });
+  const idempotency = createCoordinatedIdempotencyStore({ store });
+
+  assert.deepEqual(limiter.capabilities, store.capabilities);
+  assert.deepEqual(idempotency.capabilities, store.capabilities);
+  assert.equal(limiter.capabilities.shared, false);
+  assert.equal(idempotency.capabilities.durable, false);
+});
+
 test("setIfAbsent claims only the first writer", async () => {
   const store = createInMemoryCoordinationStore();
   assert.equal(await store.setIfAbsent("lock", { owner: 1 }), true);
