@@ -1144,3 +1144,21 @@ test("decision activity explorer provides tenant-history filters and metadata-on
   assert.match(html, /Export filtered CSV/);
   assert.doesNotMatch(script, /localStorage\.(?:setItem|removeItem)\(/);
 });
+
+
+test("all LOCD workspaces use one consistent page hierarchy and grouped navigation", async () => {
+  const html = await readFile(new URL("index.html", webRoot), "utf8");
+  const groups = ["Plan &amp; decide", "Control &amp; govern", "Observe", "Developer tools", "Administration"];
+  for (const group of groups) assert.ok(html.includes(group), "missing navigation group: " + group);
+  for (const id of [
+    "decision-lab", "overview", "target-registry", "policy-workbench",
+    "hybrid-planner", "telemetry", "system-settings", "api-lab"
+  ]) {
+    const start = html.indexOf('<section id="' + id + '"');
+    const next = html.indexOf('<section id="', start + 1);
+    assert.ok(start >= 0, "missing workspace: " + id);
+    const page = html.slice(start, next < 0 ? html.length : next);
+    assert.match(page, /class="page-heading/, id + " must use the shared page heading");
+    assert.match(page, /<h1>/, id + " must expose a single top-level page title");
+  }
+});
