@@ -2215,7 +2215,7 @@ document.querySelector("#apiLabRun")?.addEventListener("click", async event => {
     response.headers.forEach((value, name) => responseHeaders.push(name + ": " + value));
     const headersOutput = document.querySelector("#apiLabHeaders");
     if (headersOutput) headersOutput.textContent = responseHeaders.length
-      ? responseHeaders.sort((a, b) => a.localeCompare(b)).join("\\n")
+      ? responseHeaders.sort((a, b) => a.localeCompare(b)).join("\n")
       : "No response headers were exposed by the browser for this response.";
 
     if (config.path === "/v1/policies/simulate" && payload && typeof payload === "object") {
