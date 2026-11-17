@@ -307,7 +307,7 @@ function setApiAccessNotice(state) {
   notice.classList.toggle("notice-scope", !missingKey);
   setText("apiAccessNoticeTitle", missingKey ? "API key required to load this workspace" : "The current API key has insufficient scope");
   setText("apiAccessNoticeText", missingKey
-    ? "Open Render → locd-engine → Environment and copy LOCD_API_KEY. Then open System & access and apply it. Keep this key private; it is not a provider credential."
+    ? "Copy LOCD_API_KEY from Render → locd-engine → Environment. Then open System & access and apply it. Keep this key private; it is not a provider credential."
     : "This key can authenticate but cannot read every control-plane resource. Use a key with the read scope, plus the relevant action scopes, or an admin key for full control-plane access.");
   setText("apiAccessNoticeAction", "Open System & access");
 }
