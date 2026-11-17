@@ -63,7 +63,8 @@ function validateProductionSafety({
   decisionStore,
   policyStore,
   executionEnabled = false,
-  executionPlanAuthorizationEnabled = false
+  executionPlanAuthorizationEnabled = false,
+  executionPlanAuthorizationShared = false
 } = {}) {
   if (!strict) return;
 
@@ -78,6 +79,9 @@ function validateProductionSafety({
   }
   if (executionEnabled && !executionPlanAuthorizationEnabled) {
     failures.push("live execution plan authorization is not configured");
+  }
+  if (executionEnabled && !executionPlanAuthorizationShared) {
+    failures.push("live execution plan claims are not backed by shared coordination");
   }
 
   if (failures.length) {
@@ -766,7 +770,8 @@ export function createServer({
     decisionStore,
     policyStore,
     executionEnabled,
-    executionPlanAuthorizationEnabled: Boolean(executionPlanAuthorizer)
+    executionPlanAuthorizationEnabled: Boolean(executionPlanAuthorizer),
+    executionPlanAuthorizationShared: coordinationStore?.capabilities?.shared === true
   });
 
   const server = http.createServer(async (req, res) => {
@@ -1803,6 +1808,12 @@ export function createServer({
           capabilities: {
             executionEnabled: Boolean(executionEnabled),
             executionPlanAuthorizationEnabled: Boolean(executionPlanAuthorizer),
+            executionPlanAuthorizationBackend: executionPlanAuthorizer
+              ? (coordinationStore?.capabilities?.shared === true ? "shared" : "process-local")
+              : "disabled",
+            sharedExecutionPlanAuthorization: Boolean(
+              executionPlanAuthorizer && coordinationStore?.capabilities?.shared === true
+            ),
             liveExecutionRequiresSignedPlan: true,
             persistentTargets: Boolean(targetFile),
             persistentTelemetry: decisionStore?.capabilities?.durable === true,
