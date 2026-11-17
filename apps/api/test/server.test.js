@@ -1522,6 +1522,19 @@ test("live provider failures open a tenant circuit and route subsequent decision
     assert.equal(executionBody.receipts[0].errorClass, "provider_unavailable");
     assert.equal(failedProviderCalls, 1);
 
+    const staleExecution = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        mode: "live",
+        plan: grant.plan,
+        executionAuthorization: grant.executionAuthorization.token
+      })
+    });
+    assert.equal(staleExecution.status, 409);
+    assert.deepEqual(await staleExecution.json(), { error: "execution_plan_stale" });
+    assert.equal(failedProviderCalls, 1);
+
     const nextDecisionResponse = await fetch(url + "/v1/decide", {
       method: "POST",
       headers,
@@ -2502,35 +2515,38 @@ test("live execution returns provider results only when requested", async () => 
       "content-type": "application/json",
       authorization: "Bearer server-secret"
     };
-    const grant = await getAuthorizedHybridPlan(url, headers, {
+    const planRequest = {
       workload: { type: "live-output-test", sensitivity: "low" },
       steps: [
         { id: "provider-step", targetId: "provider-target", purpose: "inference" },
         { id: "secondary-step", targetId: "secondary-target", purpose: "post-process" }
       ]
-    });
-    grant.plan.steps[0].payload = { prompt: "hello" };
+    };
+    const hiddenGrant = await getAuthorizedHybridPlan(url, headers, planRequest);
+    hiddenGrant.plan.steps[0].payload = { prompt: "hello" };
 
     const hiddenResponse = await fetch(url + "/v1/execute", {
       method: "POST",
       headers,
       body: JSON.stringify({
         mode: "live",
-        plan: grant.plan,
-        executionAuthorization: grant.executionAuthorization.token
+        plan: hiddenGrant.plan,
+        executionAuthorization: hiddenGrant.executionAuthorization.token
       })
     });
     assert.equal(hiddenResponse.status, 200);
     const hidden = await hiddenResponse.json();
     assert.deepEqual(hidden.results, []);
 
+    const visibleGrant = await getAuthorizedHybridPlan(url, headers, planRequest);
+    visibleGrant.plan.steps[0].payload = { prompt: "hello" };
     const visibleResponse = await fetch(url + "/v1/execute", {
       method: "POST",
       headers: { ...headers, "idempotency-key": "execute-visible-1" },
       body: JSON.stringify({
         mode: "live",
-        plan: grant.plan,
-        executionAuthorization: grant.executionAuthorization.token,
+        plan: visibleGrant.plan,
+        executionAuthorization: visibleGrant.executionAuthorization.token,
         includeOutputs: true
       })
     });
@@ -2627,6 +2643,17 @@ test("execution retries replay the original result", async () => {
     assert.equal(first.status, 200);
     assert.equal(second.status, 200);
     assert.equal(second.headers.get("idempotency-replayed"), "true");
+    assert.equal(executions, 1);
+
+    const independentReplay = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers: { ...headers, "idempotency-key": "execution-retry-new-key" },
+      body: JSON.stringify(request)
+    });
+    assert.equal(independentReplay.status, 409);
+    assert.deepEqual(await independentReplay.json(), {
+      error: "execution_plan_authorization_replayed"
+    });
     assert.equal(executions, 1);
   } finally {
     await new Promise(resolve => executionServer.close(resolve));
