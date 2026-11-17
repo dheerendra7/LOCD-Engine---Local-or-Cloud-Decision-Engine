@@ -63,6 +63,37 @@ test("production strict mode rejects unsafe control-plane configuration", () => 
   );
 });
 
+test("production strict mode requires a plan signing secret when live execution is enabled", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-strict-execution-plan-"));
+  const file = path.join(dir, "state.db");
+  const stores = createSQLiteStateStores({ filePath: file, maxEntries: 20 });
+
+  try {
+    assert.throws(
+      () => createServer({
+        productionStrict: true,
+        authorizer: createScopedAuthorizer({
+          keys: [{
+            id: "ops",
+            secret: "ops-secret",
+            tenantId: "default",
+            scopes: ["admin"]
+          }]
+        }),
+        rateLimitMaxRequests: 60,
+        executionEnabled: true,
+        decisionStore: stores.telemetry,
+        policyStore: stores.policies,
+        coordinationStore: stores.coordination
+      }),
+      /live execution plan authorization is not configured/
+    );
+  } finally {
+    stores.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("production strict mode accepts genuinely durable stores", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "locd-strict-safe-"));
   const file = path.join(dir, "state.db");
@@ -2452,6 +2483,55 @@ test("live execution rejects caller-forged and request-scoped plans before provi
     const simulatedPlan = await simulated.json();
     assert.equal(simulatedPlan.valid, true);
     assert.equal("executionAuthorization" in simulatedPlan, false);
+    assert.equal(providerCalls, 0);
+  } finally {
+    await new Promise(resolve => executionServer.close(resolve));
+  }
+});
+
+test("live execution fails closed when plan signing is not configured", async () => {
+  let providerCalls = 0;
+  const executionServer = createServer({
+    targetRegistry: createTargetRegistry([
+      { id: "unsigned-local", mode: "local", available: true, health: 1, capacity: 0.1, privacy: 1 },
+      { id: "unsigned-private", mode: "private", available: true, health: 1, capacity: 0.1, privacy: 1 }
+    ]),
+    executionRegistry: createExecutionRegistry([
+      {
+        id: "unsigned-local-adapter",
+        targetId: "unsigned-local",
+        async execute() { providerCalls++; return { ok: true }; }
+      },
+      {
+        id: "unsigned-private-adapter",
+        targetId: "unsigned-private",
+        async execute() { providerCalls++; return { ok: true }; }
+      }
+    ]),
+    executionEnabled: true,
+    apiKey: "server-secret",
+    rateLimitMaxRequests: 20
+  });
+  await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + executionServer.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer server-secret"
+      },
+      body: JSON.stringify({
+        mode: "live",
+        plan: {
+          valid: true,
+          steps: [{ id: "forged-a", targetId: "unsigned-local" }, { id: "forged-b", targetId: "unsigned-private" }]
+        }
+      })
+    });
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { error: "execution_plan_signing_unavailable" });
     assert.equal(providerCalls, 0);
   } finally {
     await new Promise(resolve => executionServer.close(resolve));
