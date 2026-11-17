@@ -1473,6 +1473,7 @@ test("live provider failures open a tenant circuit and route subsequent decision
     targetRegistry,
     authorizer,
     executionEnabled: true,
+    executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
     rateLimitMaxRequests: 100,
     circuitBreakerFailureThreshold: 1,
     circuitBreakerFailureWindowMs: 5_000,
@@ -1490,31 +1491,29 @@ test("live provider failures open a tenant circuit and route subsequent decision
       method: "POST",
       headers,
       body: JSON.stringify({
-        workload: { type: "resilient-inference", sensitivity: "low" },
-        targets: undefined
+        workload: { type: "resilient-inference", sensitivity: "low" }
       })
     });
     assert.equal(firstDecisionResponse.status, 200);
     const firstDecision = await firstDecisionResponse.json();
     assert.equal(firstDecision.targetId, "provider-a");
 
+    const grant = await getAuthorizedHybridPlan(url, headers, {
+      workload: { type: "resilient-inference", sensitivity: "low" },
+      steps: [
+        { id: "provider-a-inference", targetId: "provider-a", purpose: "inference" },
+        { id: "provider-b-follow-up", targetId: "provider-b", purpose: "post-process" }
+      ]
+    });
+    grant.plan.steps[0].payload = { prompt: "example" };
     const execution = await fetch(url + "/v1/execute", {
       method: "POST",
       headers,
       body: JSON.stringify({
         mode: "live",
         timeoutMs: 1_000,
-        plan: {
-          planVersion: "1.0",
-          valid: true,
-          route: "cloud",
-          steps: [{
-            id: "provider-a-inference",
-            targetId: "provider-a",
-            purpose: "inference",
-            payload: { prompt: "example" }
-          }]
-        }
+        plan: grant.plan,
+        executionAuthorization: grant.executionAuthorization.token
       })
     });
     assert.equal(execution.status, 200);
@@ -1552,6 +1551,7 @@ test("live provider failures open a tenant circuit and route subsequent decision
     assert.equal(hybrid.status, 200);
     const hybridBody = await hybrid.json();
     assert.equal(hybridBody.valid, false);
+    assert.equal("executionAuthorization" in hybridBody, false);
     assert.ok(hybridBody.rejected.some(item =>
       item.stepId === "inference" && item.reasons.includes("circuit_breaker_open")
     ));
@@ -2370,6 +2370,81 @@ test("live execution requires an enabled rate limiter", async () => {
   }
 });
 
+test("live execution rejects caller-forged and request-scoped plans before provider admission", async () => {
+  let providerCalls = 0;
+  const targetRegistry = createTargetRegistry([
+    { id: "registered-local", mode: "local", available: true, health: 1, capacity: 0.1, privacy: 1 },
+    { id: "registered-private", mode: "private", available: true, health: 1, capacity: 0.1, privacy: 1 }
+  ]);
+  const executionServer = createServer({
+    targetRegistry,
+    executionRegistry: createExecutionRegistry([
+      {
+        id: "registered-provider",
+        targetId: "registered-local",
+        async execute() { providerCalls++; return { ok: true }; }
+      },
+      {
+        id: "registered-secondary",
+        targetId: "registered-private",
+        async execute() { providerCalls++; return { ok: true }; }
+      }
+    ]),
+    executionEnabled: true,
+    executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
+    apiKey: "server-secret",
+    rateLimitMaxRequests: 20
+  });
+  await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + executionServer.address().port;
+  const headers = {
+    authorization: "Bearer server-secret",
+    "content-type": "application/json"
+  };
+
+  try {
+    const forged = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        mode: "live",
+        plan: {
+          valid: true,
+          steps: [{ id: "forged-step", targetId: "registered-local" }]
+        }
+      })
+    });
+    assert.equal(forged.status, 409);
+    assert.deepEqual(await forged.json(), {
+      error: "execution_plan_authorization_invalid"
+    });
+    assert.equal(providerCalls, 0);
+
+    const simulated = await fetch(url + "/v1/hybrid-plan", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        workload: { type: "request-scoped-simulation", sensitivity: "low" },
+        steps: [
+          { id: "sim-local", targetId: "sim-local" },
+          { id: "sim-private", targetId: "sim-private" }
+        ],
+        targets: [
+          { id: "sim-local", mode: "local", available: true, health: 1, capacity: 0.1, privacy: 1 },
+          { id: "sim-private", mode: "private", available: true, health: 1, capacity: 0.1, privacy: 1 }
+        ]
+      })
+    });
+    assert.equal(simulated.status, 200);
+    const simulatedPlan = await simulated.json();
+    assert.equal(simulatedPlan.valid, true);
+    assert.equal("executionAuthorization" in simulatedPlan, false);
+    assert.equal(providerCalls, 0);
+  } finally {
+    await new Promise(resolve => executionServer.close(resolve));
+  }
+});
+
 test("live execution returns provider results only when requested", async () => {
   const adapter = {
     id: "provider-adapter",
@@ -2385,18 +2460,36 @@ test("live execution returns provider results only when requested", async () => 
       };
     }
   };
+  const secondaryAdapter = {
+    id: "secondary-adapter",
+    targetId: "secondary-target",
+    async execute() {
+      return { status: "secondary-ok" };
+    }
+  };
 
   const executionServer = createServer({
-    targetRegistry: createTargetRegistry([{
-      id: "provider-target",
-      mode: "private",
-      available: true,
-      health: 1,
-      capacity: 0.1,
-      privacy: 1
-    }]),
-    executionRegistry: createExecutionRegistry([adapter]),
+    targetRegistry: createTargetRegistry([
+      {
+        id: "provider-target",
+        mode: "private",
+        available: true,
+        health: 1,
+        capacity: 0.1,
+        privacy: 1
+      },
+      {
+        id: "secondary-target",
+        mode: "local",
+        available: true,
+        health: 1,
+        capacity: 0.1,
+        privacy: 1
+      }
+    ]),
+    executionRegistry: createExecutionRegistry([adapter, secondaryAdapter]),
     executionEnabled: true,
+    executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
     apiKey: "server-secret",
     rateLimitMaxRequests: 20
   });
@@ -2409,21 +2502,23 @@ test("live execution returns provider results only when requested", async () => 
       "content-type": "application/json",
       authorization: "Bearer server-secret"
     };
-
-    const plan = {
-      valid: true,
-      steps: [{
-        id: "provider-step",
-        targetId: "provider-target",
-        purpose: "inference",
-        payload: { prompt: "hello" }
-      }]
-    };
+    const grant = await getAuthorizedHybridPlan(url, headers, {
+      workload: { type: "live-output-test", sensitivity: "low" },
+      steps: [
+        { id: "provider-step", targetId: "provider-target", purpose: "inference" },
+        { id: "secondary-step", targetId: "secondary-target", purpose: "post-process" }
+      ]
+    });
+    grant.plan.steps[0].payload = { prompt: "hello" };
 
     const hiddenResponse = await fetch(url + "/v1/execute", {
       method: "POST",
       headers,
-      body: JSON.stringify({ mode: "live", plan })
+      body: JSON.stringify({
+        mode: "live",
+        plan: grant.plan,
+        executionAuthorization: grant.executionAuthorization.token
+      })
     });
     assert.equal(hiddenResponse.status, 200);
     const hidden = await hiddenResponse.json();
@@ -2432,7 +2527,12 @@ test("live execution returns provider results only when requested", async () => 
     const visibleResponse = await fetch(url + "/v1/execute", {
       method: "POST",
       headers: { ...headers, "idempotency-key": "execute-visible-1" },
-      body: JSON.stringify({ mode: "live", plan, includeOutputs: true })
+      body: JSON.stringify({
+        mode: "live",
+        plan: grant.plan,
+        executionAuthorization: grant.executionAuthorization.token,
+        includeOutputs: true
+      })
     });
     assert.equal(visibleResponse.status, 200);
     const visible = await visibleResponse.json();
@@ -2449,23 +2549,43 @@ test("live execution returns provider results only when requested", async () => 
 test("execution retries replay the original result", async () => {
   let executions = 0;
   const executionServer = createServer({
-    targetRegistry: createTargetRegistry([{
-      id: "retry-target",
-      mode: "local",
-      available: true,
-      health: 1,
-      capacity: 0.1,
-      privacy: 1
-    }]),
-    executionRegistry: createExecutionRegistry([{
-      id: "retry-adapter",
-      targetId: "retry-target",
-      async execute() {
-        executions++;
-        return { ok: true, executions };
+    targetRegistry: createTargetRegistry([
+      {
+        id: "retry-target",
+        mode: "local",
+        available: true,
+        health: 1,
+        capacity: 0.1,
+        privacy: 1
+      },
+      {
+        id: "retry-secondary",
+        mode: "private",
+        available: true,
+        health: 1,
+        capacity: 0.1,
+        privacy: 1
       }
-    }]),
+    ]),
+    executionRegistry: createExecutionRegistry([
+      {
+        id: "retry-adapter",
+        targetId: "retry-target",
+        async execute() {
+          executions++;
+          return { ok: true, executions };
+        }
+      },
+      {
+        id: "retry-secondary-adapter",
+        targetId: "retry-secondary",
+        async execute() {
+          return { secondary: true };
+        }
+      }
+    ]),
     executionEnabled: true,
+    executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
     apiKey: "server-secret",
     rateLimitMaxRequests: 20
   });
@@ -2474,18 +2594,23 @@ test("execution retries replay the original result", async () => {
   const url = "http://127.0.0.1:" + executionServer.address().port;
 
   try {
-    const request = {
-      mode: "live",
-      includeOutputs: true,
-      plan: {
-        valid: true,
-        steps: [{ id: "retry-step", targetId: "retry-target" }]
-      }
-    };
     const headers = {
       "content-type": "application/json",
       authorization: "Bearer server-secret",
       "idempotency-key": "execution-retry-1"
+    };
+    const grant = await getAuthorizedHybridPlan(url, headers, {
+      workload: { type: "execution-retry-test", sensitivity: "low" },
+      steps: [
+        { id: "retry-step", targetId: "retry-target" },
+        { id: "retry-secondary-step", targetId: "retry-secondary" }
+      ]
+    });
+    const request = {
+      mode: "live",
+      includeOutputs: true,
+      plan: grant.plan,
+      executionAuthorization: grant.executionAuthorization.token
     };
 
     const first = await fetch(url + "/v1/execute", {
@@ -2525,15 +2650,26 @@ test("configured execution registry adds dry-run fallbacks for static targets", 
 
 test("live execution rejects static target fallbacks", async () => {
   const executionServer = createServer({
-    targetRegistry: createTargetRegistry([{
-      id: "static-live-target",
-      mode: "local",
-      available: true,
-      health: 1,
-      capacity: 0.1,
-      privacy: 1
-    }]),
+    targetRegistry: createTargetRegistry([
+      {
+        id: "static-live-target",
+        mode: "local",
+        available: true,
+        health: 1,
+        capacity: 0.1,
+        privacy: 1
+      },
+      {
+        id: "static-live-secondary",
+        mode: "private",
+        available: true,
+        health: 1,
+        capacity: 0.1,
+        privacy: 1
+      }
+    ]),
     executionEnabled: true,
+    executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
     apiKey: "server-secret",
     rateLimitMaxRequests: 20
   });
@@ -2542,18 +2678,24 @@ test("live execution rejects static target fallbacks", async () => {
   const url = "http://127.0.0.1:" + executionServer.address().port;
 
   try {
+    const headers = {
+      "content-type": "application/json",
+      authorization: "Bearer server-secret"
+    };
+    const grant = await getAuthorizedHybridPlan(url, headers, {
+      workload: { type: "static-live-test", sensitivity: "low" },
+      steps: [
+        { id: "static-live-step", targetId: "static-live-target" },
+        { id: "static-live-secondary-step", targetId: "static-live-secondary" }
+      ]
+    });
     const response = await fetch(url + "/v1/execute", {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: "Bearer server-secret"
-      },
+      headers,
       body: JSON.stringify({
         mode: "live",
-        plan: {
-          valid: true,
-          steps: [{ id: "static-live-step", targetId: "static-live-target" }]
-        }
+        plan: grant.plan,
+        executionAuthorization: grant.executionAuthorization.token
       })
     });
 
@@ -2565,8 +2707,6 @@ test("live execution rejects static target fallbacks", async () => {
     await new Promise(resolve => executionServer.close(resolve));
   }
 });
-
-
 
 test("scoped API keys enforce route permissions", async () => {
   const authorizer = createScopedAuthorizer({
@@ -2645,37 +2785,65 @@ test("scoped API keys enforce route permissions", async () => {
   }
 });
 
-test("live execution requires execute scope even when execution is enabled", async () => {
+test("live execution requires execute scope and a planner-issued authorization", async () => {
   const authorizer = createScopedAuthorizer({
     keys: [
       { id: "reader", secret: "reader-secret", scopes: ["read"] },
-      { id: "executor", secret: "executor-secret", scopes: ["execute"] }
+      { id: "executor", secret: "executor-secret", scopes: ["execute", "decide"] }
     ]
   });
 
-  const executionRegistry = createExecutionRegistry([{
-    id: "live",
-    targetId: "live-target",
-    async execute() {
-      return { status: "ok" };
+  const targetRegistry = createTargetRegistry([
+    {
+      id: "live-target",
+      mode: "local",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1
+    },
+    {
+      id: "live-secondary",
+      mode: "private",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1
     }
-  }]);
+  ]);
+  const executionRegistry = createExecutionRegistry([
+    {
+      id: "live",
+      targetId: "live-target",
+      async execute() {
+        return { status: "ok" };
+      }
+    },
+    {
+      id: "live-secondary-adapter",
+      targetId: "live-secondary",
+      async execute() {
+        return { secondary: "ok" };
+      }
+    }
+  ]);
 
   const scopedServer = createServer({
     authorizer,
+    targetRegistry,
     executionEnabled: true,
+    executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
     executionRegistry,
     rateLimitMaxRequests: 20
   });
   await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
   const url = "http://127.0.0.1:" + scopedServer.address().port;
 
-  const plan = {
-    valid: true,
-    steps: [{ id: "step-1", targetId: "live-target", purpose: "inference" }]
-  };
-
   try {
+    const plan = {
+      valid: true,
+      steps: [{ id: "step-1", targetId: "live-target", purpose: "inference" }]
+    };
     const denied = await fetch(url + "/v1/execute", {
       method: "POST",
       headers: {
@@ -2687,13 +2855,25 @@ test("live execution requires execute scope even when execution is enabled", asy
     assert.equal(denied.status, 403);
     assert.deepEqual(await denied.json(), { error: "insufficient_scope" });
 
+    const executorHeaders = {
+      authorization: "Bearer executor-secret",
+      "content-type": "application/json"
+    };
+    const grant = await getAuthorizedHybridPlan(url, executorHeaders, {
+      workload: { type: "scoped-execution-test", sensitivity: "low" },
+      steps: [
+        { id: "step-1", targetId: "live-target", purpose: "inference" },
+        { id: "step-2", targetId: "live-secondary", purpose: "post-process" }
+      ]
+    });
     const allowed = await fetch(url + "/v1/execute", {
       method: "POST",
-      headers: {
-        authorization: "Bearer executor-secret",
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({ plan, mode: "live" })
+      headers: executorHeaders,
+      body: JSON.stringify({
+        plan: grant.plan,
+        executionAuthorization: grant.executionAuthorization.token,
+        mode: "live"
+      })
     });
     assert.equal(allowed.status, 200);
     const body = await allowed.json();
