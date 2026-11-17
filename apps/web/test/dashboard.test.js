@@ -1178,7 +1178,8 @@ test("API Lab inspector formats response headers and supports accessible keyboar
     assert.match(html, new RegExp('id="apiLab' + tab + 'Tab"'));
     assert.match(html, new RegExp('aria-labelledby="apiLab' + tab + 'Tab"'));
   }
-  assert.match(script, /join\("\\n"\)/);
+  assert.match(script, /\.join\("\\n"\)/);
+  assert.doesNotMatch(script, /\.join\("\\\\n"\)/);
   assert.match(script, /event\.key === "ArrowRight"/);
   assert.match(script, /event\.key === "ArrowLeft"/);
   assert.match(script, /event\.key === "Home"/);
