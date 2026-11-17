@@ -11,38 +11,38 @@
 <body>
   <div class="app-shell">
     <aside class="sidebar" aria-label="Primary navigation">
-      <a class="brand" href="#overview" aria-label="LOCD Engine overview" style="text-decoration:none">
+      <a class="brand" href="#decision-lab" aria-label="LOCD Engine Decision Studio" style="text-decoration:none">
         <span class="brand-mark" aria-hidden="true">L.</span>
         <span>
           <span class="brand-name">LOCD Engine</span>
-          <span class="brand-caption" style="display:block">Decision control plane</span>
+          <span class="brand-caption" style="display:block">Placement control plane</span>
         </span>
       </a>
-      <div class="nav-caption">Workspace</div>
-      <nav class="nav-list" aria-label="Workspace">
-        <a class="nav-link active" href="#overview" data-nav="overview" aria-current="location">
+      <div class="nav-caption">Workspaces</div>
+      <nav class="nav-list" aria-label="Workspaces">
+        <a class="nav-link active" href="#decision-lab" data-nav="decision-lab" aria-current="location">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4M11 7v8M7 11h8"/></svg>Decision Studio
+        </a>
+        <a class="nav-link" href="#overview" data-nav="overview">
           <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="3" y="3" width="7" height="8" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="11" width="7" height="10" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>Overview
         </a>
-        <a class="nav-link" href="#decision-lab" data-nav="decision-lab">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4M11 7v8M7 11h8"/></svg>Decision lab
-        </a>
         <a class="nav-link" href="#target-registry" data-nav="target-registry">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01M11 7h6M11 17h6"/></svg>Targets
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01M11 7h6M11 17h6"/></svg>Infrastructure
         </a>
         <a class="nav-link" href="#policy-workbench" data-nav="policy-workbench">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M12 3 19 6v5c0 4.5-3 7.5-7 10-4-2.5-7-5.5-7-10V6l7-3Z"/><path d="m9 12 2 2 4-4"/></svg>Policies
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M12 3 19 6v5c0 4.5-3 7.5-7 10-4-2.5-7-5.5-7-10V6l7-3Z"/><path d="m9 12 2 2 4-4"/></svg>Governance
         </a>
         <a class="nav-link" href="#hybrid-planner" data-nav="hybrid-planner">
           <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 6h7a5 5 0 0 1 5 5M5 8v8a2 2 0 0 0 2 2h10"/></svg>Hybrid planner
         </a>
         <a class="nav-link" href="#telemetry" data-nav="telemetry">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M3 3v18h18"/><path d="m7 14 4-4 3 3 6-7"/></svg>Telemetry
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M3 3v18h18"/><path d="m7 14 4-4 3 3 6-7"/></svg>Observability
         </a>
       </nav>
-      <div class="nav-caption" style="margin-top:20px">Configuration</div>
+      <div class="nav-caption nav-caption-config">Configuration</div>
       <nav class="nav-list" aria-label="Configuration">
         <a class="nav-link" href="#system-settings" data-nav="system-settings">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.2.9-1.2 2.1-1.4-.6a7.7 7.7 0 0 1-1.5.9l-.2 1.5h-2.5l-.3-1.5a7.7 7.7 0 0 1-1.5-.9l-1.4.6-1.2-2.1 1.2-.9a6.8 6.8 0 0 1 0-1.8l-1.2-.9 1.2-2.1 1.4.6a7.7 7.7 0 0 1 1.5-.9l.3-1.5h2.5l.2 1.5a7.7 7.7 0 0 1 1.5.9l1.4-.6 1.2 2.1-1.2.9a6.8 6.8 0 0 1-.1 1.7Z"/></svg>System & access
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.2.9-1.2 2.1-1.4-.6a7.7 7.7 0 0 1-1.5.9l-.2 1.5h-2.5l-.3-1.5a7.7 7.7 0 0 1-1.5-.9l-1.4.6-1.2-2.1 1.2-.9a6.8 6.8 0 0 1 0-1.8l-1.2-.9 1.2-2.1 1.4.6a7.7 7.7 0 0 1 1.5-.9l.3-1.5h2.5l.2 1.5a7.7 7.7 0 0 1 1.5.9l1.4-.6 1.2 2.1-1.2.9a6.8 6.8 0 0 1-.1 1.7Z"/></svg>System &amp; access
         </a>
       </nav>
       <div class="sidebar-spacer"></div>
@@ -55,7 +55,7 @@
 
     <div class="workspace">
       <header class="topbar">
-        <div class="breadcrumbs"><span>Workspace</span><span aria-hidden="true">/</span><strong id="breadcrumbCurrent">Overview</strong></div>
+        <div class="breadcrumbs"><span>Workspace</span><span aria-hidden="true">/</span><strong id="breadcrumbCurrent">Decision Studio</strong></div>
         <div class="topbar-actions">
           <span class="connection-pill" id="connectionPill" data-state="checking"><span class="connection-dot"></span><span id="connectionText">Checking API</span></span>
           <button class="btn btn-secondary" id="refreshAll" type="button" title="Refresh data from the control plane">
@@ -65,12 +65,75 @@
       </header>
 
       <main class="content">
-        <section id="overview" class="page-section">
+        <section id="decision-lab" class="page-section decision-page">
+          <div class="page-heading decision-page-heading">
+            <div>
+              <div class="page-kicker">PLACEMENT CONTROL / DETERMINISTIC ENGINE</div>
+              <h1>Decision Studio</h1>
+              <p>Translate workload requirements into an explainable placement decision across local, private, cloud and hybrid infrastructure.</p>
+            </div>
+            <div class="button-row decision-heading-actions">
+              <span class="state-badge blue">Deterministic engine</span>
+              <a class="btn btn-secondary" href="#target-registry">Manage destinations</a>
+            </div>
+          </div>
+          <div class="decision-flow" aria-label="Decision workflow">
+            <div class="decision-flow-step"><span>01</span><div><strong>Define workload</strong><small>Type &amp; sensitivity</small></div></div>
+            <div class="decision-flow-step"><span>02</span><div><strong>Set constraints</strong><small>Latency, cost &amp; privacy</small></div></div>
+            <div class="decision-flow-step"><span>03</span><div><strong>Review placement</strong><small>Route &amp; trade-offs</small></div></div>
+          </div>
+          <div class="decision-access-note">
+            <span class="decision-access-icon" aria-hidden="true">i</span>
+            <div><strong>Tenant-scoped evaluation</strong><p>Connect a scoped LOCD API key to load protected target and policy data. Keys stay in this page's memory only.</p></div>
+            <a href="#system-settings">Configure access <span aria-hidden="true">↗</span></a>
+          </div>
+          <div class="panel-grid decision-grid">
+            <section class="panel decision-input-panel">
+              <div class="section-heading"><div><div class="section-label">Request configuration</div><h2>Workload request</h2><p>Hard latency and cost budgets are enforced before a route is selected.</p></div><span class="state-badge">Input</span></div>
+              <div class="form-grid">
+                <label>Workload type
+                  <input id="workloadType" value="llm-inference" autocomplete="off" placeholder="llm-inference">
+                  <span class="help-text">A short workload category used by policy rules.</span>
+                </label>
+                <label>Data sensitivity
+                  <select id="sensitivity"><option value="low">Low</option><option value="medium">Medium</option><option value="high" selected>High</option></select>
+                </label>
+                <label>Policy profile
+                  <select id="policyProfile"><option value="balanced">Balanced</option></select>
+                </label>
+                <label>Privacy override
+                  <select id="privacyMode"><option value="">Use profile default</option><option value="balanced">Balanced</option><option value="prefer-local">Prefer local</option><option value="local-only">Local only</option><option value="private-only">Private boundary only</option></select>
+                </label>
+                <label>Latency budget <span class="help-text">Milliseconds</span>
+                  <input id="latency" type="number" value="800" min="0" step="1">
+                </label>
+                <label>Maximum estimated cost <span class="help-text">USD per workload</span>
+                  <input id="cost" type="number" value="0.05" min="0" step="0.001">
+                </label>
+              </div>
+              <div class="inline-note" style="margin-bottom:16px">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+                <span>Evaluation uses registered targets unless a request explicitly supplies targets. The browser never calls provider APIs directly.</span>
+              </div>
+              <button class="btn btn-primary decision-submit" id="decide" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16M4 12h10M4 19h7"/><circle cx="18" cy="16" r="3"/><path d="m20.2 18.2 1.3 1.3"/></svg>Evaluate placement
+              </button>
+            </section>
+            <section class="panel decision-output-panel" aria-live="polite">
+              <div class="section-heading"><div><div class="section-label">Engine output</div><h2>Placement recommendation</h2><p>Selected route, confidence, alternatives and rejection reasons.</p></div></div>
+              <div id="output">
+                <div class="output-empty"><span class="output-empty-mark"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.7"><path d="M4 5h16M4 12h10M4 19h7"/><circle cx="18" cy="16" r="3"/></svg></span><strong>Ready to evaluate</strong><p>Configure a workload and run the decision engine to see a traceable recommendation here.</p></div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section id="overview" class="page-section overview-page">
           <div class="page-heading">
             <div>
               <div class="page-kicker">Local · Private · Cloud · Hybrid</div>
-              <h1>Decision overview</h1>
-              <p>See where your workloads can run, evaluate policy constraints, and understand every routing decision from one control plane.</p>
+              <h1>Platform overview</h1>
+              <p>A live snapshot of registered infrastructure, runtime readiness and tenant activity across the LOCD control plane.</p>
             </div>
             <div class="button-row">
               <a class="btn btn-primary" href="#decision-lab">
@@ -133,152 +196,7 @@
             <div class="status" id="readinessChecks" style="margin-top:8px">Checking runtime readiness…</div>
           </section>
 
-          <section class="panel" aria-labelledby="circuitBreakerHeading">
-            <div class="section-heading">
-              <div>
-                <div class="section-label">Provider reliability</div>
-                <h2 id="circuitBreakerHeading">Circuit-breaker posture</h2>
-                <p>Tenant-scoped provider admission and recovery state. This panel is read-only; it does not trigger probes or change circuit state.</p>
-              </div>
-              <span class="state-badge" id="circuitBreakerState" role="status" aria-live="polite">Checking circuits</span>
-            </div>
-            <div class="system-grid circuit-summary" aria-label="Circuit-breaker counts">
-              <div class="system-item"><span>Open circuits</span><strong id="openCircuitCount">—</strong></div>
-              <div class="system-item"><span>Half-open circuits</span><strong id="halfOpenCircuitCount">—</strong></div>
-              <div class="system-item"><span>Closed circuits</span><strong id="closedCircuitCount">—</strong></div>
-            </div>
-            <div class="status" id="circuitBreakerPolicy" style="margin-top:12px">Loading circuit-breaker policy…</div>
-            <div class="data-table-wrap circuit-table">
-              <table class="data-table" aria-label="Provider circuit-breaker status">
-                <thead><tr><th>Provider</th><th>State</th><th>Recent failures</th><th>Recovery</th><th>Opened at</th></tr></thead>
-                <tbody id="circuitBreakersBody"><tr><td colspan="5" class="table-empty">Loading provider reliability…</td></tr></tbody>
-              </table>
-            </div>
-          </section>
-
-          <section class="panel" aria-labelledby="reliabilityHistoryHeading">
-            <div class="section-heading reliability-heading">
-              <div>
-                <div class="section-label">Provider reliability</div>
-                <h2 id="reliabilityHistoryHeading">Reliability trends & event history</h2>
-                <p>Bounded tenant-scoped operational history of provider outcomes and circuit recovery. No workload prompts or payloads are stored.</p>
-              </div>
-              <label class="reliability-range">Time window
-                <select id="reliabilityWindow">
-                  <option value="3600000">Last hour</option>
-                  <option value="86400000" selected>Last 24 hours</option>
-                  <option value="604800000">Last 7 days</option>
-                </select>
-              </label>
-            </div>
-            <div id="reliabilityStatus" class="status" role="status" aria-live="polite">Loading provider reliability history…</div>
-            <section class="slo-panel" aria-labelledby="reliabilitySloHeading">
-              <div class="section-heading slo-heading">
-                <div>
-                  <div class="section-label">Service level objective</div>
-                  <h3 id="reliabilitySloHeading">Availability SLO & error budget</h3>
-                  <p id="sloPolicyText">Evaluating provider availability against the configured objective…</p>
-                </div>
-                <span id="sloStateBadge" class="state-badge" role="status" aria-live="polite">Checking SLO</span>
-              </div>
-              <div class="system-grid slo-metrics" aria-label="Availability SLO measurements">
-                <div class="system-item"><span>Observed availability</span><strong id="sloAvailability">—</strong></div>
-                <div class="system-item"><span>Error budget consumed</span><strong id="sloBudgetConsumed">—</strong></div>
-                <div class="system-item"><span>Error budget remaining</span><strong id="sloBudgetRemaining">—</strong></div>
-                <div class="system-item"><span>Budget burn rate</span><strong id="sloBurnRate">—</strong></div>
-                <div class="system-item"><span>Eligible samples</span><strong id="sloSamples">—</strong></div>
-              </div>
-              <div id="sloDataQuality" class="status" style="margin-top:10px">Checking reliability data completeness…</div>
-              <div class="slo-alerts">
-                <div class="section-heading"><div><h4>Threshold alerts</h4><p>Read-only evaluations; no notifications are dispatched.</p></div></div>
-                <div class="data-table-wrap">
-                  <table class="data-table" aria-label="Availability SLO threshold alerts">
-                    <thead><tr><th>Severity</th><th>Scope</th><th>Signal</th><th>Burn</th><th>Samples</th></tr></thead>
-                    <tbody id="sloAlertsBody"><tr><td colspan="5" class="table-empty">Evaluating SLO thresholds…</td></tr></tbody>
-                  </table>
-                </div>
-              </div>
-            </section>
-            <div id="reliabilitySummary" class="stats-grid reliability-stat-grid" aria-label="Provider reliability summary">
-              <article class="stat-card"><div class="stat-topline">Provider attempts</div><div class="stat-value">—</div></article>
-              <article class="stat-card"><div class="stat-topline">Successes</div><div class="stat-value">—</div></article>
-              <article class="stat-card"><div class="stat-topline">Failures</div><div class="stat-value">—</div></article>
-              <article class="stat-card"><div class="stat-topline">Failure rate</div><div class="stat-value">—</div></article>
-            </div>
-            <div class="reliability-section">
-              <div class="section-heading"><div><h3>Outcome volume</h3><p>Successes and failures bucketed over the selected time window.</p></div></div>
-              <div class="reliability-chart-wrap">
-                <div id="reliabilityTimeline" class="reliability-chart" role="img" aria-label="Provider successes and failures over time">
-                  <div class="table-empty">No reliability events loaded.</div>
-                </div>
-              </div>
-              <div class="reliability-legend"><span><i class="legend-success"></i>Successes</span><span><i class="legend-failure"></i>Failures</span><span id="reliabilityRecoveryLegend">Recovery attempts: —</span></div>
-            </div>
-            <div class="reliability-section">
-              <div class="section-heading"><div><h3>Provider breakdown</h3><p>Outcome rates and circuit recovery history per provider.</p></div></div>
-              <div class="data-table-wrap">
-                <table class="data-table" aria-label="Provider reliability breakdown">
-                  <thead><tr><th>Provider</th><th>Attempts</th><th>Successes</th><th>Failures</th><th>Failure rate</th><th>SLO state</th><th>Burn</th><th>Recoveries</th><th>Avg. recovery</th></tr></thead>
-                  <tbody id="reliabilityProviderBody"><tr><td colspan="9" class="table-empty">Loading provider breakdown…</td></tr></tbody>
-                </table>
-              </div>
-            </div>
-            <div class="reliability-section">
-              <div class="section-heading"><div><h3>Recent events</h3><p>Most recent provider success, failure and recovery transitions.</p></div></div>
-              <div class="data-table-wrap">
-                <table class="data-table" aria-label="Recent provider reliability events">
-                  <thead><tr><th>Time</th><th>Provider</th><th>Event</th><th>Source</th><th>Transition</th></tr></thead>
-                  <tbody id="reliabilityEventsBody"><tr><td colspan="5" class="table-empty">Loading recent events…</td></tr></tbody>
-                </table>
-              </div>
-            </div>
-          </section>
-        </section>
-
-        <section id="decision-lab" class="page-section">
-          <div class="section-heading">
-            <div><div class="section-label">Decisioning</div><h2>Workload decision lab</h2><p>Send a workload through the deterministic engine with explicit latency, cost and privacy constraints.</p></div>
-            <span class="state-badge blue">Read-only evaluation</span>
-          </div>
-          <div class="panel-grid">
-            <section class="panel">
-              <div class="section-heading"><div><h2>Workload inputs</h2><p>Strict budgets are enforced as hard constraints.</p></div></div>
-              <div class="form-grid">
-                <label>Workload type
-                  <input id="workloadType" value="llm-inference" autocomplete="off" placeholder="llm-inference">
-                  <span class="help-text">A short workload category used by policy rules.</span>
-                </label>
-                <label>Data sensitivity
-                  <select id="sensitivity"><option value="low">Low</option><option value="medium">Medium</option><option value="high" selected>High</option></select>
-                </label>
-                <label>Policy profile
-                  <select id="policyProfile"><option value="balanced">Balanced</option></select>
-                </label>
-                <label>Privacy override
-                  <select id="privacyMode"><option value="">Use profile default</option><option value="balanced">Balanced</option><option value="prefer-local">Prefer local</option><option value="local-only">Local only</option><option value="private-only">Private boundary only</option></select>
-                </label>
-                <label>Latency budget <span class="help-text">Milliseconds</span>
-                  <input id="latency" type="number" value="800" min="0" step="1">
-                </label>
-                <label>Maximum estimated cost <span class="help-text">USD per workload</span>
-                  <input id="cost" type="number" value="0.05" min="0" step="0.001">
-                </label>
-              </div>
-              <div class="inline-note" style="margin-bottom:16px">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
-                <span>Evaluation uses registered targets unless a request explicitly supplies targets. The browser never calls provider APIs directly.</span>
-              </div>
-              <button class="btn btn-primary" id="decide" type="button">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16M4 12h10M4 19h7"/><circle cx="18" cy="16" r="3"/><path d="m20.2 18.2 1.3 1.3"/></svg>Evaluate registered targets
-              </button>
-            </section>
-            <section class="panel" aria-live="polite">
-              <div class="section-heading"><div><div class="section-label">Engine output</div><h2>Decision explanation</h2><p>Selected route, confidence, alternatives and rejection reasons.</p></div></div>
-              <div id="output">
-                <div class="output-empty"><span class="output-empty-mark"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.7"><path d="M4 5h16M4 12h10M4 19h7"/><circle cx="18" cy="16" r="3"/></svg></span><strong>Ready to evaluate</strong><p>Configure a workload and run the decision engine to see a traceable recommendation here.</p></div>
-              </div>
-            </section>
-          </div>
+          
         </section>
 
         <section id="target-registry" class="page-section">
@@ -396,9 +314,111 @@
 
         <section id="telemetry" class="page-section">
           <div class="section-heading">
-            <div><div class="section-label">Observability</div><h2>Decision activity</h2><p>Review recent decision metadata and optionally submit actual outcomes to improve latency and cost calibration.</p></div>
+            <div><div class="section-label">Observability</div><h2>Reliability &amp; decision activity</h2><p>Inspect provider health, service objectives, recorded outcomes and estimate calibration from this tenant.</p></div>
             <span id="activityStatus" class="status">Loading history…</span>
           </div>
+          <div class="observability-group-heading"><div><span class="section-label">Provider health</span><h3>Reliability &amp; service objectives</h3></div><span>Read-only operational signals</span></div>
+          <section class="panel" aria-labelledby="circuitBreakerHeading">
+            <div class="section-heading">
+              <div>
+                <div class="section-label">Provider reliability</div>
+                <h2 id="circuitBreakerHeading">Circuit-breaker posture</h2>
+                <p>Tenant-scoped provider admission and recovery state. This panel is read-only; it does not trigger probes or change circuit state.</p>
+              </div>
+              <span class="state-badge" id="circuitBreakerState" role="status" aria-live="polite">Checking circuits</span>
+            </div>
+            <div class="system-grid circuit-summary" aria-label="Circuit-breaker counts">
+              <div class="system-item"><span>Open circuits</span><strong id="openCircuitCount">—</strong></div>
+              <div class="system-item"><span>Half-open circuits</span><strong id="halfOpenCircuitCount">—</strong></div>
+              <div class="system-item"><span>Closed circuits</span><strong id="closedCircuitCount">—</strong></div>
+            </div>
+            <div class="status" id="circuitBreakerPolicy" style="margin-top:12px">Loading circuit-breaker policy…</div>
+            <div class="data-table-wrap circuit-table">
+              <table class="data-table" aria-label="Provider circuit-breaker status">
+                <thead><tr><th>Provider</th><th>State</th><th>Recent failures</th><th>Recovery</th><th>Opened at</th></tr></thead>
+                <tbody id="circuitBreakersBody"><tr><td colspan="5" class="table-empty">Loading provider reliability…</td></tr></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel" aria-labelledby="reliabilityHistoryHeading">
+            <div class="section-heading reliability-heading">
+              <div>
+                <div class="section-label">Provider reliability</div>
+                <h2 id="reliabilityHistoryHeading">Reliability trends & event history</h2>
+                <p>Bounded tenant-scoped operational history of provider outcomes and circuit recovery. No workload prompts or payloads are stored.</p>
+              </div>
+              <label class="reliability-range">Time window
+                <select id="reliabilityWindow">
+                  <option value="3600000">Last hour</option>
+                  <option value="86400000" selected>Last 24 hours</option>
+                  <option value="604800000">Last 7 days</option>
+                </select>
+              </label>
+            </div>
+            <div id="reliabilityStatus" class="status" role="status" aria-live="polite">Loading provider reliability history…</div>
+            <section class="slo-panel" aria-labelledby="reliabilitySloHeading">
+              <div class="section-heading slo-heading">
+                <div>
+                  <div class="section-label">Service level objective</div>
+                  <h3 id="reliabilitySloHeading">Availability SLO & error budget</h3>
+                  <p id="sloPolicyText">Evaluating provider availability against the configured objective…</p>
+                </div>
+                <span id="sloStateBadge" class="state-badge" role="status" aria-live="polite">Checking SLO</span>
+              </div>
+              <div class="system-grid slo-metrics" aria-label="Availability SLO measurements">
+                <div class="system-item"><span>Observed availability</span><strong id="sloAvailability">—</strong></div>
+                <div class="system-item"><span>Error budget consumed</span><strong id="sloBudgetConsumed">—</strong></div>
+                <div class="system-item"><span>Error budget remaining</span><strong id="sloBudgetRemaining">—</strong></div>
+                <div class="system-item"><span>Budget burn rate</span><strong id="sloBurnRate">—</strong></div>
+                <div class="system-item"><span>Eligible samples</span><strong id="sloSamples">—</strong></div>
+              </div>
+              <div id="sloDataQuality" class="status" style="margin-top:10px">Checking reliability data completeness…</div>
+              <div class="slo-alerts">
+                <div class="section-heading"><div><h4>Threshold alerts</h4><p>Read-only evaluations; no notifications are dispatched.</p></div></div>
+                <div class="data-table-wrap">
+                  <table class="data-table" aria-label="Availability SLO threshold alerts">
+                    <thead><tr><th>Severity</th><th>Scope</th><th>Signal</th><th>Burn</th><th>Samples</th></tr></thead>
+                    <tbody id="sloAlertsBody"><tr><td colspan="5" class="table-empty">Evaluating SLO thresholds…</td></tr></tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+            <div id="reliabilitySummary" class="stats-grid reliability-stat-grid" aria-label="Provider reliability summary">
+              <article class="stat-card"><div class="stat-topline">Provider attempts</div><div class="stat-value">—</div></article>
+              <article class="stat-card"><div class="stat-topline">Successes</div><div class="stat-value">—</div></article>
+              <article class="stat-card"><div class="stat-topline">Failures</div><div class="stat-value">—</div></article>
+              <article class="stat-card"><div class="stat-topline">Failure rate</div><div class="stat-value">—</div></article>
+            </div>
+            <div class="reliability-section">
+              <div class="section-heading"><div><h3>Outcome volume</h3><p>Successes and failures bucketed over the selected time window.</p></div></div>
+              <div class="reliability-chart-wrap">
+                <div id="reliabilityTimeline" class="reliability-chart" role="img" aria-label="Provider successes and failures over time">
+                  <div class="table-empty">No reliability events loaded.</div>
+                </div>
+              </div>
+              <div class="reliability-legend"><span><i class="legend-success"></i>Successes</span><span><i class="legend-failure"></i>Failures</span><span id="reliabilityRecoveryLegend">Recovery attempts: —</span></div>
+            </div>
+            <div class="reliability-section">
+              <div class="section-heading"><div><h3>Provider breakdown</h3><p>Outcome rates and circuit recovery history per provider.</p></div></div>
+              <div class="data-table-wrap">
+                <table class="data-table" aria-label="Provider reliability breakdown">
+                  <thead><tr><th>Provider</th><th>Attempts</th><th>Successes</th><th>Failures</th><th>Failure rate</th><th>SLO state</th><th>Burn</th><th>Recoveries</th><th>Avg. recovery</th></tr></thead>
+                  <tbody id="reliabilityProviderBody"><tr><td colspan="9" class="table-empty">Loading provider breakdown…</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="reliability-section">
+              <div class="section-heading"><div><h3>Recent events</h3><p>Most recent provider success, failure and recovery transitions.</p></div></div>
+              <div class="data-table-wrap">
+                <table class="data-table" aria-label="Recent provider reliability events">
+                  <thead><tr><th>Time</th><th>Provider</th><th>Event</th><th>Source</th><th>Transition</th></tr></thead>
+                  <tbody id="reliabilityEventsBody"><tr><td colspan="5" class="table-empty">Loading recent events…</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+          <div class="observability-group-heading decision-activity-heading"><div><span class="section-label">Decision intelligence</span><h3>Recorded workload outcomes</h3></div><span>Tenant-scoped history &amp; calibration</span></div>
           <section class="panel">
             <div class="section-heading"><div><h2>Recent decisions</h2><p>History is scoped by the API key's tenant. Inputs and prompts are not shown here.</p></div></div>
             <form id="outcomeForm">
