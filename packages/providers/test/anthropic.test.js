@@ -158,6 +158,36 @@ test("Anthropic execute preserves explicit model and max_tokens", async () => {
   assert.equal(body.stream, false);
 });
 
+test("Anthropic execution forwards caller cancellation to the HTTP request", async () => {
+  const controller = new AbortController();
+  let requestSignal;
+  const adapter = createAnthropicAdapter({
+    id: "anthropic-cancel",
+    targetId: "anthropic-cancel",
+    baseUrl: "https://api.anthropic.com",
+    model: "configured-model",
+    fetchImpl: async (_url, options) => {
+      requestSignal = options.signal;
+      return new Promise((_, reject) => {
+        options.signal.addEventListener("abort", () => {
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          reject(error);
+        }, { once: true });
+      });
+    }
+  });
+
+  const pending = adapter.execute({
+    payload: { messages: [] },
+    mode: "live",
+    signal: controller.signal
+  });
+  controller.abort();
+  await assert.rejects(pending, /provider_aborted/);
+  assert.equal(requestSignal.aborted, true);
+});
+
 test("Anthropic execute refuses dry-run mode", async () => {
   const adapter = createAnthropicAdapter({
     id: "anthropic-provider",

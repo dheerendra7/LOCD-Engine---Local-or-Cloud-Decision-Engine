@@ -124,6 +124,36 @@ test("execute uses OpenAI-compatible chat completion endpoint", async () => {
   assert.equal(JSON.parse(calls[0].options.body).model, "demo-model");
 });
 
+test("execute forwards caller cancellation to the HTTP request", async () => {
+  const controller = new AbortController();
+  let requestSignal;
+  const adapter = createOpenAICompatibleAdapter({
+    id: "provider-cancel",
+    targetId: "provider-cancel",
+    baseUrl: "https://inference.example.com",
+    model: "demo-model",
+    fetchImpl: async (_url, options) => {
+      requestSignal = options.signal;
+      return new Promise((_, reject) => {
+        options.signal.addEventListener("abort", () => {
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          reject(error);
+        }, { once: true });
+      });
+    }
+  });
+
+  const pending = adapter.execute({
+    payload: { messages: [] },
+    mode: "live",
+    signal: controller.signal
+  });
+  controller.abort();
+  await assert.rejects(pending, /provider_aborted/);
+  assert.equal(requestSignal.aborted, true);
+});
+
 test("execute refuses dry-run mode", async () => {
   const adapter = createOpenAICompatibleAdapter({
     id: "provider",

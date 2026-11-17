@@ -69,6 +69,35 @@ test("cloud Ollama sends bearer auth to native API", async () => {
   assert.equal(JSON.parse(calls[0].options.body).stream, false);
 });
 
+test("Ollama execution forwards caller cancellation to the HTTP request", async () => {
+  const controller = new AbortController();
+  let requestSignal;
+  const adapter = createOllamaAdapter({
+    id: "ollama-cancel",
+    targetId: "ollama-cancel",
+    model: "gemma4:31b",
+    fetchImpl: async (_url, options) => {
+      requestSignal = options.signal;
+      return new Promise((_, reject) => {
+        options.signal.addEventListener("abort", () => {
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          reject(error);
+        }, { once: true });
+      });
+    }
+  });
+
+  const pending = adapter.execute({
+    payload: { messages: [] },
+    mode: "live",
+    signal: controller.signal
+  });
+  controller.abort();
+  await assert.rejects(pending, /provider_aborted/);
+  assert.equal(requestSignal.aborted, true);
+});
+
 test("execute requires a model", async () => {
   const adapter = createOllamaAdapter({
     id: "ollama",

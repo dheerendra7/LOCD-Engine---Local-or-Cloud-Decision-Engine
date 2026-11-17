@@ -37,14 +37,32 @@ function optionalNonNegative(value) {
   return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
-function timeoutSignal(timeoutMs) {
+function timeoutSignal(timeoutMs, parentSignal = null) {
+  if (parentSignal != null && (
+    typeof parentSignal.aborted !== "boolean" ||
+    typeof parentSignal.addEventListener !== "function"
+  )) {
+    throw new Error("signal must be an AbortSignal");
+  }
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return { signal: undefined, cancel: () => {} };
 
   const controller = new AbortController();
+  let parentAbortListener = null;
+  if (parentSignal?.aborted) {
+    controller.abort(parentSignal.reason);
+  } else if (parentSignal) {
+    parentAbortListener = () => controller.abort(parentSignal.reason);
+    parentSignal.addEventListener("abort", parentAbortListener, { once: true });
+  }
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   return {
     signal: controller.signal,
-    cancel: () => clearTimeout(timer)
+    cancel: () => {
+      clearTimeout(timer);
+      if (parentSignal && parentAbortListener) {
+        parentSignal.removeEventListener("abort", parentAbortListener);
+      }
+    }
   };
 }
 
@@ -169,7 +187,7 @@ export function createOpenAICompatibleAdapter({
     }
   }
 
-  async function execute({ payload, mode: executionMode = "live" } = {}) {
+  async function execute({ payload, mode: executionMode = "live", signal = null } = {}) {
     if (executionMode !== "live") {
       throw new Error("provider execution requires live mode");
     }
@@ -177,7 +195,7 @@ export function createOpenAICompatibleAdapter({
       throw new Error("execution payload must be an object");
     }
 
-    const timeout = timeoutSignal(timeoutMs);
+    const timeout = timeoutSignal(timeoutMs, signal);
     try {
       const body = {
         ...payload,
@@ -201,6 +219,7 @@ export function createOpenAICompatibleAdapter({
 
       return await response.json();
     } catch (error) {
+      if (signal?.aborted) throw new Error("provider_aborted");
       if (error?.name === "AbortError") throw new Error("provider_timeout");
       throw error;
     } finally {
