@@ -4327,3 +4327,92 @@ test("reliability endpoint evaluates tenant-scoped SLO burn and read-only alerts
     await new Promise(resolve => sloServer.close(resolve));
   }
 });
+
+
+test("decision, policy simulation and hybrid planning use server-owned circuit-breaker state for request-scoped targets", async () => {
+  const circuitBreaker = createCircuitBreaker({ failureThreshold: 1 });
+  assert.equal(await circuitBreaker.recordFailure("default", "provider-a", { source: "test" }), true);
+
+  const guardedServer = createServer({ circuitBreaker });
+  await new Promise(resolve => guardedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + guardedServer.address().port;
+  const post = (route, body) => fetch(url + route, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body)
+  });
+
+  const targets = [
+    {
+      id: "provider-a",
+      mode: "cloud",
+      available: true,
+      health: 1,
+      capacity: 0.05,
+      privacy: 1,
+      estimatedLatencyMs: 10,
+      estimatedCostUsd: 0.001,
+      // A caller must not be able to hide a server-side open circuit.
+      circuitBreaker: { state: "closed", failureCount: 0, probeInFlight: false }
+    },
+    {
+      id: "provider-b",
+      mode: "cloud",
+      available: true,
+      health: 0.8,
+      capacity: 0.3,
+      privacy: 0.8,
+      estimatedLatencyMs: 80,
+      estimatedCostUsd: 0.01,
+      // Nor should a caller be able to inject fabricated breaker state.
+      circuitBreaker: { state: "open", failureCount: 99, probeInFlight: true }
+    }
+  ];
+
+  try {
+    const decisionResponse = await post("/v1/decide", {
+      workload: { type: "circuit-breaker-authority", sensitivity: "low" },
+      targets
+    });
+    assert.equal(decisionResponse.status, 200);
+    const decision = await decisionResponse.json();
+    assert.equal(decision.targetId, "provider-b");
+    assert.deepEqual(
+      decision.rejected.find(item => item.targetId === "provider-a")?.reasons,
+      ["circuit_breaker_open"]
+    );
+
+    const simulationResponse = await post("/v1/policies/simulate", {
+      workload: { type: "circuit-breaker-authority", sensitivity: "low" },
+      targets,
+      currentPolicy: { allowedModes: ["cloud"] },
+      candidatePolicy: { allowedModes: ["cloud"] }
+    });
+    assert.equal(simulationResponse.status, 200);
+    const simulation = await simulationResponse.json();
+    assert.equal(simulation.current.targetId, "provider-b");
+    assert.equal(simulation.candidate.targetId, "provider-b");
+    assert.equal(simulation.mutatedState, false);
+    assert.equal(simulation.executedProvider, false);
+
+    const hybridResponse = await post("/v1/hybrid-plan", {
+      workload: { type: "circuit-breaker-authority", sensitivity: "low" },
+      targets,
+      steps: [
+        { id: "prepare", purpose: "Prepare", targetId: "provider-a", dataSensitivity: "low" },
+        { id: "infer", purpose: "Infer", targetId: "provider-b", dataSensitivity: "low" }
+      ]
+    });
+    assert.equal(hybridResponse.status, 200);
+    const hybrid = await hybridResponse.json();
+    assert.equal(hybrid.valid, false);
+    assert.equal(
+      hybrid.rejected.some(item =>
+        item.stepId === "prepare" && item.reasons.includes("circuit_breaker_open")
+      ),
+      true
+    );
+  } finally {
+    await new Promise(resolve => guardedServer.close(resolve));
+  }
+});
