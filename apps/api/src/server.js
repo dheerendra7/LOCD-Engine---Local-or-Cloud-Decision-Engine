@@ -1016,13 +1016,11 @@ export function createServer({
           return;
         }
         const hasRequestTargets = Array.isArray(body.targets) && body.targets.length > 0;
-        const registeredTargets = hasRequestTargets
-          ? body.targets
-          : await effectiveCircuitBreaker.annotateTargets(
-              await requestRegistry.list(),
-              tenantId
-            );
-        const request = { ...body, targets: registeredTargets };
+        const rawTargets = hasRequestTargets ? body.targets : await requestRegistry.list();
+        // Circuit-breaker state is server-owned. Never trust caller-supplied
+        // target.circuitBreaker fields, including on request-scoped targets.
+        const annotatedTargets = await effectiveCircuitBreaker.annotateTargets(rawTargets, tenantId);
+        const request = { ...body, targets: annotatedTargets };
 
         if (!request.targets.length) {
           sendJson(res, 503, { error: "no_registered_targets" });
@@ -1050,9 +1048,9 @@ export function createServer({
         const calibratedTargets = calibrationEnabled
           ? calibrator.apply(rawTargets, body.workload?.type || "unknown", tenantId)
           : rawTargets;
-        const decisionTargets = hasRequestTargets
-          ? calibratedTargets
-          : await effectiveCircuitBreaker.annotateTargets(calibratedTargets, tenantId);
+        // Re-apply the authoritative tenant-scoped breaker state after calibration.
+        // Request-scoped targets must not be able to spoof or omit this state.
+        const decisionTargets = await effectiveCircuitBreaker.annotateTargets(calibratedTargets, tenantId);
         let policy = body.policy || {};
         if (policyStore && policy.profile) {
           const custom = await policyStore.get(tenantId, policy.profile);
@@ -1193,8 +1191,9 @@ export function createServer({
         const rawTargets = Array.isArray(body.targets) && body.targets.length > 0
           ? body.targets
           : await requestRegistry.list();
+        const decisionTargets = await effectiveCircuitBreaker.annotateTargets(rawTargets, tenantId);
 
-        if (!rawTargets.length) {
+        if (!decisionTargets.length) {
           sendJson(res, 503, { error: "no_registered_targets" });
           return;
         }
@@ -1202,7 +1201,7 @@ export function createServer({
         const result = simulatePolicy({
           workload: body.workload,
           constraints: body.constraints || {},
-          targets: rawTargets,
+          targets: decisionTargets,
           currentPolicy: await resolvePolicyForTenant(body.currentPolicy || {}),
           candidatePolicy: await resolvePolicyForTenant(body.candidatePolicy || {})
         });
