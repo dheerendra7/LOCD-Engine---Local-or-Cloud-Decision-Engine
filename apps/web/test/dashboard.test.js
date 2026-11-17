@@ -1162,3 +1162,38 @@ test("all LOCD workspaces use one consistent page hierarchy and grouped navigati
     assert.match(page, /<h1>/, id + " must expose a single top-level page title");
   }
 });
+
+
+test("API Lab response inspector exposes response, headers, code and safe request tabs", async () => {
+  const html = await readFile(new URL("index.html", webRoot), "utf8");
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  const css = await readFile(new URL("styles.css", webRoot), "utf8");
+  for (const tab of ["Response", "Headers", "Code", "Request"]) {
+    assert.match(html, new RegExp('id="apiLab' + tab + 'Tab"'));
+    assert.match(html, new RegExp('aria-labelledby="apiLab' + tab + 'Tab"'));
+  }
+  for (const id of ["apiLabResponsePane", "apiLabHeadersPane", "apiLabCodePane", "apiLabRequestPane", "apiLabHeaders", "apiLabCode", "apiLabCopyCode"]) {
+    assert.match(html, new RegExp('id="' + id + '"'));
+  }
+  assert.match(script, /function apiLabSetInspectorTab\(name\)/);
+  assert.match(script, /function apiLabRenderCode\(\)/);
+  assert.match(script, /response\.headers\.forEach/);
+  assert.match(script, /<YOUR_LOCD_API_KEY>/);
+  assert.match(css, /\.api-lab-inspector/);
+  assert.match(css, /\.api-lab-tab\.active/);
+});
+
+test("API Lab inspector formats response headers and supports accessible keyboard tab movement", async () => {
+  const html = await readFile(new URL("index.html", webRoot), "utf8");
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  for (const tab of ["Response", "Headers", "Code", "Request"]) {
+    assert.match(html, new RegExp('id="apiLab' + tab + 'Tab"'));
+  }
+  assert.match(script, /\.join\("\\n"\)/);
+  assert.doesNotMatch(script, /\.join\("\\\\n"\)/);
+  assert.match(script, /event\.key === "ArrowRight"/);
+  assert.match(script, /event\.key === "ArrowLeft"/);
+  assert.match(script, /event\.key === "Home"/);
+  assert.match(script, /event\.key === "End"/);
+  assert.match(script, /button\.tabIndex = active \? 0 : -1/);
+});
