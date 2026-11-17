@@ -591,25 +591,25 @@
               </div>
               <div class="api-lab-inspector">
                 <div class="api-lab-tabs" role="tablist" aria-label="API exchange inspector">
-                  <button class="api-lab-tab active" type="button" role="tab" aria-selected="true" aria-controls="apiLabResponsePane" data-api-lab-tab="response">Response</button>
-                  <button class="api-lab-tab" type="button" role="tab" aria-selected="false" aria-controls="apiLabHeadersPane" data-api-lab-tab="headers">Headers</button>
-                  <button class="api-lab-tab" type="button" role="tab" aria-selected="false" aria-controls="apiLabCodePane" data-api-lab-tab="code">Code</button>
-                  <button class="api-lab-tab" type="button" role="tab" aria-selected="false" aria-controls="apiLabRequestPane" data-api-lab-tab="request">Request</button>
+                  <button class="api-lab-tab active" type="button" id="apiLabResponseTab" role="tab" aria-selected="true" aria-controls="apiLabResponsePane" tabindex="0" data-api-lab-tab="response">Response</button>
+                  <button class="api-lab-tab" type="button" id="apiLabHeadersTab" role="tab" aria-selected="false" aria-controls="apiLabHeadersPane" tabindex="-1" data-api-lab-tab="headers">Headers</button>
+                  <button class="api-lab-tab" type="button" id="apiLabCodeTab" role="tab" aria-selected="false" aria-controls="apiLabCodePane" tabindex="-1" data-api-lab-tab="code">Code</button>
+                  <button class="api-lab-tab" type="button" id="apiLabRequestTab" role="tab" aria-selected="false" aria-controls="apiLabRequestPane" tabindex="-1" data-api-lab-tab="request">Request</button>
                 </div>
-                <section class="api-lab-tab-pane active" id="apiLabResponsePane" role="tabpanel">
+                <section class="api-lab-tab-pane active" id="apiLabResponsePane" role="tabpanel" aria-labelledby="apiLabResponseTab">
                   <div class="api-lab-response-label"><strong>Response body</strong><span id="apiLabResponseType">JSON / text</span></div>
                   <pre id="apiLabResponse" class="api-lab-response" aria-live="polite">Select an endpoint and send the request. The response will appear here.</pre>
                 </section>
-                <section class="api-lab-tab-pane" id="apiLabHeadersPane" role="tabpanel" hidden>
+                <section class="api-lab-tab-pane" id="apiLabHeadersPane" role="tabpanel" aria-labelledby="apiLabHeadersTab" hidden>
                   <div class="api-lab-response-label"><strong>Response headers</strong><span>Headers exposed by the browser</span></div>
                   <pre id="apiLabHeaders" class="api-lab-response">Response headers will appear after a request.</pre>
                 </section>
-                <section class="api-lab-tab-pane" id="apiLabCodePane" role="tabpanel" hidden>
+                <section class="api-lab-tab-pane" id="apiLabCodePane" role="tabpanel" aria-labelledby="apiLabCodeTab" hidden>
                   <div class="api-lab-response-label"><strong>Reproducible request examples</strong><button class="btn btn-secondary btn-small" type="button" id="apiLabCopyCode">Copy code</button></div>
                   <pre id="apiLabCode" class="api-lab-response api-lab-code">Choose an endpoint to generate cURL, Node.js and Python examples.</pre>
                   <p class="api-lab-code-note">Generated examples use a placeholder API key. Your active credential is never inserted into code.</p>
                 </section>
-                <section class="api-lab-tab-pane" id="apiLabRequestPane" role="tabpanel" hidden>
+                <section class="api-lab-tab-pane" id="apiLabRequestPane" role="tabpanel" aria-labelledby="apiLabRequestTab" hidden>
                   <div class="api-lab-response-label"><strong>Safe request preview</strong><span>Authorization value redacted</span></div>
                   <pre id="apiLabRequestPreview" class="api-lab-request-preview">The method, path and safe request headers will appear here.</pre>
                 </section>
