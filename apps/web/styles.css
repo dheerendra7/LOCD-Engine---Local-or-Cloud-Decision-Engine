@@ -520,3 +520,6 @@ input:focus, select:focus, textarea:focus { border-color: #6578e8; box-shadow: 0
 @media (prefers-reduced-motion: reduce) {
   .nav-link { transition: none; }
 }
+
+/* Workspace navigation keeps non-active sections out of the visual and accessibility flow. */
+.page-section[hidden] { display: none !important; }
