@@ -1088,3 +1088,37 @@ test("Decision Studio is the primary entry point and reliability is grouped unde
   assert.match(observability, /Circuit-breaker posture/);
   assert.match(observability, /Reliability trends &(?:amp;)? event history/);
 });
+
+
+test("API Lab exposes only safe allowlisted operations and a read-only policy simulation", async () => {
+  const html = await readFile(new URL("index.html", webRoot), "utf8");
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+
+  for (const id of [
+    "api-lab", "apiLabEndpoint", "apiLabMethod", "apiLabPath",
+    "apiLabScope", "apiLabBody", "apiLabRun", "apiLabResponse",
+    "apiLabRequestPreview", "apiLabHttpStatus", "apiLabDuration",
+    "apiLabRequestId", "apiLabAccessHint"
+  ]) {
+    assert.match(html, new RegExp('id="' + id + '"'), "missing API Lab control: " + id);
+  }
+
+  assert.match(html, /API Lab/);
+  assert.match(script, /const API_LAB_ENDPOINTS = Object\.freeze\(/);
+  for (const endpoint of [
+    'path: "/health"',
+    'path: "/ready"',
+    'path: "/v1/status"',
+    'path: "/v1/targets"',
+    'path: "/v1/policies"',
+    'path: "/v1/policies/simulate"'
+  ]) {
+    assert.ok(script.includes(endpoint), "missing allowlisted endpoint: " + endpoint);
+  }
+  assert.match(script, /\.\.\.apiHeaders\(\)/);
+  assert.match(script, /"x-request-id": requestId/);
+  assert.ok(script.includes('authorization: "[redacted — key remains in page memory]"'));
+  assert.match(script, /mutatedState/);
+  assert.match(script, /executedProvider/);
+  assert.doesNotMatch(script, /fetch\(document\.querySelector\("#apiLabPath"\)/);
+});

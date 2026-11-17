@@ -44,6 +44,10 @@
         <a class="nav-link" href="#system-settings" data-nav="system-settings">
           <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.2.9-1.2 2.1-1.4-.6a7.7 7.7 0 0 1-1.5.9l-.2 1.5h-2.5l-.3-1.5a7.7 7.7 0 0 1-1.5-.9l-1.4.6-1.2-2.1 1.2-.9a6.8 6.8 0 0 1 0-1.8l-1.2-.9 1.2-2.1 1.4.6a7.7 7.7 0 0 1 1.5-.9l.3-1.5h2.5l.2 1.5a7.7 7.7 0 0 1 1.5.9l1.4-.6 1.2 2.1-1.2.9a6.8 6.8 0 0 1-.1 1.7Z"/></svg>System &amp; access
         </a>
+      
+        <a class="nav-link" href="#api-lab" data-nav="api-lab">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M8 5 3 12l5 7M16 5l5 7-5 7M14 4l-4 16"/></svg>API Lab
+        </a>
       </nav>
       <div class="sidebar-spacer"></div>
       <div class="sidebar-footer">
@@ -469,6 +473,90 @@
               <div class="system-item"><span>Status</span><strong>Waiting for API response</strong></div>
             </div>
             <div class="footer-note">LOCD provides explainable placement decisions. Validate privacy, capacity, price and provider availability in the target environment before production use.</div>
+          </section>
+        </section>
+
+        <section id="api-lab" class="page-section api-lab-page">
+          <div class="page-heading">
+            <div>
+              <div class="page-kicker">DEVELOPER WORKSPACE · LIVE REQUEST INSPECTOR</div>
+              <h1>API Lab</h1>
+              <p>Run a curated set of safe LOCD endpoints and inspect the real request, response, status and latency. Requests stay on this LOCD deployment; credentials are never printed in the inspector.</p>
+            </div>
+            <div class="button-row"><span class="state-badge blue">Same-origin · Allowlisted</span></div>
+          </div>
+
+          <div class="api-lab-intro panel">
+            <div class="api-lab-intro-mark" aria-hidden="true">&lt;/&gt;</div>
+            <div>
+              <strong>Watch the control plane work</strong>
+              <p>Choose an endpoint, run it, and compare the request with the API's actual response. The policy comparison is explicitly read-only: it does not record decision telemetry or invoke provider adapters.</p>
+            </div>
+          </div>
+
+          <div class="api-lab-grid">
+            <section class="panel api-lab-request-panel">
+              <div class="section-heading">
+                <div><div class="section-label">01 / Request builder</div><h2>Choose an API operation</h2><p>Only reviewed endpoints are available. You cannot enter an arbitrary URL or trigger a write operation from this workspace.</p></div>
+                <span class="state-badge">Allowlist</span>
+              </div>
+
+              <label for="apiLabEndpoint">Endpoint
+                <select id="apiLabEndpoint">
+                  <option value="health">GET /health · Public health</option>
+                  <option value="ready">GET /ready · Readiness</option>
+                  <option value="status">GET /v1/status · Runtime status</option>
+                  <option value="targets">GET /v1/targets · Target registry</option>
+                  <option value="policies">GET /v1/policies · Policy catalog</option>
+                  <option value="simulate">POST /v1/policies/simulate · Read-only policy comparison</option>
+                </select>
+              </label>
+
+              <div class="api-lab-route">
+                <span id="apiLabMethod" class="api-method-badge">GET</span>
+                <code id="apiLabPath">/health</code>
+                <span id="apiLabScope" class="api-scope-label">Public</span>
+              </div>
+              <p id="apiLabDescription" class="api-lab-description">Checks whether the LOCD HTTP service is responding.</p>
+
+              <div id="apiLabBodyWrap" class="api-lab-body-wrap" hidden>
+                <div class="api-lab-body-heading"><strong>JSON request body</strong><button class="btn btn-quiet" type="button" id="apiLabResetBody">Restore example</button></div>
+                <label class="api-lab-textarea-label">Request payload
+                  <textarea id="apiLabBody" rows="15" spellcheck="false" aria-describedby="apiLabBodyHelp"></textarea>
+                  <span id="apiLabBodyHelp" class="help-text">This example uses request-scoped sample targets. It does not register or persist them.</span>
+                </label>
+              </div>
+
+              <div class="api-lab-actions">
+                <button class="btn btn-primary" type="button" id="apiLabRun"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m8 5 11 7-11 7V5Z"/></svg>Send request</button>
+                <span id="apiLabStatus" class="status" role="status" aria-live="polite">Ready to send a request.</span>
+              </div>
+              <div id="apiLabAccessHint" class="api-lab-access-hint" hidden>
+                This endpoint needs a scoped key. <a href="#system-settings">Configure API access</a> using the System &amp; access workspace.
+              </div>
+            </section>
+
+            <section class="panel api-lab-response-panel">
+              <div class="section-heading"><div><div class="section-label">02 / Response inspector</div><h2>Live API response</h2><p>Response details are captured from the actual HTTP exchange.</p></div><span id="apiLabStatusBadge" class="state-badge">Not run</span></div>
+              <div class="api-lab-metrics" aria-live="polite">
+                <div><span>HTTP status</span><strong id="apiLabHttpStatus">—</strong></div>
+                <div><span>Duration</span><strong id="apiLabDuration">—</strong></div>
+                <div><span>Request ID</span><strong id="apiLabRequestId">—</strong></div>
+              </div>
+              <div class="api-lab-response-label"><strong>Response body</strong><span id="apiLabResponseType">JSON / text</span></div>
+              <pre id="apiLabResponse" class="api-lab-response" aria-live="polite">Select an endpoint and send the request. The response will appear here.</pre>
+              <div class="api-lab-response-label"><strong>Request preview</strong><span>Authorization value hidden</span></div>
+              <pre id="apiLabRequestPreview" class="api-lab-request-preview">The method, path and safe request headers will appear here before sending.</pre>
+            </section>
+          </div>
+
+          <section class="panel api-lab-safety">
+            <div class="section-heading"><div><div class="section-label">03 / Safety boundary</div><h2>What this API Lab can and cannot do</h2><p>The tool is designed to teach the request lifecycle without risking live infrastructure.</p></div></div>
+            <div class="api-lab-safety-grid">
+              <div><span class="api-safety-dot good"></span><strong>Allowed</strong><p>Health, readiness, tenant-scoped status, target and policy reads, plus read-only policy simulation.</p></div>
+              <div><span class="api-safety-dot"></span><strong>Not exposed</strong><p>Target or policy writes, outcome recording, live provider probes, and live execution.</p></div>
+              <div><span class="api-safety-dot"></span><strong>Credential handling</strong><p>The existing page-memory API key is sent only as an authorization header. It is never shown in the request preview or URL.</p></div>
+            </div>
           </section>
         </section>
 

@@ -1799,3 +1799,255 @@ if (initialHybridRows) {
   addHybridStep({ id: "inference", purpose: "Model inference", dataSensitivity: "medium" });
 }
 refreshAll();
+
+
+// API Lab: a fixed allowlist of safe, same-origin operations for hands-on API inspection.
+const API_LAB_SIMULATION_EXAMPLE = {
+  workload: {
+    type: "llm-inference",
+    sensitivity: "high",
+    requiredCapabilities: ["text-generation"]
+  },
+  constraints: {
+    latencyBudgetMs: 800,
+    maxCostUsd: 0.05,
+    strictLatency: true,
+    strictCost: true
+  },
+  targets: [
+    {
+      id: "local-gpu",
+      mode: "local",
+      available: true,
+      health: 0.99,
+      capacity: 0.25,
+      privacy: 1,
+      estimatedLatencyMs: 420,
+      estimatedCostUsd: 0,
+      regions: ["local"],
+      capabilities: ["text-generation"]
+    },
+    {
+      id: "cloud-gpu",
+      mode: "cloud",
+      available: true,
+      health: 0.99,
+      capacity: 0.2,
+      privacy: 0.2,
+      estimatedLatencyMs: 120,
+      estimatedCostUsd: 0.02,
+      regions: ["us-east-1"],
+      capabilities: ["text-generation"]
+    }
+  ],
+  currentPolicy: { profile: "balanced" },
+  candidatePolicy: { sensitiveDataMode: "prefer-local" }
+};
+
+const API_LAB_ENDPOINTS = Object.freeze({
+  health: {
+    method: "GET",
+    path: "/health",
+    scope: "Public",
+    description: "Checks whether the LOCD HTTP service is responding."
+  },
+  ready: {
+    method: "GET",
+    path: "/ready",
+    scope: "Public",
+    description: "Checks the configured telemetry, target registry and policy backing stores before the instance receives traffic."
+  },
+  status: {
+    method: "GET",
+    path: "/v1/status",
+    scope: "read",
+    description: "Returns the authenticated tenant's runtime capabilities, registered targets and circuit-breaker summary."
+  },
+  targets: {
+    method: "GET",
+    path: "/v1/targets",
+    scope: "read",
+    description: "Lists normalized execution targets visible to the current API-key tenant."
+  },
+  policies: {
+    method: "GET",
+    path: "/v1/policies",
+    scope: "read",
+    description: "Lists built-in policy profiles and custom policies visible to the current tenant."
+  },
+  simulate: {
+    method: "POST",
+    path: "/v1/policies/simulate",
+    scope: "decide",
+    description: "Compares a current and candidate policy against sample targets. The API response confirms that state was not mutated and no provider was executed.",
+    example: API_LAB_SIMULATION_EXAMPLE
+  }
+});
+
+const apiLabEndpointSelect = document.querySelector("#apiLabEndpoint");
+const apiLabBody = document.querySelector("#apiLabBody");
+const apiLabBodyWrap = document.querySelector("#apiLabBodyWrap");
+
+function apiLabConfig() {
+  return API_LAB_ENDPOINTS[apiLabEndpointSelect?.value] || API_LAB_ENDPOINTS.health;
+}
+
+function apiLabUpdateRequestPreview() {
+  const config = apiLabConfig();
+  const bodyText = config.method === "POST" ? apiLabBody?.value || "" : null;
+  const preview = {
+    method: config.method,
+    path: config.path,
+    headers: {
+      ...(config.method === "POST" ? { "content-type": "application/json" } : {}),
+      ...(activeApiKey ? { authorization: "[redacted — key remains in page memory]" } : {}),
+      "x-request-id": "[generated for each request]",
+      ...(config.method === "POST" ? { "idempotency-key": "[generated for each request]" } : {})
+    },
+    body: bodyText == null ? null : (() => {
+      try { return JSON.parse(bodyText); } catch { return "[invalid JSON — fix before sending]"; }
+    })()
+  };
+  const output = document.querySelector("#apiLabRequestPreview");
+  if (output) output.textContent = JSON.stringify(preview, null, 2);
+}
+
+function apiLabSelectEndpoint() {
+  const config = apiLabConfig();
+  const method = document.querySelector("#apiLabMethod");
+  const path = document.querySelector("#apiLabPath");
+  const scope = document.querySelector("#apiLabScope");
+  const description = document.querySelector("#apiLabDescription");
+  if (method) {
+    method.textContent = config.method;
+    method.dataset.method = config.method;
+  }
+  if (path) path.textContent = config.path;
+  if (scope) scope.textContent = config.scope;
+  if (description) description.textContent = config.description;
+  if (apiLabBodyWrap) apiLabBodyWrap.hidden = config.method !== "POST";
+  if (apiLabBody && config.example) apiLabBody.value = JSON.stringify(config.example, null, 2);
+  apiLabUpdateRequestPreview();
+}
+
+apiLabEndpointSelect?.addEventListener("change", apiLabSelectEndpoint);
+apiLabBody?.addEventListener("input", apiLabUpdateRequestPreview);
+document.querySelector("#apiLabResetBody")?.addEventListener("click", () => {
+  const example = apiLabConfig().example;
+  if (apiLabBody && example) apiLabBody.value = JSON.stringify(example, null, 2);
+  apiLabUpdateRequestPreview();
+});
+
+document.querySelector("#apiLabRun")?.addEventListener("click", async event => {
+  const config = apiLabConfig();
+  const button = event.currentTarget;
+  const status = document.querySelector("#apiLabStatus");
+  const statusBadge = document.querySelector("#apiLabStatusBadge");
+  const responseOutput = document.querySelector("#apiLabResponse");
+  const accessHint = document.querySelector("#apiLabAccessHint");
+  const accessRevision = apiAccessRevision;
+  let body = null;
+
+  if (config.method === "POST") {
+    try {
+      body = JSON.parse(apiLabBody?.value || "");
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        throw new Error("The request body must be a JSON object.");
+      }
+    } catch (error) {
+      if (status) status.textContent = error instanceof Error ? error.message : "Invalid JSON request body.";
+      if (statusBadge) {
+        statusBadge.textContent = "Invalid request";
+        statusBadge.className = "state-badge bad";
+      }
+      return;
+    }
+  }
+
+  const requestId = globalThis.crypto?.randomUUID?.() ||
+    "locd-api-lab-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+  const headers = {
+    ...apiHeaders(),
+    "x-request-id": requestId
+  };
+  const options = { method: config.method, headers, cache: "no-store" };
+  if (config.method === "POST") {
+    headers["content-type"] = "application/json";
+    headers["idempotency-key"] = portalIdempotencyKey();
+    options.body = JSON.stringify(body);
+  }
+
+  apiLabUpdateRequestPreview();
+  if (status) status.textContent = "Sending " + config.method + " " + config.path + "…";
+  if (statusBadge) {
+    statusBadge.textContent = "In flight";
+    statusBadge.className = "state-badge warn";
+  }
+  if (responseOutput) responseOutput.textContent = "Waiting for the LOCD API response…";
+  if (accessHint) accessHint.hidden = true;
+  button.disabled = true;
+
+  const startedAt = performance.now();
+  try {
+    const response = await fetch(config.path, options);
+    const elapsedMs = performance.now() - startedAt;
+    const raw = await response.text();
+    let payload = raw;
+    let responseType = response.headers.get("content-type") || "unknown";
+    if (responseType.includes("json")) {
+      try { payload = JSON.parse(raw); } catch { payload = raw; }
+    }
+    if (accessRevision !== apiAccessRevision) return;
+
+    const requestIdHeader = response.headers.get("x-request-id") || requestId;
+    const httpStatus = document.querySelector("#apiLabHttpStatus");
+    const duration = document.querySelector("#apiLabDuration");
+    const responseId = document.querySelector("#apiLabRequestId");
+    const responseTypeLabel = document.querySelector("#apiLabResponseType");
+    if (httpStatus) httpStatus.textContent = String(response.status) + " " + response.statusText;
+    if (duration) duration.textContent = elapsedMs.toFixed(1) + " ms";
+    if (responseId) responseId.textContent = requestIdHeader;
+    if (responseTypeLabel) responseTypeLabel.textContent = responseType;
+    if (responseOutput) responseOutput.textContent = typeof payload === "string"
+      ? payload || "(empty response)"
+      : JSON.stringify(payload, null, 2);
+
+    if (config.path === "/v1/policies/simulate" && payload && typeof payload === "object") {
+      if (payload.mutatedState === false && payload.executedProvider === false) {
+        if (status) status.textContent = "Read-only verified: no state mutation or provider execution.";
+      } else if (status) {
+        status.textContent = "Response received; read-only verification flags were not both false.";
+      }
+    } else if (status) {
+      status.textContent = response.ok
+        ? "Request completed successfully."
+        : "API returned HTTP " + response.status + ".";
+    }
+    if (statusBadge) {
+      statusBadge.textContent = response.ok ? "Completed" : "HTTP " + response.status;
+      statusBadge.className = response.ok ? "state-badge good" : "state-badge bad";
+    }
+    if ((response.status === 401 || response.status === 403) && accessHint) {
+      accessHint.hidden = false;
+    }
+  } catch (error) {
+    if (accessRevision !== apiAccessRevision) return;
+    const elapsedMs = performance.now() - startedAt;
+    const httpStatus = document.querySelector("#apiLabHttpStatus");
+    const duration = document.querySelector("#apiLabDuration");
+    const responseId = document.querySelector("#apiLabRequestId");
+    if (httpStatus) httpStatus.textContent = "Network error";
+    if (duration) duration.textContent = elapsedMs.toFixed(1) + " ms";
+    if (responseId) responseId.textContent = requestId;
+    if (responseOutput) responseOutput.textContent = error instanceof Error ? error.message : String(error);
+    if (status) status.textContent = "Could not reach the LOCD API.";
+    if (statusBadge) {
+      statusBadge.textContent = "Network error";
+      statusBadge.className = "state-badge bad";
+    }
+  } finally {
+    if (accessRevision === apiAccessRevision) button.disabled = false;
+  }
+});
+
+apiLabSelectEndpoint();
