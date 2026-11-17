@@ -2016,6 +2016,81 @@ function apiLabConfig() {
   return API_LAB_ENDPOINTS[apiLabEndpointSelect?.value] || API_LAB_ENDPOINTS.health;
 }
 
+function apiLabSetInspectorTab(name) {
+  const tabs = Array.from(document.querySelectorAll("[data-api-lab-tab]"));
+  const selected = tabs.find(button => button.dataset.apiLabTab === name);
+  if (!selected) return;
+
+  tabs.forEach(button => {
+    const active = button === selected;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+    button.tabIndex = active ? 0 : -1;
+  });
+
+  document.querySelectorAll(".api-lab-tab-pane").forEach(pane => {
+    const active = pane.id === "apiLab" + name[0].toUpperCase() + name.slice(1) + "Pane";
+    pane.hidden = !active;
+    pane.classList.toggle("active", active);
+  });
+}
+
+function apiLabRenderCode() {
+  const config = apiLabConfig();
+  let body = null;
+  if (config.method === "POST") {
+    try {
+      body = JSON.stringify(JSON.parse(apiLabBody?.value || "{}"), null, 2);
+    } catch {
+      const output = document.querySelector("#apiLabCode");
+      if (output) output.textContent = "Fix the JSON request body to generate runnable examples.";
+      return;
+    }
+  }
+  const path = config.path;
+  const curlBody = body == null ? "" : " \\\n  --data '" + body.replace(/'/g, "'\\''") + "'";
+  const idempotencyHeader = config.method === "POST" ? " \\\n  --header 'Idempotency-Key: <UNIQUE_IDEMPOTENCY_KEY>'" : "";
+  const nodeBody = body == null ? "" : ",\n  body: JSON.stringify(" + body + ")";
+  const pythonBody = body == null ? "" : ",\n    json=json.loads(" + JSON.stringify(body) + ")";
+  const examples = [
+    "# cURL\ncurl --request " + config.method + " 'https://YOUR-LOCD-HOST" + path + "' \\\n  --header 'Authorization: Bearer <YOUR_LOCD_API_KEY>' \\\n  --header 'X-Request-ID: <UNIQUE_REQUEST_ID>'" + idempotencyHeader + curlBody,
+    "# Node.js (built-in fetch)\nconst response = await fetch('https://YOUR-LOCD-HOST" + path + "', {\n  method: '" + config.method + "',\n  headers: {\n    Authorization: 'Bearer <YOUR_LOCD_API_KEY>',\n    'X-Request-ID': '<UNIQUE_REQUEST_ID>'" + (config.method === "POST" ? ",\n    'Idempotency-Key': '<UNIQUE_IDEMPOTENCY_KEY>'" : "") + "\n  }" + nodeBody + "\n});\nconst result = await response.json();\nconsole.log(response.status, result);",
+    "# Python (requests)\nimport json\nimport requests\n\nresponse = requests.request(\n    '" + config.method + "',\n    'https://YOUR-LOCD-HOST" + path + "',\n    headers={\n        'Authorization': 'Bearer <YOUR_LOCD_API_KEY>',\n        'X-Request-ID': '<UNIQUE_REQUEST_ID>'" + (config.method === "POST" ? ",\n        'Idempotency-Key': '<UNIQUE_IDEMPOTENCY_KEY>'" : "") + "\n    }" + pythonBody + "\n)\nprint(response.status_code, response.json())"
+  ];
+  const output = document.querySelector("#apiLabCode");
+  if (output) output.textContent = examples.join("\n\n" + "─".repeat(64) + "\n\n");
+}
+
+const apiLabTabs = Array.from(document.querySelectorAll("[data-api-lab-tab]"));
+apiLabTabs.forEach(button => {
+  button.addEventListener("click", () => apiLabSetInspectorTab(button.dataset.apiLabTab));
+  button.addEventListener("keydown", event => {
+    const currentIndex = apiLabTabs.indexOf(button);
+    let nextIndex = currentIndex;
+    if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % apiLabTabs.length;
+    else if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + apiLabTabs.length) % apiLabTabs.length;
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = apiLabTabs.length - 1;
+    else return;
+
+    event.preventDefault();
+    const nextTab = apiLabTabs[nextIndex];
+    apiLabSetInspectorTab(nextTab.dataset.apiLabTab);
+    nextTab.focus();
+  });
+});
+apiLabSetInspectorTab("response");
+document.querySelector("#apiLabCopyCode")?.addEventListener("click", async () => {
+  const code = document.querySelector("#apiLabCode")?.textContent || "";
+  const status = document.querySelector("#apiLabStatus");
+  try {
+    await navigator.clipboard.writeText(code);
+    if (status) status.textContent = "Generated examples copied. Replace the host and API-key placeholders before use.";
+  } catch {
+    if (status) status.textContent = "Clipboard access is unavailable. Select and copy the generated code manually.";
+  }
+});
+
 function apiLabUpdateRequestPreview() {
   const config = apiLabConfig();
   const bodyText = config.method === "POST" ? apiLabBody?.value || "" : null;
@@ -2034,6 +2109,7 @@ function apiLabUpdateRequestPreview() {
   };
   const output = document.querySelector("#apiLabRequestPreview");
   if (output) output.textContent = JSON.stringify(preview, null, 2);
+  apiLabRenderCode();
 }
 
 function apiLabSelectEndpoint() {
@@ -2135,6 +2211,12 @@ document.querySelector("#apiLabRun")?.addEventListener("click", async event => {
     if (responseOutput) responseOutput.textContent = typeof payload === "string"
       ? payload || "(empty response)"
       : JSON.stringify(payload, null, 2);
+    const responseHeaders = [];
+    response.headers.forEach((value, name) => responseHeaders.push(name + ": " + value));
+    const headersOutput = document.querySelector("#apiLabHeaders");
+    if (headersOutput) headersOutput.textContent = responseHeaders.length
+      ? responseHeaders.sort((a, b) => a.localeCompare(b)).join("\n")
+      : "No response headers were exposed by the browser for this response.";
 
     if (config.path === "/v1/policies/simulate" && payload && typeof payload === "object") {
       if (payload.mutatedState === false && payload.executedProvider === false) {

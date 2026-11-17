@@ -441,3 +441,64 @@ summary { color: var(--ink-soft); cursor: pointer; font-size: 11px; font-weight:
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* API Lab exchange inspector — scoped additions, preserving the workspace shell */
+.api-lab-inspector {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 10px);
+  background: var(--surface);
+}
+.api-lab-tabs {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 7px 8px 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-soft);
+  scrollbar-width: thin;
+}
+.api-lab-tab {
+  flex: 0 0 auto;
+  appearance: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 7px 7px 0 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 9px 13px 10px;
+  font-size: 11px;
+  font-weight: 680;
+}
+.api-lab-tab:hover { background: var(--surface-muted, var(--surface-soft)); color: var(--ink); }
+.api-lab-tab.active {
+  color: var(--green);
+  border-bottom-color: var(--green);
+  background: var(--surface);
+}
+.api-lab-tab:focus-visible { outline-offset: -2px; }
+.api-lab-tab-pane { min-width: 0; padding: 0 12px 12px; }
+.api-lab-tab-pane[hidden] { display: none !important; }
+.api-lab-tab-pane .api-lab-response-label { margin-top: 12px; }
+.api-lab-tab-pane pre {
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+.api-lab-tab-pane .api-lab-code {
+  min-height: 340px;
+  max-height: 560px;
+  white-space: pre;
+  overflow: auto;
+}
+.api-lab-tab-pane .api-lab-request-preview { min-height: 210px; }
+.api-lab-code-note { margin: 8px 0 0; color: var(--muted-light); font-size: 10px; }
+@media (max-width: 760px) {
+  .api-lab-tabs { gap: 1px; }
+  .api-lab-tab { padding-inline: 10px; }
+  .api-lab-tab-pane .api-lab-code { min-height: 280px; }
+}
