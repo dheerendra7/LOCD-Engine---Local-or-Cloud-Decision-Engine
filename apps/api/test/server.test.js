@@ -94,6 +94,37 @@ test("production strict mode requires a plan signing secret when live execution 
   }
 });
 
+test("production strict mode requires shared coordination for single-use live plan claims", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-strict-shared-plan-"));
+  const file = path.join(dir, "state.db");
+  const stores = createSQLiteStateStores({ filePath: file, maxEntries: 20 });
+
+  try {
+    assert.throws(
+      () => createServer({
+        productionStrict: true,
+        authorizer: createScopedAuthorizer({
+          keys: [{
+            id: "ops",
+            secret: "ops-secret",
+            tenantId: "default",
+            scopes: ["admin"]
+          }]
+        }),
+        rateLimitMaxRequests: 60,
+        executionEnabled: true,
+        executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
+        decisionStore: stores.telemetry,
+        policyStore: stores.policies
+      }),
+      /live execution plan claims are not backed by shared coordination/
+    );
+  } finally {
+    stores.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("production strict mode accepts genuinely durable stores", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "locd-strict-safe-"));
   const file = path.join(dir, "state.db");
