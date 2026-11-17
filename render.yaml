@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: locd-engine
+    runtime: node
+    plan: free
+    region: singapore
+    branch: main
+    autoDeployTrigger: checksPass
+    numInstances: 1
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /ready
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LOCD_DEPLOYMENT_PROFILE
+        value: free-preview
+      - key: LOCD_PRODUCTION_STRICT
+        value: "false"
+      - key: LOCD_RATE_LIMIT_RPM
+        value: "60"
+      - key: LOCD_API_KEY
+        generateValue: true
+      - key: LOCD_EXECUTION_ENABLED
+        value: "false"
+      - key: LOCD_PROBE_INTERVAL_MS
+        value: "0"

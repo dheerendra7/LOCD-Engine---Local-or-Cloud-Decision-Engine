@@ -1,0 +1,33 @@
+{
+  "profile": "balanced",
+  "rules": [
+    {
+      "id": "high-sensitivity-local",
+      "priority": 100,
+      "when": {
+        "sensitivity": "high"
+      },
+      "set": {
+        "sensitiveDataMode": "local-only",
+        "allowedModes": ["local"]
+      }
+    },
+    {
+      "id": "vision-private",
+      "priority": 80,
+      "when": {
+        "requiredCapability": ["vision"]
+      },
+      "set": {
+        "allowedModes": ["private", "cloud"],
+        "weights": {
+          "latency": 0.40,
+          "cost": 0.20,
+          "privacy": 0.30,
+          "capacity": 0.05,
+          "reliability": 0.05
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "plan": {
+    "valid": true,
+    "route": "local",
+    "steps": [
+      {
+        "id": "inference",
+        "targetId": "local-ollama",
+        "purpose": "inference",
+        "payload": {
+          "messages": [
+            {
+              "role": "user",
+              "content": "hello from LOCD"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

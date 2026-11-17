@@ -1,0 +1,10 @@
+{
+  "name": "locd-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "locd": "./bin/locd.mjs"
+  },
+  "description": "CLI for the LOCD Engine HTTP API."
+}
