@@ -1051,7 +1051,7 @@ test("Decision Studio is the primary entry point and reliability is grouped unde
   assert.ok(telemetryStart >= 0 && systemStart > telemetryStart);
   const overview = html.slice(overviewStart, html.indexOf('<section id="target-registry"', overviewStart));
   const observability = html.slice(telemetryStart, systemStart);
-  assert.doesNotMatch(overview, /Circuit-breaker posture|Reliability trends &amp; event history/);
+  assert.doesNotMatch(overview, /Circuit-breaker posture|Reliability trends &(?:amp;)? event history/);
   assert.match(observability, /Circuit-breaker posture/);
-  assert.match(observability, /Reliability trends &amp; event history/);
+  assert.match(observability, /Reliability trends &(?:amp;)? event history/);
 });
