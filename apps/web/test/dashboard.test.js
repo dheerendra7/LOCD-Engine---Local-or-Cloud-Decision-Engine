@@ -1157,7 +1157,9 @@ test("API Lab response inspector exposes response, headers, generated code and s
   assert.match(script, /function apiLabRenderCode\(\)/);
   assert.match(script, /response\.headers\.forEach/);
   assert.match(script, /<YOUR_LOCD_API_KEY>/);
-  assert.doesNotMatch(script, /apiLabRenderCode[\s\S]{0,1800}activeApiKey/);
+  const codeGenerator = script.match(/function apiLabRenderCode\\(\\) \\{[\\s\\S]*?\\n\\}/)?.[0] || "";
+  assert.ok(codeGenerator, "API code generator should be present");
+  assert.doesNotMatch(codeGenerator, /activeApiKey|apiHeaders\\(\\)/);
 });
 
 test("premium workspace design tokens and responsive navigation are defined", async () => {
