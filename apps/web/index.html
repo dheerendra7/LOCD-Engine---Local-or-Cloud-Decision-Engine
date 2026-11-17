@@ -18,7 +18,7 @@
           <span class="brand-caption" style="display:block">Placement control plane</span>
         </span>
       </a>
-      <div class="nav-caption">Workspaces</div>
+      <div class="nav-caption">Product workspaces</div>
       <nav class="nav-list" aria-label="Workspaces">
         <a class="nav-link active" href="#decision-lab" data-nav="decision-lab" aria-current="page">
           <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4M11 7v8M7 11h8"/></svg>Decision Studio
@@ -68,28 +68,28 @@
         <section id="decision-lab" class="page-section decision-page">
           <div class="page-heading decision-page-heading">
             <div>
-              <div class="page-kicker">PLACEMENT CONTROL / DETERMINISTIC ENGINE</div>
+              <div class="page-kicker">THE WORKLOAD PLACEMENT WORKBENCH</div>
               <h1>Decision Studio</h1>
-              <p>Translate workload requirements into an explainable placement decision across local, private, cloud and hybrid infrastructure.</p>
+              <p>Choose where each workload should run. LOCD applies hard constraints first, then explains the best-fit destination and the trade-offs behind it.</p>
             </div>
             <div class="button-row decision-heading-actions">
-              <span class="state-badge blue">Deterministic engine</span>
+              <span class="state-badge blue">Policy-aware placement</span>
               <a class="btn btn-secondary" href="#target-registry">Manage destinations</a>
             </div>
           </div>
           <div class="decision-flow" aria-label="Decision workflow">
-            <div class="decision-flow-step"><span>01</span><div><strong>Define workload</strong><small>Type &amp; sensitivity</small></div></div>
-            <div class="decision-flow-step"><span>02</span><div><strong>Set constraints</strong><small>Latency, cost &amp; privacy</small></div></div>
-            <div class="decision-flow-step"><span>03</span><div><strong>Review placement</strong><small>Route &amp; trade-offs</small></div></div>
+            <div class="decision-flow-step"><span>01</span><div><strong>Describe the workload</strong><small>Type, data class &amp; capabilities</small></div></div>
+            <div class="decision-flow-step"><span>02</span><div><strong>Set hard guardrails</strong><small>Privacy, latency &amp; cost limits</small></div></div>
+            <div class="decision-flow-step"><span>03</span><div><strong>Understand the route</strong><small>Decision, alternatives &amp; reasons</small></div></div>
           </div>
           <div class="decision-access-note">
             <span class="decision-access-icon" aria-hidden="true">i</span>
-            <div><strong>Tenant-scoped evaluation</strong><p>Connect a scoped LOCD API key to load protected target and policy data. Keys stay in this page's memory only.</p></div>
+            <div><strong>Your control plane. Your scope.</strong><p>Protected targets and policy data load through your scoped LOCD API key. The key stays in page memory; provider credentials stay server-side.</p></div>
             <a href="#system-settings">Configure access <span aria-hidden="true">↗</span></a>
           </div>
           <div class="panel-grid decision-grid">
             <section class="panel decision-input-panel">
-              <div class="section-heading"><div><div class="section-label">Request configuration</div><h2>Workload request</h2><p>Hard latency and cost budgets are enforced before a route is selected.</p></div><span class="state-badge">Input</span></div>
+              <div class="section-heading"><div><div class="section-label">01 / Request inputs</div><h2>Build a placement request</h2><p>Describe what the workload needs. LOCD applies policy and hard limits before any destination is ranked.</p></div><span class="state-badge">Draft request</span></div>
               <div class="form-grid">
                 <label>Workload type
                   <input id="workloadType" value="llm-inference" autocomplete="off" placeholder="llm-inference">
@@ -113,16 +113,16 @@
               </div>
               <div class="inline-note" style="margin-bottom:16px">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
-                <span>Evaluation uses registered targets unless a request explicitly supplies targets. The browser never calls provider APIs directly.</span>
+                <span>Evaluation uses registered targets unless a request explicitly supplies targets. Provider APIs are never called directly from the browser.</span>
               </div>
               <button class="btn btn-primary decision-submit" id="decide" type="button">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16M4 12h10M4 19h7"/><circle cx="18" cy="16" r="3"/><path d="m20.2 18.2 1.3 1.3"/></svg>Evaluate placement
               </button>
             </section>
             <section class="panel decision-output-panel" aria-live="polite">
-              <div class="section-heading"><div><div class="section-label">Engine output</div><h2>Placement recommendation</h2><p>Selected route, confidence, alternatives and rejection reasons.</p></div></div>
+              <div class="section-heading"><div><div class="section-label">02 / Decision output</div><h2>Placement recommendation</h2><p>See the selected destination, why it qualified, and what the engine ruled out.</p></div></div>
               <div id="output">
-                <div class="output-empty"><span class="output-empty-mark"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.7"><path d="M4 5h16M4 12h10M4 19h7"/><circle cx="18" cy="16" r="3"/></svg></span><strong>Ready to evaluate</strong><p>Configure a workload and run the decision engine to see a traceable recommendation here.</p></div>
+                <div class="output-empty"><span class="output-empty-mark"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.7"><path d="M4 5h16M4 12h10M4 19h7"/><circle cx="18" cy="16" r="3"/></svg></span><strong>Your next placement decision starts here</strong><p>Complete the request and evaluate it. The result will show the chosen route, confidence, alternatives and constraint checks.</p></div>
               </div>
             </section>
           </div>
