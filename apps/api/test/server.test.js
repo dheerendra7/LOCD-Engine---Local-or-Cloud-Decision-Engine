@@ -3412,7 +3412,10 @@ test("two API instances share idempotency responses through the same backend", a
 
 test("status endpoint does not misreport in-memory coordination as shared or durable", async () => {
   const coordination = createInMemoryCoordinationStore();
-  const statusServer = createServer({ coordinationStore: coordination });
+  const statusServer = createServer({
+    coordinationStore: coordination,
+    rateLimitMaxRequests: 5
+  });
 
   await new Promise(resolve => statusServer.listen(0, "127.0.0.1", resolve));
   const url = "http://127.0.0.1:" + statusServer.address().port;
@@ -3434,6 +3437,19 @@ test("status endpoint does not misreport in-memory coordination as shared or dur
   }
 });
 
+test("status endpoint reports disabled rate limiting when no request limit is configured", async () => {
+  const statusServer = createServer();
+  await new Promise(resolve => statusServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + statusServer.address().port;
+  try {
+    const response = await fetch(url + "/v1/status");
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.capabilities.rateLimitMode, "disabled");
+  } finally {
+    await new Promise(resolve => statusServer.close(resolve));
+  }
+});
 test("status endpoint reports shared and durable capabilities from SQLite backends", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "locd-status-capabilities-"));
   const file = path.join(dir, "state.db");
