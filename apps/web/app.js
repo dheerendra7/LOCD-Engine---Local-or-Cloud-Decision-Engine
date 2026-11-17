@@ -1748,12 +1748,24 @@ document.querySelector("#apiKey")?.addEventListener("keydown", event => {
 // Refresh listener is registered above; avoid duplicate refreshes.
 
 function setActiveNavigation(sectionId) {
+  const workspaceSections = [...document.querySelectorAll(".content > .page-section")];
+  const requestedTarget = document.getElementById(sectionId);
+  const requestedPage = requestedTarget?.classList.contains("page-section")
+    ? requestedTarget
+    : requestedTarget?.closest(".page-section");
+  const activePage = requestedPage || workspaceSections.find(section => section.id === sectionId) || workspaceSections[0];
+  if (!activePage) return;
+
+  workspaceSections.forEach(section => {
+    section.hidden = section !== activePage;
+  });
+
   let current = null;
   document.querySelectorAll("[data-nav]").forEach(link => {
-    const active = link.dataset.nav === sectionId;
+    const active = link.dataset.nav === activePage.id;
     link.classList.toggle("active", active);
     if (active) {
-      link.setAttribute("aria-current", "location");
+      link.setAttribute("aria-current", "page");
       current = link;
     } else {
       link.removeAttribute("aria-current");
@@ -1762,17 +1774,23 @@ function setActiveNavigation(sectionId) {
   if (current) setText("breadcrumbCurrent", current.textContent.trim());
 }
 
+function syncWorkspaceFromHash() {
+  const sectionId = decodeURIComponent(window.location.hash.slice(1));
+  setActiveNavigation(sectionId || "decision-lab");
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+}
+
 document.querySelectorAll("[data-nav]").forEach(link => {
-  link.addEventListener("click", () => setActiveNavigation(link.dataset.nav));
+  link.addEventListener("click", event => {
+    event.preventDefault();
+    setActiveNavigation(link.dataset.nav);
+    if (window.location.hash !== "#" + link.dataset.nav) {
+      window.location.hash = link.dataset.nav;
+    }
+  });
 });
-const sectionObserver = typeof IntersectionObserver === "function"
-  ? new IntersectionObserver(entries => {
-      const visible = entries.filter(entry => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-      if (!visible) return;
-      setActiveNavigation(visible.target.id);
-    }, { rootMargin: "-15% 0px -70% 0px", threshold: [0, .1, .3, .5] })
-  : null;
-if (sectionObserver) document.querySelectorAll(".page-section").forEach(section => sectionObserver.observe(section));
+window.addEventListener("hashchange", syncWorkspaceFromHash);
+syncWorkspaceFromHash();
 
 const initialHybridRows = document.querySelector("#hybridStepRows");
 if (initialHybridRows) {
