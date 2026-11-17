@@ -125,7 +125,7 @@ Rate limiting is intentionally local to a process; distributed deployments need 
 
 Live execution also requires the API rate limiter to be enabled. Set `LOCD_RATE_LIMIT_RPM` to a positive value (or supply an enabled custom limiter) before enabling live execution; otherwise `POST /v1/execute` returns HTTP 503 without invoking a provider.
 
-Live execution additionally requires `LOCD_EXECUTION_PLAN_SECRET` with at least 32 bytes. Set `LOCD_EXECUTION_PLAN_TTL_MS` to control the signed-plan lifetime (default 600 seconds, maximum 15 minutes). Use the same secret on every API instance behind the same load balancer. In strict production mode, enabling live execution without this secret fails startup.
+Live execution additionally requires `LOCD_EXECUTION_PLAN_SECRET` with at least 32 bytes. Set `LOCD_EXECUTION_PLAN_TTL_MS` to control the signed-plan lifetime (default 600 seconds, maximum 15 minutes). Use the same secret on every API instance behind the same load balancer. In strict production mode, enabling live execution without this secret or without shared coordination for single-use plan claims fails startup. A process-local coordination store provides only per-process replay protection; use the shared backend for a multi-instance deployment.
 
 The API issues signed authorizations only for valid plans evaluated against the authenticated tenant's registered targets. Request-scoped target arrays are simulation-only. At execution time LOCD verifies the tenant-bound signature and expiry, reloads current targets, and re-runs policy/circuit validation before invoking any adapter. A stale or modified plan is rejected before provider admission.
 
