@@ -73,12 +73,13 @@ test("console operational data is fetched from LOCD API endpoints", async () => 
   const script = await readFile(new URL("app.js", webRoot), "utf8");
   for (const endpoint of [
     "/v1/status", "/v1/metrics", "/v1/targets", "/v1/policies",
-    "/v1/decisions?limit=25", "/v1/calibration", "/v1/outcomes",
+    "/v1/decisions?limit=", "/v1/calibration", "/v1/outcomes",
     "/v1/policies/simulate"
   ]) {
     assert.ok(script.includes(endpoint), "missing API integration: " + endpoint);
   }
   assert.doesNotMatch(script, /localStorage\.(?:setItem|removeItem)\(/);
+  assert.match(script, /decisionActivityLimit = 100/);
 });
 
 
@@ -1121,4 +1122,25 @@ test("API Lab exposes only safe allowlisted operations and a read-only policy si
   assert.match(script, /mutatedState/);
   assert.match(script, /executedProvider/);
   assert.doesNotMatch(script, /fetch\(document\.querySelector\("#apiLabPath"\)/);
+});
+
+
+test("decision activity explorer provides tenant-history filters and metadata-only export", async () => {
+  const html = await readFile(new URL("index.html", webRoot), "utf8");
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  for (const id of [
+    "activitySearch", "activityOutcomeFilter", "activityRouteFilter",
+    "activityWindowFilter", "activityClearFilters", "activityExportCsv",
+    "activitySummary", "activityMatchedCount", "activitySuccessCount",
+    "activityFailureCount", "activityPendingCount"
+  ]) {
+    assert.match(html, new RegExp('id="' + id + '"'), "missing decision explorer control: " + id);
+  }
+  assert.match(script, /decisionActivityLimit = 100/);
+  assert.match(script, /\/v1\/decisions\?limit=" \+ decisionActivityLimit/);
+  assert.match(script, /function filteredDecisionRows\(\)/);
+  assert.match(script, /function csvDecisionCell\(value\)/);
+  assert.match(script, /\^\[\\s\]\*\[=\+\\-@\]/);
+  assert.match(html, /Export filtered CSV/);
+  assert.doesNotMatch(script, /localStorage\.(?:setItem|removeItem)\(/);
 });

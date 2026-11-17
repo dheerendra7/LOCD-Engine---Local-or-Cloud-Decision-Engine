@@ -302,7 +302,7 @@ test("light dashboard serves its real stylesheet and script under the browser CS
   const script = await scriptResponse.text();
   for (const endpoint of [
     "/v1/decide", "/v1/targets", "/v1/policies", "/v1/policies/simulate",
-    "/v1/hybrid-plan", "/v1/execute", "/v1/decisions?limit=25",
+    "/v1/hybrid-plan", "/v1/execute", "/v1/decisions?limit=",
     "/v1/outcomes", "/v1/calibration", "/v1/status", "/v1/metrics"
   ]) {
     assert.ok(script.includes(endpoint), "dashboard is missing API endpoint " + endpoint);
@@ -363,7 +363,7 @@ test("dashboard API workflow connects target management, decision, simulation, f
   try {
     for (const route of [
       "/health", "/ready", "/v1/status", "/v1/metrics", "/v1/targets",
-      "/v1/policies", "/v1/decisions?limit=25", "/v1/calibration"
+      "/v1/policies", "/v1/decisions?limit=100", "/v1/calibration"
     ]) {
       const response = await fetch(url + route);
       assert.equal(response.status, 200, "dashboard read endpoint failed: " + route);
@@ -399,7 +399,7 @@ test("dashboard API workflow connects target management, decision, simulation, f
     assert.ok(decision.decisionId);
     assert.ok([localId, cloudId].includes(decision.targetId));
 
-    const activityResponse = await fetch(url + "/v1/decisions?limit=25");
+    const activityResponse = await fetch(url + "/v1/decisions?limit=100");
     const activity = await activityResponse.json();
     assert.equal(activity.decisions.some(item => item.id === decision.decisionId), true);
 
