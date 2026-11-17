@@ -726,8 +726,8 @@ test("workspace navigation shows one page at a time and maps nested links to the
   const navLinks = [...html.matchAll(/<a\\b[^>]*data-nav="([^"]+)"[^>]*>/g)];
   const pageIds = [...html.matchAll(/<section id="([^"]+)" class="page-section[^"]*">/g)].map(match => match[1]);
   assert.ok(pageIds.length >= 7, "all product workspaces should remain present");
-  assert.equal(navLinks.filter(match => /aria-current="location"/.test(match[0])).length, 0);
-  assert.match(html, /data-nav="decision-lab"[^>]*aria-current="location"/);
+  assert.equal(navLinks.filter(match => /aria-current="page"/.test(match[0])).length, 1);
+  assert.match(html, /data-nav="decision-lab"[^>]*aria-current="page"/);
   assert.match(script, /function setActiveNavigation\\(sectionId\\)/);
   assert.match(script, /function syncWorkspaceFromHash\\(\\)/);
   assert.match(script, /window\\.addEventListener\\("hashchange", syncWorkspaceFromHash\\)/);
@@ -738,7 +738,7 @@ test("workspace navigation shows one page at a time and maps nested links to the
   assert.ok(start >= 0 && end > start);
   const helper = script.slice(start, end);
   const navStates = new Map();
-  const pageStates = new Map(pageIds.map(id => [id, { id, hidden: id !== "decision-lab" }]));
+  const pageStates = new Map(pageIds.map(id => [id, { id, hidden: id !== "decision-lab", classList: { contains(name) { return name === "page-section"; } }]));
   const breadcrumbs = {};
   const links = navLinks.map(match => ({
     dataset: { nav: match[1] },
@@ -1059,7 +1059,7 @@ test("Decision Studio is the primary entry point and reliability is grouped unde
   const telemetryStart = html.indexOf('<section id="telemetry"');
   const systemStart = html.indexOf('<section id="system-settings"');
   assert.ok(decisionStart >= 0 && decisionStart < overviewStart, "Decision Studio should be the first workspace");
-  assert.match(html, /data-nav="decision-lab"[^>]*aria-current="location"/);
+  assert.match(html, /data-nav="decision-lab"[^>]*aria-current="page"/);
   assert.match(html, /<h1>Decision Studio<\/h1>/);
   assert.match(html, /id="decide"/);
   assert.match(html, /id="output"/);
