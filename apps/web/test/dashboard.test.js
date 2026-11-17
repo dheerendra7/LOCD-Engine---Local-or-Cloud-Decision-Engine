@@ -1117,7 +1117,7 @@ test("API Lab exposes only safe allowlisted operations and a read-only policy si
   }
   assert.match(script, /\.\.\.apiHeaders\(\)/);
   assert.match(script, /"x-request-id": requestId/);
-  assert.match(script, /authorization: "\\[redacted — key remains in page memory\\]"/);
+  assert.ok(script.includes('authorization: "[redacted — key remains in page memory]"'));
   assert.match(script, /mutatedState/);
   assert.match(script, /executedProvider/);
   assert.doesNotMatch(script, /fetch\(document\.querySelector\("#apiLabPath"\)/);
