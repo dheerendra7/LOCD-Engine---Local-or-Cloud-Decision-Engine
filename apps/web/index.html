@@ -520,9 +520,11 @@
               <p id="apiLabDescription" class="api-lab-description">Checks whether the LOCD HTTP service is responding.</p>
 
               <div id="apiLabBodyWrap" class="api-lab-body-wrap" hidden>
-                <div class="api-lab-body-heading"><label for="apiLabBody">JSON request body</label><button class="btn btn-quiet" type="button" id="apiLabResetBody">Restore example</button></div>
-                <textarea id="apiLabBody" rows="15" spellcheck="false" aria-describedby="apiLabBodyHelp"></textarea>
-                <span id="apiLabBodyHelp" class="help-text">This example uses request-scoped sample targets. It does not register or persist them.</span>
+                <div class="api-lab-body-heading"><strong>JSON request body</strong><button class="btn btn-quiet" type="button" id="apiLabResetBody">Restore example</button></div>
+                <label class="api-lab-textarea-label">Request payload
+                  <textarea id="apiLabBody" rows="15" spellcheck="false" aria-describedby="apiLabBodyHelp"></textarea>
+                  <span id="apiLabBodyHelp" class="help-text">This example uses request-scoped sample targets. It does not register or persist them.</span>
+                </label>
               </div>
 
               <div class="api-lab-actions">
