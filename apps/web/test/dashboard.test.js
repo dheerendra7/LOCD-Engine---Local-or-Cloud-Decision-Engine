@@ -1034,3 +1034,24 @@ test("dashboard access onboarding never embeds or persists the deployment API ke
   assert.match(script, /activeApiKey = nextApiKey/);
   assert.doesNotMatch(html + script, /LOCD_API_KEY\s*[:=]\s*["'][^"']+/);
 });
+
+
+test("Decision Studio is the primary entry point and reliability is grouped under observability", async () => {
+  const html = await readFile(new URL("index.html", webRoot), "utf8");
+  const decisionStart = html.indexOf('<section id="decision-lab"');
+  const overviewStart = html.indexOf('<section id="overview"');
+  const telemetryStart = html.indexOf('<section id="telemetry"');
+  const systemStart = html.indexOf('<section id="system-settings"');
+  assert.ok(decisionStart >= 0 && decisionStart < overviewStart, "Decision Studio should be the first workspace");
+  assert.match(html, /data-nav="decision-lab"[^>]*aria-current="location"/);
+  assert.match(html, /<h1>Decision Studio<\/h1>/);
+  assert.match(html, /id="decide"/);
+  assert.match(html, /id="output"/);
+  assert.match(html, /id="targetCount"/);
+  assert.ok(telemetryStart >= 0 && systemStart > telemetryStart);
+  const overview = html.slice(overviewStart, html.indexOf('<section id="target-registry"', overviewStart));
+  const observability = html.slice(telemetryStart, systemStart);
+  assert.doesNotMatch(overview, /Circuit-breaker posture|Reliability trends &(?:amp;)? event history/);
+  assert.match(observability, /Circuit-breaker posture/);
+  assert.match(observability, /Reliability trends &(?:amp;)? event history/);
+});
