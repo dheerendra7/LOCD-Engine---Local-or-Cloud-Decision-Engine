@@ -1057,12 +1057,17 @@ export function createServer({
             return;
           }
 
+          const claimNow = Date.now();
+          const claimTtlMs = authorization.expiresAt - claimNow;
+          if (claimTtlMs <= 0) {
+            sendJson(res, 409, { error: "execution_plan_authorization_expired" });
+            return;
+          }
           const claimKey = "locd:execution-plan:consumed:" +
             encodeURIComponent(tenantId) + ":" + authorization.tokenId;
-          const claimTtlMs = Math.max(1, authorization.expiresAt - Date.now());
           const claimed = await executionPlanClaimStore.setIfAbsent(
             claimKey,
-            { tenantId, consumedAt: Date.now() },
+            { tenantId, consumedAt: claimNow },
             { ttlMs: claimTtlMs }
           );
           if (!claimed) {
