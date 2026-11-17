@@ -1918,7 +1918,10 @@ function apiLabSelectEndpoint() {
   const path = document.querySelector("#apiLabPath");
   const scope = document.querySelector("#apiLabScope");
   const description = document.querySelector("#apiLabDescription");
-  if (method) method.textContent = config.method;
+  if (method) {
+    method.textContent = config.method;
+    method.dataset.method = config.method;
+  }
   if (path) path.textContent = config.path;
   if (scope) scope.textContent = config.scope;
   if (description) description.textContent = config.description;
@@ -2009,9 +2012,17 @@ document.querySelector("#apiLabRun")?.addEventListener("click", async event => {
       ? payload || "(empty response)"
       : JSON.stringify(payload, null, 2);
 
-    if (status) status.textContent = response.ok
-      ? "Request completed successfully."
-      : "API returned HTTP " + response.status + ".";
+    if (config.path === "/v1/policies/simulate" && payload && typeof payload === "object") {
+      if (payload.mutatedState === false && payload.executedProvider === false) {
+        if (status) status.textContent = "Read-only verified: no state mutation or provider execution.";
+      } else if (status) {
+        status.textContent = "Response received; read-only verification flags were not both false.";
+      }
+    } else if (status) {
+      status.textContent = response.ok
+        ? "Request completed successfully."
+        : "API returned HTTP " + response.status + ".";
+    }
     if (statusBadge) {
       statusBadge.textContent = response.ok ? "Completed" : "HTTP " + response.status;
       statusBadge.className = response.ok ? "state-badge good" : "state-badge bad";
