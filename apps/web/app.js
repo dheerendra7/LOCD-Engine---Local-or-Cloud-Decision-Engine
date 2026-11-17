@@ -2016,6 +2016,49 @@ function apiLabConfig() {
   return API_LAB_ENDPOINTS[apiLabEndpointSelect?.value] || API_LAB_ENDPOINTS.health;
 }
 
+function apiLabSetInspectorTab(name) {
+  document.querySelectorAll("[data-api-lab-tab]").forEach(button => {
+    const active = button.dataset.apiLabTab === name;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  document.querySelectorAll(".api-lab-tab-pane").forEach(pane => {
+    const active = pane.id === "apiLab" + name[0].toUpperCase() + name.slice(1) + "Pane";
+    pane.hidden = !active;
+    pane.classList.toggle("active", active);
+  });
+}
+
+function apiLabRenderCode() {
+  const config = apiLabConfig();
+  const body = config.method === "POST" ? apiLabBody?.value || "{}" : null;
+  const path = config.path;
+  const curlBody = body == null ? "" : " \\\n  --data '" + body.replace(/'/g, "'\\''") + "'";
+  const nodeBody = body == null ? "" : ",\n  body: JSON.stringify(" + body + ")";
+  const pythonBody = body == null ? "" : ",\n    json=" + body;
+  const examples = [
+    "# cURL\ncurl --request " + config.method + " 'https://YOUR-LOCD-HOST" + path + "' \\\n  --header 'Authorization: Bearer <YOUR_LOCD_API_KEY>' \\\n  --header 'X-Request-ID: <UNIQUE_REQUEST_ID>'" + curlBody,
+    "# Node.js (built-in fetch)\nconst response = await fetch('https://YOUR-LOCD-HOST" + path + "', {\n  method: '" + config.method + "',\n  headers: {\n    Authorization: 'Bearer <YOUR_LOCD_API_KEY>',\n    'X-Request-ID': '<UNIQUE_REQUEST_ID>'\n  }" + nodeBody + "\n});\nconst result = await response.json();\nconsole.log(response.status, result);",
+    "# Python (requests)\nimport requests\n\nresponse = requests.request(\n    '" + config.method + "',\n    'https://YOUR-LOCD-HOST" + path + "',\n    headers={\n        'Authorization': 'Bearer <YOUR_LOCD_API_KEY>',\n        'X-Request-ID': '<UNIQUE_REQUEST_ID>'\n    }" + pythonBody + "\n)\nprint(response.status_code, response.json())"
+  ];
+  const output = document.querySelector("#apiLabCode");
+  if (output) output.textContent = examples.join("\n\n" + "─".repeat(64) + "\n\n");
+}
+
+document.querySelectorAll("[data-api-lab-tab]").forEach(button => {
+  button.addEventListener("click", () => apiLabSetInspectorTab(button.dataset.apiLabTab));
+});
+document.querySelector("#apiLabCopyCode")?.addEventListener("click", async () => {
+  const code = document.querySelector("#apiLabCode")?.textContent || "";
+  const status = document.querySelector("#apiLabStatus");
+  try {
+    await navigator.clipboard.writeText(code);
+    if (status) status.textContent = "Generated examples copied. Replace the host and API-key placeholders before use.";
+  } catch {
+    if (status) status.textContent = "Clipboard access is unavailable. Select and copy the generated code manually.";
+  }
+});
+
 function apiLabUpdateRequestPreview() {
   const config = apiLabConfig();
   const bodyText = config.method === "POST" ? apiLabBody?.value || "" : null;
@@ -2034,6 +2077,7 @@ function apiLabUpdateRequestPreview() {
   };
   const output = document.querySelector("#apiLabRequestPreview");
   if (output) output.textContent = JSON.stringify(preview, null, 2);
+  apiLabRenderCode();
 }
 
 function apiLabSelectEndpoint() {
@@ -2135,6 +2179,12 @@ document.querySelector("#apiLabRun")?.addEventListener("click", async event => {
     if (responseOutput) responseOutput.textContent = typeof payload === "string"
       ? payload || "(empty response)"
       : JSON.stringify(payload, null, 2);
+    const responseHeaders = [];
+    response.headers.forEach((value, name) => responseHeaders.push(name + ": " + value));
+    const headersOutput = document.querySelector("#apiLabHeaders");
+    if (headersOutput) headersOutput.textContent = responseHeaders.length
+      ? responseHeaders.sort((a, b) => a.localeCompare(b)).join("\\n")
+      : "No response headers were exposed by the browser for this response.";
 
     if (config.path === "/v1/policies/simulate" && payload && typeof payload === "object") {
       if (payload.mutatedState === false && payload.executedProvider === false) {
