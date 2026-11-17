@@ -546,7 +546,7 @@ export function createServer({
   executionRegistry = null,
   executionEnabled = process.env.LOCD_EXECUTION_ENABLED === "true",
   executionPlanSecret = process.env.LOCD_EXECUTION_PLAN_SECRET?.trim() || null,
-  executionPlanTtlMs = Number(process.env.LOCD_EXECUTION_PLAN_TTL_MS || 120_000),
+  executionPlanTtlMs = Number(process.env.LOCD_EXECUTION_PLAN_TTL_MS || 600_000),
   authorizer = null,
   probeScheduler = null,
   serviceVersion = "0.1.0",
@@ -623,6 +623,7 @@ export function createServer({
         ttlMs: executionPlanTtlMs
       })
     : null;
+  const executionPlanClaimStore = coordinationStore || createInMemoryCoordinationStore();
 
   async function resolvePolicyForTenant(tenantId, input) {
     const candidate = input && typeof input === "object" ? input : {};
@@ -1048,6 +1049,19 @@ export function createServer({
               reasons: currentPlan.reasons,
               rejected: currentPlan.rejected
             });
+            return;
+          }
+
+          const claimKey = "locd:execution-plan:consumed:" +
+            encodeURIComponent(tenantId) + ":" + authorization.tokenId;
+          const claimTtlMs = Math.max(1, authorization.expiresAt - Date.now());
+          const claimed = await executionPlanClaimStore.setIfAbsent(
+            claimKey,
+            { tenantId, consumedAt: Date.now() },
+            { ttlMs: claimTtlMs }
+          );
+          if (!claimed) {
+            sendJson(res, 409, { error: "execution_plan_authorization_replayed" });
             return;
           }
 
