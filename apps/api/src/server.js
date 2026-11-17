@@ -1697,7 +1697,9 @@ export function createServer({
             coordinationBackend: coordinationBackendName,
             telemetryBackend: telemetryBackendName,
             policyBackend: policyBackendName,
-            rateLimitMode: backendModeFor(effectiveRateLimiter),
+            rateLimitMode: effectiveRateLimiter.enabled === false
+              ? "disabled"
+              : backendModeFor(effectiveRateLimiter),
             idempotencyMode: backendModeFor(effectiveIdempotencyStore)
           },
           circuitBreakers: {
