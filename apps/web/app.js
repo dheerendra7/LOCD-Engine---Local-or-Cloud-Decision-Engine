@@ -1777,6 +1777,7 @@ function setActiveNavigation(sectionId) {
 function syncWorkspaceFromHash() {
   const sectionId = decodeURIComponent(window.location.hash.slice(1));
   setActiveNavigation(sectionId || "decision-lab");
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
 }
 
 document.querySelectorAll("[data-nav]").forEach(link => {
