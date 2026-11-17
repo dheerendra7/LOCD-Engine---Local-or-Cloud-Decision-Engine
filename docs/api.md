@@ -376,6 +376,10 @@ Execution receipts remain metadata-only. Caller-scoped results are not written t
 
 For live execution, each registered target must also pass circuit admission immediately before its provider adapter is called. Targets with open circuits or an active half-open probe return failed step receipts with `circuit_breaker_open` or `circuit_breaker_half_open_busy`; no provider call is made for those steps.
 
+The executor passes an `AbortSignal` to every adapter's `execute({ step, payload, mode, signal })` call. The per-step `timeoutMs` deadline aborts that signal and returns an `execution_timeout` receipt. If the HTTP client disconnects before the response completes, the API aborts the active step with `execution_aborted` and stops later steps. The built-in OpenAI-compatible, Anthropic and Ollama adapters forward this signal to their HTTP request while retaining their own provider timeout.
+
+Cancellation is cooperative: custom adapters must pass the signal to their I/O operation and stop local work when it aborts. LOCD cannot roll back a remote provider operation that has already been accepted or guarantee that a remote service stopped processing. A timed-out or disconnected live execution still consumes its single-use plan authorization. With an Idempotency-Key, the terminal execution result is retained for exact retries; without one, a new execution requires a newly issued plan authorization. Caller cancellation is not counted as a provider health failure, and an owned half-open breaker lease is released.
+
 ## Scoped authorization
 
 The API accepts either the legacy LOCD_API_KEY or scoped credentials configured through LOCD_API_KEYS_JSON.

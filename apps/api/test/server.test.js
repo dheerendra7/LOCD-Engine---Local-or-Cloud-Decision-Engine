@@ -2771,6 +2771,98 @@ test("live execution rejects a global adapter registry for tenant-scoped targets
   }
 });
 
+test("client disconnect aborts the live provider request and stops later steps", async () => {
+  let startedResolve;
+  let abortedResolve;
+  const started = new Promise(resolve => { startedResolve = resolve; });
+  const aborted = new Promise(resolve => { abortedResolve = resolve; });
+  const calls = [];
+  const targetRegistry = createTargetRegistry([
+    { id: "disconnect-local", mode: "local", available: true, health: 1, capacity: 0.1, privacy: 1 },
+    { id: "disconnect-private", mode: "private", available: true, health: 1, capacity: 0.1, privacy: 1 }
+  ]);
+  const executionRegistry = createExecutionRegistry([
+    {
+      id: "disconnect-local-adapter",
+      targetId: "disconnect-local",
+      async execute({ signal }) {
+        calls.push("local");
+        startedResolve();
+        return new Promise((_, reject) => {
+          signal.addEventListener("abort", () => {
+            abortedResolve();
+            reject(new Error("adapter_cancelled"));
+          }, { once: true });
+        });
+      }
+    },
+    {
+      id: "disconnect-private-adapter",
+      targetId: "disconnect-private",
+      async execute() {
+        calls.push("private");
+        return { ok: true };
+      }
+    }
+  ]);
+  const executionServer = createServer({
+    targetRegistry,
+    executionRegistry,
+    executionEnabled: true,
+    executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
+    apiKey: "disconnect-secret",
+    rateLimitMaxRequests: 20
+  });
+  await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
+  const url = new URL("http://127.0.0.1:" + executionServer.address().port);
+  const headers = {
+    authorization: "Bearer disconnect-secret",
+    "content-type": "application/json"
+  };
+
+  try {
+    const grant = await getAuthorizedHybridPlan(url.origin, headers, {
+      workload: { type: "client-disconnect-cancellation", sensitivity: "low" },
+      steps: [
+        { id: "local-step", targetId: "disconnect-local" },
+        { id: "private-step", targetId: "disconnect-private" }
+      ]
+    });
+
+    const request = http.request({
+      hostname: url.hostname,
+      port: Number(url.port),
+      path: "/v1/execute",
+      method: "POST",
+      headers
+    }, response => response.resume());
+    request.on("error", () => {});
+    request.end(JSON.stringify({
+      mode: "live",
+      plan: grant.plan,
+      executionAuthorization: grant.executionAuthorization.token
+    }));
+
+    await started;
+    request.destroy();
+    let abortTimer;
+    try {
+      await Promise.race([
+        aborted,
+        new Promise((_, reject) => {
+          abortTimer = setTimeout(() => reject(new Error("provider signal was not aborted")), 1000);
+        })
+      ]);
+    } finally {
+      clearTimeout(abortTimer);
+    }
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(calls, ["local"]);
+  } finally {
+    await new Promise(resolve => executionServer.close(resolve));
+  }
+});
+
 test("live execution revalidates the tenant custom policy after planning", async () => {
   let providerCalls = 0;
   const policyStore = createPolicyStore();

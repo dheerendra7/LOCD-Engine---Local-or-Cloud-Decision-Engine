@@ -1114,8 +1114,21 @@ export function createServer({
               await createConfiguredExecutionRegistry({ targetRegistry: requestRegistry });
         }
 
-        const responseBody = await executePlan(executablePlan, {
+        const executionAbortController = new AbortController();
+        const abortExecutionOnDisconnect = () => {
+          if (!res.writableEnded && !executionAbortController.signal.aborted) {
+            executionAbortController.abort();
+          }
+        };
+        if (req.aborted || res.destroyed) abortExecutionOnDisconnect();
+        req.once("aborted", abortExecutionOnDisconnect);
+        res.once("close", abortExecutionOnDisconnect);
+
+        let responseBody;
+        try {
+          responseBody = await executePlan(executablePlan, {
           registry,
+          signal: executionAbortController.signal,
           mode,
           timeoutMs: body.timeoutMs,
           failFast: body.failFast !== false,
@@ -1131,12 +1144,22 @@ export function createServer({
               }
             : null,
           onStepResult: mode === "live"
-            ? async ({ step, status, executionContext }) => {
+            ? async ({ step, status, executionContext, cancelled }) => {
                 const breakerOptions = {
                   probeToken: executionContext?.probeToken ?? null,
                   source: "execution"
                 };
                 try {
+                  if (cancelled) {
+                    if (breakerOptions.probeToken && typeof effectiveCircuitBreaker.release === "function") {
+                      await effectiveCircuitBreaker.release(
+                        tenantId,
+                        step.targetId,
+                        breakerOptions
+                      );
+                    }
+                    return;
+                  }
                   if (status === "completed") {
                     await effectiveCircuitBreaker.recordSuccess(
                       tenantId,
@@ -1160,10 +1183,14 @@ export function createServer({
                 }
               }
             : null
-        });
+          });
+        } finally {
+          req.off("aborted", abortExecutionOnDisconnect);
+          res.off("close", abortExecutionOnDisconnect);
+        }
 
         await rememberResponse(body, 200, responseBody);
-        sendJson(res, 200, responseBody);
+        if (!res.destroyed) sendJson(res, 200, responseBody);
         return;
       }
 
