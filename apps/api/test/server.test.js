@@ -25,6 +25,22 @@ import path from "node:path";
 let server;
 let baseUrl;
 
+const TEST_EXECUTION_PLAN_SECRET = "api-test-execution-plan-secret-with-at-least-32-bytes";
+
+async function getAuthorizedHybridPlan(url, headers, request) {
+  const response = await fetch(url + "/v1/hybrid-plan", {
+    method: "POST",
+    headers: { ...headers, "content-type": "application/json" },
+    body: JSON.stringify(request)
+  });
+  const body = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(body));
+  assert.equal(body.valid, true, JSON.stringify(body.rejected));
+  assert.ok(body.executionAuthorization?.token, "registered-target plan should carry a signed authorization");
+  const { executionAuthorization, ...plan } = body;
+  return { plan, executionAuthorization };
+}
+
 test.before(async () => {
   server = createServer();
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
