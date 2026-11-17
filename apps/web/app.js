@@ -1,4 +1,6 @@
 let activeApiKey = "";
+let recentDecisionRows = [];
+const decisionActivityLimit = 100;
 let apiAccessRevision = 0;
 let policyHistoryRequestRevision = 0;
 let policyCatalogRequestRevision = 0;
@@ -31,6 +33,19 @@ function resetTenantScopedView() {
   const policyHistory = document.querySelector("#policyHistory");
   if (policyHistory) policyHistory.innerHTML = "";
 
+  recentDecisionRows = [];
+  for (const id of ["activitySearch", "activityOutcomeFilter", "activityRouteFilter"]) {
+    const field = document.querySelector("#" + id);
+    if (field) field.value = "";
+  }
+  const activityWindow = document.querySelector("#activityWindowFilter");
+  if (activityWindow) activityWindow.value = "all";
+  const activityExport = document.querySelector("#activityExportCsv");
+  if (activityExport) activityExport.disabled = true;
+  for (const id of ["activityMatchedCount", "activitySuccessCount", "activityFailureCount", "activityPendingCount"]) {
+    setText(id, "—");
+  }
+  setText("activitySummary", "Waiting for records from the current API access…");
   setText("activityStatus", "Loading decision history…");
   const activityBody = document.querySelector("#activityTableBody");
   if (activityBody) activityBody.innerHTML = '<tr><td colspan="7" class="table-empty">Loading decision history…</td></tr>';
@@ -830,48 +845,143 @@ async function refreshMetrics() {
   }
 }
 
+function filteredDecisionRows() {
+  const search = (document.querySelector("#activitySearch")?.value || "").trim().toLocaleLowerCase();
+  const outcome = document.querySelector("#activityOutcomeFilter")?.value || "";
+  const route = document.querySelector("#activityRouteFilter")?.value || "";
+  const windowValue = document.querySelector("#activityWindowFilter")?.value || "all";
+  const hours = windowValue === "24h" ? 24 : windowValue === "7d" ? 24 * 7 : null;
+  const cutoff = hours == null ? null : Date.now() - hours * 60 * 60 * 1000;
+
+  return recentDecisionRows.filter(item => {
+    const itemOutcome = item.outcome || "pending";
+    if (outcome && itemOutcome !== outcome) return false;
+    if (route && String(item.route || "none") !== route) return false;
+    if (cutoff != null) {
+      const timestamp = Date.parse(item.timestamp);
+      if (!Number.isFinite(timestamp) || timestamp < cutoff) return false;
+    }
+    if (search) {
+      const haystack = [item.id, item.workloadType, item.route, item.targetId]
+        .filter(value => value != null)
+        .join(" ").toLocaleLowerCase();
+      if (!haystack.includes(search)) return false;
+    }
+    return true;
+  });
+}
+
+function renderActivity() {
+  const body = document.querySelector("#activityTableBody");
+  if (!body) return;
+  const status = document.querySelector("#activityStatus");
+  const rows = filteredDecisionRows();
+  const counts = {
+    success: rows.filter(item => item.outcome === "success").length,
+    failure: rows.filter(item => item.outcome === "failure").length,
+    pending: rows.filter(item => !item.outcome || item.outcome === "pending").length
+  };
+
+  setText("activityMatchedCount", rows.length);
+  setText("activitySuccessCount", counts.success);
+  setText("activityFailureCount", counts.failure);
+  setText("activityPendingCount", counts.pending);
+  setText("activitySummary",
+    "Showing " + rows.length + " of " + recentDecisionRows.length +
+    " loaded decisions · latest " + decisionActivityLimit + " returned by the current tenant API key");
+  if (status) status.textContent = recentDecisionRows.length +
+    " recent decision record" + (recentDecisionRows.length === 1 ? "" : "s");
+  const exportButton = document.querySelector("#activityExportCsv");
+  if (exportButton) exportButton.disabled = rows.length === 0;
+
+  if (!recentDecisionRows.length) {
+    body.innerHTML = '<tr><td colspan="7" class="table-empty">No decision activity has been recorded yet. Run a workload through the Decision Studio.</td></tr>';
+    return;
+  }
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="7" class="table-empty">No decisions match these filters. Clear one or more filters to widen the result set.</td></tr>';
+    return;
+  }
+
+  body.innerHTML = rows.map(item => {
+    const outcome = item.outcome || "pending";
+    const style = outcome === "success" ? "good" : outcome === "failure" ? "bad" : "";
+    return "<tr><td>" + escapeHtml(formatDate(item.timestamp)) + "</td><td><strong>" +
+      escapeHtml(item.workloadType || "Unknown") + "</strong><div class=\"status\">" + escapeHtml(item.id) + "</div></td><td>" +
+      escapeHtml(routeLabel(item.route)) + "</td><td>" + escapeHtml(item.targetId || "None") + "</td><td>" +
+      escapeHtml(item.estimatedLatencyMs == null ? "—" : formatNumber(item.estimatedLatencyMs) + " ms") +
+      "<div class=\"status\">" + escapeHtml(formatCost(item.estimatedCostUsd)) + "</div></td><td>" +
+      stateBadge(routeLabel(outcome), style) + "</td><td><button type=\"button\" class=\"btn btn-secondary btn-small\" data-select-decision=\"" +
+      escapeHtml(item.id) + "\">Report outcome</button></td></tr>";
+  }).join("");
+  body.querySelectorAll("[data-select-decision]").forEach(button => {
+    button.addEventListener("click", () => {
+      const input = document.querySelector("#outcomeDecisionId");
+      if (input) {
+        input.value = button.dataset.selectDecision;
+        input.focus();
+      }
+      document.querySelector("#outcomeForm")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  });
+}
+
+function csvDecisionCell(value) {
+  let textValue = value == null ? "" : String(value);
+  if (/^[\s]*[=+\-@]/.test(textValue)) textValue = "'" + textValue;
+  return '"' + textValue.replace(/"/g, '""') + '"';
+}
+
+function exportFilteredDecisionCsv() {
+  const rows = filteredDecisionRows();
+  if (!rows.length) return;
+  const columns = [
+    ["Recorded at", item => item.timestamp],
+    ["Decision ID", item => item.id],
+    ["Workload type", item => item.workloadType],
+    ["Route", item => item.route],
+    ["Target ID", item => item.targetId],
+    ["Estimated latency (ms)", item => item.estimatedLatencyMs],
+    ["Estimated cost (USD)", item => item.estimatedCostUsd],
+    ["Confidence", item => item.confidence],
+    ["Outcome", item => item.outcome || "pending"],
+    ["Actual latency (ms)", item => item.actualLatencyMs],
+    ["Actual cost (USD)", item => item.actualCostUsd]
+  ];
+  const csv = [columns.map(([heading]) => csvDecisionCell(heading)).join(",")]
+    .concat(rows.map(item => columns.map(([, value]) => csvDecisionCell(value(item))).join(",")))
+    .join("\r\n");
+  const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "locd-decisions-" + new Date().toISOString().slice(0, 10) + ".csv";
+  link.hidden = true;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 async function refreshActivity() {
   const accessRevision = apiAccessRevision;
   const body = document.querySelector("#activityTableBody");
   if (!body) return;
   const status = document.querySelector("#activityStatus");
+  if (status) status.textContent = "Loading recent tenant decisions…";
   try {
-    const data = await portalFetch("/v1/decisions?limit=25");
+    const data = await portalFetch("/v1/decisions?limit=" + decisionActivityLimit);
     if (accessRevision !== apiAccessRevision) return;
-    const rows = Array.isArray(data.decisions) ? data.decisions : [];
-    if (status) status.textContent = rows.length + " recent decision record" + (rows.length === 1 ? "" : "s");
-    if (!rows.length) {
-      body.innerHTML = '<tr><td colspan="7" class="table-empty">No decision activity has been recorded yet. Run a workload through the Decision lab.</td></tr>';
-      return;
-    }
-    body.innerHTML = rows.map(item => {
-      const outcome = item.outcome || "pending";
-      const style = outcome === "success" ? "good" : outcome === "failure" ? "bad" : "";
-      return "<tr><td>" + escapeHtml(formatDate(item.timestamp)) + "</td><td><strong>" +
-        escapeHtml(item.workloadType || "Unknown") + "</strong><div class=\"status\">" + escapeHtml(item.id) + "</div></td><td>" +
-        escapeHtml(routeLabel(item.route)) + "</td><td>" + escapeHtml(item.targetId || "None") + "</td><td>" +
-        escapeHtml(item.estimatedLatencyMs == null ? "—" : formatNumber(item.estimatedLatencyMs) + " ms") +
-        "<div class=\"status\">" + escapeHtml(formatCost(item.estimatedCostUsd)) + "</div></td><td>" +
-        stateBadge(routeLabel(outcome), style) + "</td><td><button type=\"button\" class=\"btn btn-secondary btn-small\" data-select-decision=\"" +
-        escapeHtml(item.id) + "\">Report outcome</button></td></tr>";
-    }).join("");
-    body.querySelectorAll("[data-select-decision]").forEach(button => {
-      button.addEventListener("click", () => {
-        const input = document.querySelector("#outcomeDecisionId");
-        if (input) {
-          input.value = button.dataset.selectDecision;
-          input.focus();
-        }
-        document.querySelector("#outcomeForm")?.scrollIntoView({ behavior: "smooth", block: "center" });
-      });
-    });
+    recentDecisionRows = Array.isArray(data.decisions) ? data.decisions : [];
+    renderActivity();
   } catch (error) {
     if (accessRevision !== apiAccessRevision) return;
+    recentDecisionRows = [];
+    renderActivity();
     if (status) status.textContent = niceError(error);
     body.innerHTML = '<tr><td colspan="7" class="table-empty">' + escapeHtml(niceError(error)) + "</td></tr>";
   }
 }
-
 async function refreshCalibration() {
   const accessRevision = apiAccessRevision;
   const cards = document.querySelector("#calibrationCards");
@@ -1603,6 +1713,20 @@ function renderHybridResult(result) {
 }
 
 document.querySelector("#reliabilityWindow")?.addEventListener("change", refreshReliability);
+document.querySelector("#activitySearch")?.addEventListener("input", renderActivity);
+for (const id of ["activityOutcomeFilter", "activityRouteFilter", "activityWindowFilter"]) {
+  document.querySelector("#" + id)?.addEventListener("change", renderActivity);
+}
+document.querySelector("#activityClearFilters")?.addEventListener("click", () => {
+  for (const id of ["activitySearch", "activityOutcomeFilter", "activityRouteFilter"]) {
+    const field = document.querySelector("#" + id);
+    if (field) field.value = "";
+  }
+  const windowFilter = document.querySelector("#activityWindowFilter");
+  if (windowFilter) windowFilter.value = "all";
+  renderActivity();
+});
+document.querySelector("#activityExportCsv")?.addEventListener("click", exportFilteredDecisionCsv);
 
 document.querySelector("#addHybridStep")?.addEventListener("click", () => addHybridStep());
 
