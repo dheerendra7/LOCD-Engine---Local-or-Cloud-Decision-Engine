@@ -1,21 +1,30 @@
 # Deployment
 
-## Render
+## Render production profile
 
-The repository includes render.yaml for a simple Node web-service deployment.
+The checked-in `render.yaml` describes one paid Node web service named `locd-engine`:
 
-Current configuration:
+- Build: `npm ci`; start: `npm start`; runtime: Node 24.21.0 via `.node-version`.
+- Health check: `/ready`; the process listens on Render's `PORT` and binds to `0.0.0.0`.
+- Compute: Starter plan, one instance.
+- Persistent disk: 1 GB mounted at `/data`.
+- State: SQLite at `/data/locd.db`; registered targets at `/data/targets.json`.
+- Security defaults: strict production safety enabled, API rate limiting enabled, generated `LOCD_API_KEY` and `LOCD_EXECUTION_PLAN_SECRET`.
+- Live provider execution remains disabled (`LOCD_EXECUTION_ENABLED=false`) until operators have configured and verified server-side provider adapters and credentials.
 
-- runtime: Node
-- branch: main
-- build: npm install
-- start: npm start
-- health check: /health
-- compute plan: free
+### Frontend + API topology
 
-Render currently documents free web services as suitable for testing, hobby projects and previews, with limitations; they should not be treated as production infrastructure. Free web services also spin down after 15 minutes of inactivity.
+This is a single-origin full-stack deployment. The API process serves `apps/web/index.html`, `apps/web/styles.css` and `apps/web/app.js` at `/`, `/styles.css` and `/app.js`; the same process handles the dashboard's `/v1/*` requests. No separate frontend host, public API URL or permissive CORS configuration is required.
 
-Source: https://render.com/docs/free
+After the first Blueprint deploy, retrieve the generated `LOCD_API_KEY` from the Render service's Environment page and paste it into **System & access** in the dashboard. The browser keeps the key in page memory only; do not place it in source code, a checked-in config file or a public frontend variable. Keep `LOCD_EXECUTION_PLAN_SECRET` server-side.
+
+### Persistence and scaling boundary
+
+The persistent disk protects the SQLite database and target registry across restarts and deploys. The SQLite implementation is a single-host state backend: keep this service at one instance. Do not increase `numInstances` or attach multiple API instances to this database. Before horizontal scaling or high availability, move coordination, telemetry, policy and target state to managed shared services and validate the migration/backup/restore path.
+
+A persistent disk disables Render's zero-downtime deploy sequence. Schedule deployments accordingly and maintain verified SQLite backups. Render documents persistent disks as a paid-service feature and describes the zero-downtime limitation in its deployment documentation: https://render.com/docs/disks and https://render.com/docs/deploys.
+
+The Free plan is suitable for previews and evaluation only: it spins down after inactivity and does not provide the persistent-disk production profile above. See https://render.com/docs/free.
 
 ## CI runner reproducibility
 
@@ -75,24 +84,19 @@ Set `LOCD_PRODUCTION_STRICT=true` for hosted production deployments that should 
 
 Strict mode requires API authentication, an enabled rate limiter, durable telemetry, and durable policy state. Local development remains unchanged with the default `false`.
 
-## Production checklist
+## Remaining production operations
 
-Before production use, add:
+The Render profile supplies the single-instance baseline: API authentication, an enabled rate limiter, durable SQLite telemetry/policy/coordination state, and a persistent target registry. These are not a substitute for operating the service safely.
 
-- authentication and authorization
-- secret management
-- durable database-backed telemetry
-- managed/shared policy storage with backup and migration controls (the built-in State Service now provides a reference shared policy store)
-- persistent target registry (LOCD_TARGETS_FILE; use durable storage for hosted production)
-- rate limiting
-- structured logs and traces with request-correlated internal error logging
-- provider credential isolation
-- backups and migration strategy
-- uptime/error monitoring
-- SLOs for the LOCD control plane
-- generic 500 responses with request-correlated server-side diagnostics
+Before exposing it to real workloads:
 
-The free deployment is a useful demo and evaluation environment, not a production SLA.
+- Configure a custom domain and verify HTTPS, DNS and rollback behavior.
+- Set up uptime, error-rate, latency, disk-capacity and backup-failure alerts.
+- Schedule SQLite backups and run a restore drill against a separate environment.
+- Add only the provider adapters and credentials that the deployment actually needs; keep credentials in Render secrets, not in provider JSON or browser code.
+- Load-test the API and dashboard with the intended workload and request volume.
+- Keep live execution disabled until provider configuration, authorization scopes, target isolation, idempotency and cancellation behavior have been verified in staging.
+- Do not claim multi-instance availability, a 30-day SLO or a permanent compliance audit trail from the current single-host SQLite backend and bounded reliability history.
 
 ## Persistent target registry
 
@@ -102,7 +106,7 @@ Set:
 
 The server restores targets from this JSON file at startup and writes the file after target registration/removal.
 
-The file is an operator-controlled configuration/state artifact. On managed platforms with ephemeral filesystems, attach persistent storage or use a database-backed registry before depending on restart durability.
+The file is an operator-controlled configuration/state artifact. On managed platforms with ephemeral filesystems, attach persistent storage or use a database-backed registry before depending on restart durability. The Render production profile mounts this file on its `/data` persistent disk.
 
 ## HTTP resource guards
 
