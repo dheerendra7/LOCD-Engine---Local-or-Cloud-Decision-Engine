@@ -25,6 +25,7 @@ import {
   createExecutionRegistry,
   executePlan
 } from "../../../packages/execution/src/index.js";
+import { createExecutionPlanAuthorizer } from "../../../packages/execution/src/index.js";
 import { loadProvidersFromFile } from "../../../packages/providers/src/index.js";
 import { loadScopedAuthFromEnv } from "../../../packages/auth/src/index.js";
 import { createSQLiteStateStores } from "../../../packages/sqlite/src/index.js";
@@ -60,7 +61,9 @@ function validateProductionSafety({
   authEnabled,
   rateLimitEnabled,
   decisionStore,
-  policyStore
+  policyStore,
+  executionEnabled = false,
+  executionPlanAuthorizationEnabled = false
 } = {}) {
   if (!strict) return;
 
@@ -72,6 +75,9 @@ function validateProductionSafety({
   }
   if (policyStore?.capabilities?.durable !== true) {
     failures.push("policy store is not durable");
+  }
+  if (executionEnabled && !executionPlanAuthorizationEnabled) {
+    failures.push("live execution plan authorization is not configured");
   }
 
   if (failures.length) {
@@ -539,6 +545,8 @@ export function createServer({
   }),
   executionRegistry = null,
   executionEnabled = process.env.LOCD_EXECUTION_ENABLED === "true",
+  executionPlanSecret = process.env.LOCD_EXECUTION_PLAN_SECRET?.trim() || null,
+  executionPlanTtlMs = Number(process.env.LOCD_EXECUTION_PLAN_TTL_MS || 120_000),
   authorizer = null,
   probeScheduler = null,
   serviceVersion = "0.1.0",
@@ -608,6 +616,31 @@ export function createServer({
   const auth = authorizer || loadScopedAuthFromEnv({
     legacyApiKey: apiKey
   });
+
+  const executionPlanAuthorizer = executionPlanSecret
+    ? createExecutionPlanAuthorizer({
+        secret: executionPlanSecret,
+        ttlMs: executionPlanTtlMs
+      })
+    : null;
+
+  async function resolvePolicyForTenant(tenantId, input) {
+    const candidate = input && typeof input === "object" ? input : {};
+    if (!candidate.profile) return candidate;
+
+    const custom = await policyStore.get(tenantId, candidate.profile);
+    if (custom) {
+      return {
+        ...custom.policy,
+        ...candidate,
+        profile: custom.baseProfile
+      };
+    }
+
+    const builtIn = listPolicyProfiles().some(profile => profile.id === candidate.profile);
+    if (!builtIn) throw new Error("unknown_policy_profile");
+    return candidate;
+  }
 
   const effectiveIdempotencyStore = idempotencyStore ||
     (coordinationStore
@@ -730,7 +763,9 @@ export function createServer({
     authEnabled: auth.enabled,
     rateLimitEnabled: effectiveRateLimiter.enabled,
     decisionStore,
-    policyStore
+    policyStore,
+    executionEnabled,
+    executionPlanAuthorizationEnabled: Boolean(executionPlanAuthorizer)
   });
 
   const server = http.createServer(async (req, res) => {
@@ -960,6 +995,7 @@ export function createServer({
           return;
         }
 
+        let executablePlan = body.plan;
         if (mode === "live") {
           if (!executionEnabled) {
             sendJson(res, 403, { error: "live_execution_disabled" });
@@ -973,12 +1009,66 @@ export function createServer({
             sendJson(res, 503, { error: "live_execution_requires_rate_limit" });
             return;
           }
+          if (!executionPlanAuthorizer) {
+            sendJson(res, 503, { error: "execution_plan_signing_unavailable" });
+            return;
+          }
+
+          const authorization = executionPlanAuthorizer.verify({
+            token: body.executionAuthorization,
+            tenantId,
+            plan: body.plan
+          });
+          if (!authorization.authorized) {
+            const status = authorization.error === "execution_plan_tenant_mismatch" ? 403 : 409;
+            sendJson(res, status, { error: authorization.error });
+            return;
+          }
+
+          // Re-evaluate the signed plan against the current tenant registry and
+          // current breaker state. Request-scoped simulation targets can never
+          // authorize a live provider call.
+          const currentTargets = await effectiveCircuitBreaker.annotateTargets(
+            await requestRegistry.list(),
+            tenantId
+          );
+          if (!currentTargets.length) {
+            sendJson(res, 409, { error: "execution_plan_stale" });
+            return;
+          }
+
+          const currentPlan = planHybridExecution({
+            ...authorization.request,
+            policy: await resolvePolicyForTenant(tenantId, authorization.request.policy),
+            targets: currentTargets
+          });
+          if (!currentPlan.valid) {
+            sendJson(res, 409, {
+              error: "execution_plan_stale",
+              reasons: currentPlan.reasons,
+              rejected: currentPlan.rejected
+            });
+            return;
+          }
+
+          const payloadsByStep = new Map(
+            body.plan.steps.map(step => [String(step.id), step])
+          );
+          executablePlan = {
+            ...currentPlan,
+            steps: currentPlan.steps.map(step => {
+              const supplied = payloadsByStep.get(String(step.id));
+              return supplied && Object.hasOwn(supplied, "payload")
+                ? { ...step, payload: supplied.payload }
+                : step;
+            })
+          };
         }
 
         const registry = executionRegistry ||
           await createConfiguredExecutionRegistry({ targetRegistry: requestRegistry });
 
-        const responseBody = await executePlan(body.plan, {
+        const responseBody = await executePlan(executablePlan, {
           registry,
           mode,
           timeoutMs: body.timeoutMs,
@@ -1045,14 +1135,31 @@ export function createServer({
               await requestRegistry.list(),
               tenantId
             );
-        const request = { ...body, targets: registeredTargets };
-
-        if (!request.targets.length) {
+        if (!registeredTargets.length) {
           sendJson(res, 503, { error: "no_registered_targets" });
           return;
         }
 
+        const policy = await resolvePolicyForTenant(tenantId, body.policy || {});
+        const request = { ...body, policy, targets: registeredTargets };
         const responseBody = planHybridExecution(request);
+
+        // Only plans evaluated against the server's registered tenant targets
+        // can receive a live-execution authorization. Request-scoped targets
+        // remain useful for simulations, but never cross the live boundary.
+        if (!hasRequestTargets && responseBody.valid && executionPlanAuthorizer) {
+          responseBody.executionAuthorization = executionPlanAuthorizer.issue({
+            tenantId,
+            plan: responseBody,
+            request: {
+              workload: body.workload,
+              constraints: body.constraints || {},
+              policy: body.policy || {},
+              steps: body.steps
+            }
+          });
+        }
+
         await rememberResponse(body, 200, responseBody);
         sendJson(res, 200, responseBody);
         return;
@@ -1681,6 +1788,8 @@ export function createServer({
           }),
           capabilities: {
             executionEnabled: Boolean(executionEnabled),
+            executionPlanAuthorizationEnabled: Boolean(executionPlanAuthorizer),
+            liveExecutionRequiresSignedPlan: true,
             persistentTargets: Boolean(targetFile),
             persistentTelemetry: decisionStore?.capabilities?.durable === true,
             automaticProbing: Boolean(probeScheduler?.isRunning?.()),
