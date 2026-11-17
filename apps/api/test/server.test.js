@@ -3554,7 +3554,10 @@ test("readiness endpoint reports public service readiness", async () => {
 });
 
 test("status endpoint exposes explicit backend capability metadata", async () => {
-  const server = createServer({ serviceVersion: "contract-test" });
+  const server = createServer({
+    serviceVersion: "contract-test",
+    deploymentProfile: "free-preview"
+  });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const url = "http://127.0.0.1:" + server.address().port;
 
@@ -3563,6 +3566,7 @@ test("status endpoint exposes explicit backend capability metadata", async () =>
     assert.equal(response.status, 200);
     const body = await response.json();
 
+    assert.equal(body.deploymentProfile, "free-preview");
     assert.equal(body.stateBackend.kind, "process-local");
     assert.equal(body.stateBackend.telemetry.durable, false);
     assert.equal(body.stateBackend.telemetry.tenantScoped, true);
