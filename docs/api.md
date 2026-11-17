@@ -362,7 +362,7 @@ Executes a planner-authorized execution plan against server-registered adapters.
 
 A caller-provided `plan.valid: true` is not proof of validation. Live execution requires an HMAC authorization issued by `POST /v1/hybrid-plan` for a valid plan built from the authenticated tenant's registered targets. Request-scoped targets remain simulation-only and never receive a live-execution authorization.
 
-The authorization binds the plan structure and tenant, expires after `LOCD_EXECUTION_PLAN_TTL_MS` (default 120 seconds; maximum 15 minutes), and excludes only each step's runtime `payload` field so payloads can be supplied at execution time. Any change to routing, target identity, sensitivity, or other signed plan fields invalidates the authorization.
+The authorization binds the plan structure and tenant, expires after `LOCD_EXECUTION_PLAN_TTL_MS` (default 600 seconds; maximum 15 minutes), and excludes only each step's runtime `payload` field so payloads can be supplied at execution time. Any change to routing, target identity, sensitivity, or other signed plan fields invalidates the authorization.
 
 Before a provider is invoked, LOCD verifies the signature and tenant, reloads the tenant's registered targets, re-evaluates the plan against current policy and circuit-breaker state, and rejects stale or newly ineligible plans with HTTP 409. A target removed, unavailable, policy-rejected, or circuit-open since planning cannot be executed using an old authorization.
 
