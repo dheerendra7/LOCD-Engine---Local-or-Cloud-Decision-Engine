@@ -49,6 +49,7 @@ test("signed execution plans verify for the issuing tenant", () => {
   });
   assert.equal(verified.authorized, true);
   assert.equal(verified.expiresAt, 6_000);
+  assert.equal(typeof verified.tokenId, "string");
   assert.deepEqual(verified.request, validRequest());
 });
 
