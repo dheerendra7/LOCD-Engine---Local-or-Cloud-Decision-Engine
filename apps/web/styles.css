@@ -767,7 +767,7 @@ input:focus, select:focus, textarea:focus {
 .decision-page-heading::after {
   content: "";
   position: absolute;
-  z-index: -1;
+  z-index: 0;
   width: 330px;
   height: 330px;
   right: -96px;
@@ -911,6 +911,13 @@ input:focus, select:focus, textarea:focus {
   color: #426b2f;
 }
 .decision-output-panel .route { color: #18291f; font-size: clamp(30px, 3vw, 38px); }
+.decision-output-panel .metric {
+  background: rgba(255,255,255,.82);
+  border-color: #d9e4d3;
+}
+.decision-output-panel .output-block {
+  border-top-color: #dce6d5;
+}
 
 .page-section > .section-heading { margin-bottom: 20px; }
 .target-card, .policy-card, .metric, .change, .history-row, .calibration-card, .slo-panel {
