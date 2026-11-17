@@ -2017,11 +2017,17 @@ function apiLabConfig() {
 }
 
 function apiLabSetInspectorTab(name) {
-  document.querySelectorAll("[data-api-lab-tab]").forEach(button => {
-    const active = button.dataset.apiLabTab === name;
+  const tabs = Array.from(document.querySelectorAll("[data-api-lab-tab]"));
+  const selected = tabs.find(button => button.dataset.apiLabTab === name);
+  if (!selected) return;
+
+  tabs.forEach(button => {
+    const active = button === selected;
     button.classList.toggle("active", active);
     button.setAttribute("aria-selected", String(active));
+    button.tabIndex = active ? 0 : -1;
   });
+
   document.querySelectorAll(".api-lab-tab-pane").forEach(pane => {
     const active = pane.id === "apiLab" + name[0].toUpperCase() + name.slice(1) + "Pane";
     pane.hidden = !active;
@@ -2055,9 +2061,25 @@ function apiLabRenderCode() {
   if (output) output.textContent = examples.join("\n\n" + "─".repeat(64) + "\n\n");
 }
 
-document.querySelectorAll("[data-api-lab-tab]").forEach(button => {
+const apiLabTabs = Array.from(document.querySelectorAll("[data-api-lab-tab]"));
+apiLabTabs.forEach(button => {
   button.addEventListener("click", () => apiLabSetInspectorTab(button.dataset.apiLabTab));
+  button.addEventListener("keydown", event => {
+    const currentIndex = apiLabTabs.indexOf(button);
+    let nextIndex = currentIndex;
+    if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % apiLabTabs.length;
+    else if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + apiLabTabs.length) % apiLabTabs.length;
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = apiLabTabs.length - 1;
+    else return;
+
+    event.preventDefault();
+    const nextTab = apiLabTabs[nextIndex];
+    apiLabSetInspectorTab(nextTab.dataset.apiLabTab);
+    nextTab.focus();
+  });
 });
+apiLabSetInspectorTab("response");
 document.querySelector("#apiLabCopyCode")?.addEventListener("click", async () => {
   const code = document.querySelector("#apiLabCode")?.textContent || "";
   const status = document.querySelector("#apiLabStatus");
