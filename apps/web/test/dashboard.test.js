@@ -1169,3 +1169,19 @@ test("premium workspace design tokens and responsive navigation are defined", as
   assert.match(css, /--blue:#176b50/);
   assert.match(css, /@media\(max-width:760px\)/);
 });
+
+
+test("API Lab inspector formats response headers and supports accessible keyboard tab movement", async () => {
+  const html = await readFile(new URL("index.html", webRoot), "utf8");
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  for (const tab of ["Response", "Headers", "Code", "Request"]) {
+    assert.match(html, new RegExp('id="apiLab' + tab + 'Tab"'));
+    assert.match(html, new RegExp('aria-labelledby="apiLab' + tab + 'Tab"'));
+  }
+  assert.match(script, /join\("\\n"\)/);
+  assert.match(script, /event\.key === "ArrowRight"/);
+  assert.match(script, /event\.key === "ArrowLeft"/);
+  assert.match(script, /event\.key === "Home"/);
+  assert.match(script, /event\.key === "End"/);
+  assert.match(script, /button\.tabIndex = active \? 0 : -1/);
+});
