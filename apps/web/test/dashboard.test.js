@@ -1144,3 +1144,26 @@ test("decision activity explorer provides tenant-history filters and metadata-on
   assert.match(html, /Export filtered CSV/);
   assert.doesNotMatch(script, /localStorage\.(?:setItem|removeItem)\(/);
 });
+
+
+test("API Lab response inspector exposes response, headers, generated code and safe request tabs", async () => {
+  const html = await readFile(new URL("index.html", webRoot), "utf8");
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  for (const id of ["apiLabResponsePane", "apiLabHeadersPane", "apiLabCodePane", "apiLabRequestPane", "apiLabHeaders", "apiLabCode", "apiLabCopyCode"]) {
+    assert.match(html, new RegExp('id="' + id + '"'), "missing API inspector surface: " + id);
+  }
+  for (const tab of ["response", "headers", "code", "request"]) assert.match(html, new RegExp('data-api-lab-tab="' + tab + '"'));
+  assert.match(script, /function apiLabSetInspectorTab\(name\)/);
+  assert.match(script, /function apiLabRenderCode\(\)/);
+  assert.match(script, /response\.headers\.forEach/);
+  assert.match(script, /<YOUR_LOCD_API_KEY>/);
+  assert.doesNotMatch(script, /apiLabRenderCode[\s\S]{0,1800}activeApiKey/);
+});
+
+test("premium workspace design tokens and responsive navigation are defined", async () => {
+  const css = await readFile(new URL("styles.css", webRoot), "utf8");
+  assert.match(css, /LOCD premium workspace system/);
+  assert.match(css, /--page:#f2f4f3/);
+  assert.match(css, /--blue:#176b50/);
+  assert.match(css, /@media\(max-width:760px\)/);
+});
