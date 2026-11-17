@@ -102,6 +102,30 @@ test("failed half-open probe reopens the circuit with a fresh cooldown", async (
   assert.equal(state.retryAt, now() + 500);
 });
 
+test("cancelled half-open work releases its probe lease without recording provider failure", async () => {
+  const { breaker, advance } = fixture({ failureThreshold: 1, cooldownMs: 100 });
+  await breaker.recordFailure("acme", "gpu-a");
+  advance(100);
+  const first = await breaker.acquire("acme", "gpu-a");
+  assert.equal(first.allowed, true);
+  assert.equal((await breaker.inspect("acme", "gpu-a")).probeInFlight, true);
+
+  assert.equal(await breaker.release("acme", "gpu-a", {
+    probeToken: first.probeToken
+  }), true);
+  const released = await breaker.inspect("acme", "gpu-a");
+  assert.equal(released.state, "half-open");
+  assert.equal(released.probeInFlight, false);
+  assert.equal(released.failureCount, 1);
+
+  const retry = await breaker.acquire("acme", "gpu-a");
+  assert.equal(retry.allowed, true);
+  assert.notEqual(retry.probeToken, first.probeToken);
+  assert.equal(await breaker.recordSuccess("acme", "gpu-a", {
+    probeToken: retry.probeToken
+  }), true);
+});
+
 test("breaker state is isolated by tenant and target identifier", async () => {
   const { breaker } = fixture({ failureThreshold: 1 });
   await breaker.recordFailure("acme", "shared/gpu");

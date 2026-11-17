@@ -461,6 +461,26 @@ export function createCircuitBreaker({
     return false;
   }
 
+  async function release(tenantId, targetId, { probeToken = null } = {}) {
+    if (!probeToken) return false;
+    const key = stateKey(tenantId, targetId);
+    for (let attempt = 0; attempt < maxCasAttempts; attempt++) {
+      const current = await readState(key);
+      if (
+        current?.state !== "half-open" ||
+        current.probeToken !== probeToken
+      ) return false;
+
+      const next = {
+        ...current,
+        probeToken: null,
+        probeLeaseExpiresAt: null
+      };
+      if (await writeState(key, current, next)) return true;
+    }
+    return false;
+  }
+
   async function history(tenantId = "default", {
     windowMs = 24 * 60 * 60 * 1000,
     limit = 50
@@ -632,6 +652,7 @@ export function createCircuitBreaker({
     acquire,
     recordFailure,
     recordSuccess,
+    release,
     snapshot,
     history,
     config: {

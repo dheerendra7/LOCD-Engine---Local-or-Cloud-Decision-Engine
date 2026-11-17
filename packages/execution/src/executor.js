@@ -29,18 +29,60 @@ function normalizeReceipt({ step, adapter, status, startedAt, completedAt, error
   };
 }
 
-async function withTimeout(task, timeoutMs) {
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return task();
+async function withTimeout(task, timeoutMs, parentSignal = null) {
+  if (parentSignal != null && (
+    typeof parentSignal.aborted !== "boolean" ||
+    typeof parentSignal.addEventListener !== "function"
+  )) {
+    throw new Error("signal must be an AbortSignal");
+  }
+  if (parentSignal?.aborted) throw new Error("execution_aborted");
 
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error("execution_timeout")), timeoutMs);
-  });
+  const controller = new AbortController();
+  let timer = null;
+  let parentAbortListener = null;
+
+  const races = [
+    Promise.resolve()
+      .then(() => task(controller.signal))
+      .then(
+        value => ({ type: "completed", value }),
+        error => ({ type: "error", error })
+      )
+  ];
+
+  if (parentSignal) {
+    races.push(new Promise(resolve => {
+      parentAbortListener = () => {
+        controller.abort(parentSignal.reason);
+        resolve({ type: "aborted" });
+      };
+      parentSignal.addEventListener("abort", parentAbortListener, { once: true });
+      if (parentSignal.aborted) parentAbortListener();
+    }));
+  }
+
+  if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    races.push(new Promise(resolve => {
+      timer = setTimeout(() => {
+        // Resolve timeout before abort callbacks can reject the adapter promise.
+        resolve({ type: "timeout" });
+        controller.abort(new Error("execution_timeout"));
+      }, timeoutMs);
+    }));
+  }
 
   try {
-    return await Promise.race([task(), timeout]);
+    const outcome = await Promise.race(races);
+    if (outcome.type === "timeout") throw new Error("execution_timeout");
+    if (outcome.type === "aborted") throw new Error("execution_aborted");
+    if (outcome.type === "error") throw outcome.error;
+    return outcome.value;
   } finally {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
+    if (parentSignal && parentAbortListener) {
+      parentSignal.removeEventListener("abort", parentAbortListener);
+    }
   }
 }
 
@@ -155,7 +197,8 @@ export async function executePlan(
     includeOutputs = false,
     clock,
     beforeStep = null,
-    onStepResult = null
+    onStepResult = null,
+    signal = null
   } = {}
 ) {
   if (!plan || typeof plan !== "object") throw new Error("execution plan is required");
@@ -176,6 +219,12 @@ export async function executePlan(
   if (onStepResult !== null && typeof onStepResult !== "function") {
     throw new Error("onStepResult must be a function");
   }
+  if (signal != null && (
+    typeof signal.aborted !== "boolean" ||
+    typeof signal.addEventListener !== "function"
+  )) {
+    throw new Error("signal must be an AbortSignal");
+  }
 
   const notifyStepResult = async payload => {
     if (typeof onStepResult !== "function") return;
@@ -194,6 +243,29 @@ export async function executePlan(
   for (const step of plan.steps) {
     const adapter = registry.get(step.targetId);
     const startedAt = nowIso(clock);
+
+    if (signal?.aborted) {
+      const errorClass = "execution_aborted";
+      await notifyStepResult({
+        step: { ...step },
+        adapter,
+        status: "failed",
+        errorClass,
+        cancelled: true,
+        executionContext: null
+      });
+      receipts.push(normalizeReceipt({
+        step,
+        adapter,
+        status: "failed",
+        startedAt,
+        completedAt: nowIso(clock),
+        errorClass
+      }));
+      status = "failed";
+      failedStepId = step.id;
+      break;
+    }
 
     if (!adapter) {
       const receipt = normalizeReceipt({
@@ -232,7 +304,8 @@ export async function executePlan(
         const admission = await beforeStep({
           step: { ...step },
           adapter,
-          mode
+          mode,
+          signal
         });
         if (admission?.allowed === false) {
           receipts.push(normalizeReceipt({
@@ -249,6 +322,28 @@ export async function executePlan(
           continue;
         }
         executionContext = admission?.context ?? admission ?? null;
+        if (signal?.aborted) {
+          const errorClass = "execution_aborted";
+          await notifyStepResult({
+            step: { ...step },
+            adapter,
+            status: "failed",
+            errorClass,
+            cancelled: true,
+            executionContext
+          });
+          receipts.push(normalizeReceipt({
+            step,
+            adapter,
+            status: "failed",
+            startedAt,
+            completedAt: nowIso(clock),
+            errorClass
+          }));
+          status = "failed";
+          failedStepId = step.id;
+          break;
+        }
       } catch {
         receipts.push(normalizeReceipt({
           step,
@@ -267,12 +362,14 @@ export async function executePlan(
 
     try {
       const output = await withTimeout(
-        () => adapter.execute({
+        adapterSignal => adapter.execute({
           step: { ...step },
           payload: step.payload,
-          mode
+          mode,
+          signal: adapterSignal
         }),
-        timeoutMs
+        timeoutMs,
+        signal
       );
 
       await notifyStepResult({
@@ -299,11 +396,13 @@ export async function executePlan(
       }));
     } catch (error) {
       const errorClass = error instanceof Error ? error.message : "execution_failed";
+      const cancelled = errorClass === "execution_aborted";
       await notifyStepResult({
         step: { ...step },
         adapter,
         status: "failed",
         errorClass,
+        cancelled,
         executionContext
       });
       receipts.push(normalizeReceipt({

@@ -115,6 +115,99 @@ test("execution timeout is classified without leaking adapter errors", async () 
   assert.equal(result.receipts[0].errorClass, "execution_timeout");
 });
 
+test("execution timeout aborts the provider signal and returns a deterministic timeout", async () => {
+  let abortObserved = false;
+  const registry = createExecutionRegistry([{
+    id: "slow",
+    targetId: "local",
+    async execute({ signal }) {
+      return new Promise((_, reject) => {
+        signal.addEventListener("abort", () => {
+          abortObserved = true;
+          reject(new Error("adapter_cancelled"));
+        }, { once: true });
+      });
+    }
+  }]);
+
+  const result = await executePlan(
+    { ...plan(), steps: [plan().steps[0]] },
+    { registry, mode: "live", timeoutMs: 5 }
+  );
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.receipts[0].errorClass, "execution_timeout");
+  assert.equal(abortObserved, true);
+});
+
+test("caller abort cancels the in-flight step and prevents later provider steps", async () => {
+  const controller = new AbortController();
+  const calls = [];
+  const outcomes = [];
+  const registry = createExecutionRegistry([
+    {
+      id: "local",
+      targetId: "local",
+      async execute({ signal }) {
+        calls.push("local");
+        return new Promise((_, reject) => {
+          signal.addEventListener("abort", () => reject(new Error("adapter_cancelled")), { once: true });
+        });
+      }
+    },
+    {
+      id: "private",
+      targetId: "private",
+      async execute() {
+        calls.push("private");
+        return { ok: true };
+      }
+    }
+  ]);
+
+  const execution = executePlan(plan(), {
+    registry,
+    mode: "live",
+    signal: controller.signal,
+    onStepResult: event => outcomes.push({
+      stepId: event.step.id,
+      errorClass: event.errorClass,
+      cancelled: event.cancelled === true
+    })
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  controller.abort();
+  const result = await execution;
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.receipts[0].errorClass, "execution_aborted");
+  assert.deepEqual(calls, ["local"]);
+  assert.deepEqual(outcomes, [{
+    stepId: "pre",
+    errorClass: "execution_aborted",
+    cancelled: true
+  }]);
+});
+
+test("an already-aborted execution signal prevents provider admission", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let calls = 0;
+  const registry = createExecutionRegistry([{
+    id: "local",
+    targetId: "local",
+    async execute() { calls++; return {}; }
+  }]);
+
+  const result = await executePlan(
+    { ...plan(), steps: [plan().steps[0]] },
+    { registry, signal: controller.signal }
+  );
+
+  assert.equal(result.receipts[0].errorClass, "execution_aborted");
+  assert.equal(calls, 0);
+});
+
 test("registry rejects duplicate target adapters", () => {
   const registry = createExecutionRegistry([
     createDryRunExecutionAdapter({ id: "one", targetId: "local" })
