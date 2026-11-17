@@ -351,21 +351,28 @@ The built-in OpenAI-compatible adapter probes GET /v1/models and measures round-
 
 ### POST /v1/execute
 
-Executes a previously validated execution plan against server-registered adapters.
+Executes a planner-authorized execution plan against server-registered adapters.
 
 - mode: dry-run or live; dry-run is the default
 - includeOutputs: optional boolean; successful adapter results are returned only when true
 - timeoutMs: optional execution timeout
 - failFast: optional boolean, default true
-- plan: validated plan with target IDs and optional per-step payload
+- plan: planner-issued plan; optional per-step payloads may be attached after planning
+- executionAuthorization: required signed authorization for live mode
 
-Live execution requires LOCD_EXECUTION_ENABLED=true and authentication. A positive rate-limit configuration is also mandatory for live execution; otherwise the API returns HTTP 503 with `live_execution_requires_rate_limit` and does not invoke a provider.
+A caller-provided `plan.valid: true` is not proof of validation. Live execution requires an HMAC authorization issued by `POST /v1/hybrid-plan` for a valid plan built from the authenticated tenant's registered targets. Request-scoped targets remain simulation-only and never receive a live-execution authorization.
+
+The authorization binds the plan structure and tenant, expires after `LOCD_EXECUTION_PLAN_TTL_MS` (default 120 seconds; maximum 15 minutes), and excludes only each step's runtime `payload` field so payloads can be supplied at execution time. Any change to routing, target identity, sensitivity, or other signed plan fields invalidates the authorization.
+
+Before a provider is invoked, LOCD verifies the signature and tenant, reloads the tenant's registered targets, re-evaluates the plan against current policy and circuit-breaker state, and rejects stale or newly ineligible plans with HTTP 409. A target removed, unavailable, policy-rejected, or circuit-open since planning cannot be executed using an old authorization.
+
+Live execution requires `LOCD_EXECUTION_ENABLED=true`, authentication with execute/admin scope, a configured `LOCD_EXECUTION_PLAN_SECRET` of at least 32 bytes, and an enabled rate limiter. The same plan secret must be configured on every API instance that may issue or consume the authorization. Missing signing configuration returns HTTP 503; an unsigned, expired, modified or cross-tenant authorization is rejected before provider admission.
 
 Static target snapshots receive dry-run-only execution adapters. They cannot be used for live execution.
 
 Execution receipts remain metadata-only. Caller-scoped results are not written to telemetry.
 
-For live execution, each registered target must pass circuit admission before its provider adapter is called. Targets with open circuits or an active half-open probe return failed step receipts with `circuit_breaker_open` or `circuit_breaker_half_open_busy`; no provider call is made for those steps.
+For live execution, each registered target must also pass circuit admission immediately before its provider adapter is called. Targets with open circuits or an active half-open probe return failed step receipts with `circuit_breaker_open` or `circuit_breaker_half_open_busy`; no provider call is made for those steps.
 
 ## Scoped authorization
 
