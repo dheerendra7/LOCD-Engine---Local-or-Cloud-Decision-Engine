@@ -719,47 +719,63 @@ test("metrics distinguish known and unknown estimated-cost coverage", async () =
 });
 
 
-test("section navigation announces the current location to assistive technology", async () => {
+test("workspace navigation shows one page at a time and maps nested links to their workspace", async () => {
   const html = await readFile(new URL("index.html", webRoot), "utf8");
   const script = await readFile(new URL("app.js", webRoot), "utf8");
-  const navLinks = [...html.matchAll(/<a\b[^>]*data-nav="([^"]+)"[^>]*>/g)];
-  assert.ok(navLinks.length >= 6, "workspace and configuration links should be present");
-  assert.equal(navLinks.filter(match => /aria-current="location"/.test(match[0])).length, 1);
-  assert.match(script, /function setActiveNavigation\(sectionId\)/);
+  const css = await readFile(new URL("styles.css", webRoot), "utf8");
+  const navLinks = [...html.matchAll(/<a\\b[^>]*data-nav="([^"]+)"[^>]*>/g)];
+  const pageIds = [...html.matchAll(/<section id="([^"]+)" class="page-section[^"]*">/g)].map(match => match[1]);
+  assert.ok(pageIds.length >= 7, "all product workspaces should remain present");
+  assert.equal(navLinks.filter(match => /aria-current="location"/.test(match[0])).length, 0);
+  assert.match(html, /data-nav="decision-lab"[^>]*aria-current="location"/);
+  assert.match(script, /function setActiveNavigation\\(sectionId\\)/);
+  assert.match(script, /function syncWorkspaceFromHash\\(\\)/);
+  assert.match(script, /window\\.addEventListener\\("hashchange", syncWorkspaceFromHash\\)/);
+  assert.match(css, /\\.page-section\\[hidden\\]\\s*\\{\\s*display:\\s*none\\s*!important;/);
 
   const start = script.indexOf("function setActiveNavigation(sectionId) {");
-  const end = script.indexOf("\n}", start) + 2;
+  const end = script.indexOf("\\n}", start) + 2;
   assert.ok(start >= 0 && end > start);
   const helper = script.slice(start, end);
-  const classStates = new Map();
+  const navStates = new Map();
+  const pageStates = new Map(pageIds.map(id => [id, { id, hidden: id !== "decision-lab" }]));
   const breadcrumbs = {};
   const links = navLinks.map(match => ({
     dataset: { nav: match[1] },
     textContent: match[1],
     attributes: new Map(),
-    classList: { toggle(name, enabled) { if (name === "active") classStates.set(match[1], enabled); } },
+    classList: { toggle(name, enabled) { if (name === "active") navStates.set(match[1], enabled); } },
     setAttribute(name, value) { this.attributes.set(name, value); },
     removeAttribute(name) { this.attributes.delete(name); }
   }));
-  const runtime = new Function(
-    "document", "setText", helper + "; return setActiveNavigation;"
-  )({ querySelectorAll: () => links }, (id, value) => { breadcrumbs[id] = value; });
+  const documentMock = {
+    getElementById(id) { return pageStates.get(id) || null; },
+    querySelectorAll(selector) {
+      if (selector === ".content > .page-section") return [...pageStates.values()];
+      if (selector === "[data-nav]") return links;
+      return [];
+    }
+  };
+  const runtime = new Function("document", "setText", helper + "; return setActiveNavigation;")(
+    documentMock,
+    (id, value) => { breadcrumbs[id] = value; }
+  );
 
   runtime("hybrid-planner");
-  assert.equal(classStates.get("hybrid-planner"), true);
-  assert.equal(links.find(link => link.dataset.nav === "hybrid-planner").attributes.get("aria-current"), "location");
+  assert.deepEqual([...pageStates.values()].filter(page => !page.hidden).map(page => page.id), ["hybrid-planner"]);
+  assert.equal(navStates.get("hybrid-planner"), true);
+  assert.equal(links.find(link => link.dataset.nav === "hybrid-planner").attributes.get("aria-current"), "page");
   assert.equal(links.filter(link => link.attributes.has("aria-current")).length, 1);
-  assert.equal([...classStates.values()].filter(Boolean).length, 1);
   assert.equal(breadcrumbs.breadcrumbCurrent, "hybrid-planner");
 
   runtime("system-settings");
+  assert.deepEqual([...pageStates.values()].filter(page => !page.hidden).map(page => page.id), ["system-settings"]);
   assert.equal(links.find(link => link.dataset.nav === "hybrid-planner").attributes.has("aria-current"), false);
-  assert.equal(classStates.get("hybrid-planner"), false);
-  assert.equal(links.find(link => link.dataset.nav === "system-settings").attributes.get("aria-current"), "location");
-  assert.equal(classStates.get("system-settings"), true);
+  assert.equal(links.find(link => link.dataset.nav === "system-settings").attributes.get("aria-current"), "page");
   assert.equal(breadcrumbs.breadcrumbCurrent, "system-settings");
-  assert.equal(links.filter(link => link.attributes.has("aria-current")).length, 1);
 });
+
+
 
 
 test("dashboard text and status colors meet WCAG AA contrast targets", async () => {
