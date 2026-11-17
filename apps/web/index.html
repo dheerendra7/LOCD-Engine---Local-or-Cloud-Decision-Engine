@@ -79,6 +79,23 @@
             </div>
           </div>
 
+          <section id="apiAccessNotice" class="notice-card hidden" role="status" aria-live="polite" aria-labelledby="apiAccessNoticeTitle">
+            <div class="notice-icon" aria-hidden="true">!</div>
+            <div class="notice-copy">
+              <strong id="apiAccessNoticeTitle">API access needs setup</strong>
+              <p id="apiAccessNoticeText">Add the deployment API key to load tenant data.</p>
+            </div>
+            <a class="btn btn-primary" href="#system-settings" id="apiAccessNoticeAction">Open System &amp; access</a>
+          </section>
+
+          <section id="freePreviewNotice" class="notice-card notice-preview hidden" role="note" aria-labelledby="freePreviewNoticeTitle">
+            <div class="notice-icon" aria-hidden="true">i</div>
+            <div class="notice-copy">
+              <strong id="freePreviewNoticeTitle">Free preview deployment</strong>
+              <p id="freePreviewNoticeText">Runtime persistence details will appear after API access is configured.</p>
+            </div>
+          </section>
+
           <div class="stats-grid" aria-label="Control plane summary">
             <article class="stat-card">
               <div class="stat-topline"><span>Registered targets</span><span class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/></svg></span></div>
