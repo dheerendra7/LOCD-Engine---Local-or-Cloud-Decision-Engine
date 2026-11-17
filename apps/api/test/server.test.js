@@ -3442,6 +3442,10 @@ test("status endpoint reports shared and durable capabilities from SQLite backen
     decisionStore: stores.telemetry,
     policyStore: stores.policies,
     coordinationStore: stores.coordination,
+    // Stale process-local labels must not contradict durable/shared stores.
+    telemetryBackend: "process-local",
+    policyBackend: "process-local",
+    coordinationBackend: "process-local",
     rateLimitMaxRequests: 10
   });
 
