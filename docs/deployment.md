@@ -5,8 +5,8 @@
 The checked-in `render.yaml` describes one paid Node web service named `locd-engine`:
 
 - Build: `npm ci`; start: `npm start`; runtime: Node 24.21.0 via `.node-version`.
-- Health check: `/ready`; the process listens on Render's `PORT` and binds to `0.0.0.0`.
-- Compute: Starter plan, one instance.
+- Health check: `/ready`; the process listens on Render's `PORT` and binds to `0.0.0.0`. Automatic deploys require the linked Git checks to pass.
+- Compute: Starter plan, Singapore region, one instance.
 - Persistent disk: 1 GB mounted at `/data`.
 - State: SQLite at `/data/locd.db`; registered targets at `/data/targets.json`.
 - Security defaults: strict production safety enabled, API rate limiting enabled, generated `LOCD_API_KEY` and `LOCD_EXECUTION_PLAN_SECRET`.
