@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="LOCD Engine control plane for explainable local, private, cloud and hybrid workload placement.">
-  <meta name="theme-color" content="#f6f8fb">
+  <meta name="theme-color" content="#f4f6f2">
   <title>LOCD Engine — Control Plane</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
@@ -18,37 +18,55 @@
           <span class="brand-caption" style="display:block">Placement control plane</span>
         </span>
       </a>
-      <div class="nav-caption">Product workspaces</div>
-      <nav class="nav-list" aria-label="Workspaces">
-        <a class="nav-link active" href="#decision-lab" data-nav="decision-lab" aria-current="page">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4M11 7v8M7 11h8"/></svg>Decision Studio
-        </a>
-        <a class="nav-link" href="#overview" data-nav="overview">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="3" y="3" width="7" height="8" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="11" width="7" height="10" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>Overview
-        </a>
-        <a class="nav-link" href="#target-registry" data-nav="target-registry">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01M11 7h6M11 17h6"/></svg>Infrastructure
-        </a>
-        <a class="nav-link" href="#policy-workbench" data-nav="policy-workbench">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M12 3 19 6v5c0 4.5-3 7.5-7 10-4-2.5-7-5.5-7-10V6l7-3Z"/><path d="m9 12 2 2 4-4"/></svg>Governance
-        </a>
-        <a class="nav-link" href="#hybrid-planner" data-nav="hybrid-planner">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 6h7a5 5 0 0 1 5 5M5 8v8a2 2 0 0 0 2 2h10"/></svg>Hybrid planner
-        </a>
-        <a class="nav-link" href="#telemetry" data-nav="telemetry">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M3 3v18h18"/><path d="m7 14 4-4 3 3 6-7"/></svg>Observability
-        </a>
-      </nav>
-      <div class="nav-caption nav-caption-config">Configuration</div>
-      <nav class="nav-list" aria-label="Configuration">
-        <a class="nav-link" href="#system-settings" data-nav="system-settings">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.2.9-1.2 2.1-1.4-.6a7.7 7.7 0 0 1-1.5.9l-.2 1.5h-2.5l-.3-1.5a7.7 7.7 0 0 1-1.5-.9l-1.4.6-1.2-2.1 1.2-.9a6.8 6.8 0 0 1 0-1.8l-1.2-.9 1.2-2.1 1.4.6a7.7 7.7 0 0 1 1.5-.9l.3-1.5h2.5l.2 1.5a7.7 7.7 0 0 1 1.5.9l1.4-.6 1.2 2.1-1.2.9a6.8 6.8 0 0 1-.1 1.7Z"/></svg>System &amp; access
-        </a>
-      
-        <a class="nav-link" href="#api-lab" data-nav="api-lab">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M8 5 3 12l5 7M16 5l5 7-5 7M14 4l-4 16"/></svg>API Lab
-        </a>
-      </nav>
+      <div class="nav-group">
+        <div class="nav-caption">Plan &amp; decide</div>
+        <nav class="nav-list" aria-label="Plan and decide">
+          <a class="nav-link active" href="#decision-lab" data-nav="decision-lab" aria-current="page">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4M11 7v8M7 11h8"/></svg>Decision Studio
+          </a>
+          <a class="nav-link" href="#hybrid-planner" data-nav="hybrid-planner">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 6h7a5 5 0 0 1 5 5M5 8v8a2 2 0 0 0 2 2h10"/></svg>Hybrid planner
+          </a>
+        </nav>
+      </div>
+      <div class="nav-group">
+        <div class="nav-caption">Control &amp; govern</div>
+        <nav class="nav-list" aria-label="Control and govern">
+          <a class="nav-link" href="#overview" data-nav="overview">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="3" y="3" width="7" height="8" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="11" width="7" height="10" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>Overview
+          </a>
+          <a class="nav-link" href="#target-registry" data-nav="target-registry">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01M11 7h6M11 17h6"/></svg>Infrastructure
+          </a>
+          <a class="nav-link" href="#policy-workbench" data-nav="policy-workbench">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M12 3 19 6v5c0 4.5-3 7.5-7 10-4-2.5-7-5.5-7-10V6l7-3Z"/><path d="m9 12 2 2 4-4"/></svg>Governance
+          </a>
+        </nav>
+      </div>
+      <div class="nav-group">
+        <div class="nav-caption">Observe</div>
+        <nav class="nav-list" aria-label="Observe">
+          <a class="nav-link" href="#telemetry" data-nav="telemetry">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M3 3v18h18"/><path d="m7 14 4-4 3 3 6-7"/></svg>Observability
+          </a>
+        </nav>
+      </div>
+      <div class="nav-group">
+        <div class="nav-caption">Developer tools</div>
+        <nav class="nav-list" aria-label="Developer tools">
+          <a class="nav-link" href="#api-lab" data-nav="api-lab">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M8 5 3 12l5 7M16 5l5 7-5 7M14 4l-4 16"/></svg>API Lab
+          </a>
+        </nav>
+      </div>
+      <div class="nav-group">
+        <div class="nav-caption">Administration</div>
+        <nav class="nav-list" aria-label="Administration">
+          <a class="nav-link" href="#system-settings" data-nav="system-settings">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.2.9-1.2 2.1-1.4-.6a7.7 7.7 0 0 1-1.5.9l-.2 1.5h-2.5l-.3-1.5a7.7 7.7 0 0 1-1.5-.9l-1.4.6-1.2-2.1 1.2-.9a6.8 6.8 0 0 1 0-1.8l-1.2-.9 1.2-2.1 1.4.6a7.7 7.7 0 0 1 1.5-.9l.3-1.5h2.5l.2 1.5a7.7 7.7 0 0 1 1.5.9l1.4-.6 1.2 2.1-1.2.9a6.8 6.8 0 0 1-.1 1.7Z"/></svg>System &amp; access
+          </a>
+        </nav>
+      </div>
       <div class="sidebar-spacer"></div>
       <div class="sidebar-footer">
         <div class="environment-label">Runtime</div>
@@ -204,8 +222,8 @@
         </section>
 
         <section id="target-registry" class="page-section">
-          <div class="section-heading">
-            <div><div class="section-label">Infrastructure</div><h2>Target registry</h2><p>Manage the destinations that LOCD evaluates. Estimates and availability reflect registered metadata, not live guarantees.</p></div>
+          <div class="page-heading">
+            <div><div class="page-kicker">INFRASTRUCTURE</div><h1>Target registry</h1><p>Manage the local, private and cloud destinations that LOCD can evaluate. Capacity and availability are registered metadata, not live guarantees.</p></div>
             <span class="state-badge" id="targetStatus">Not loaded</span>
           </div>
           <section class="panel">
@@ -233,9 +251,9 @@
         </section>
 
         <section id="policy-workbench" class="page-section">
-          <div class="section-heading">
-            <div><div class="section-label">Governance</div><h2>Policy workbench</h2><p>Inspect built-in profiles, manage tenant-scoped policy documents, and compare a candidate change before rolling it out.</p></div>
-            <span class="state-badge blue">Simulation does not execute providers</span>
+          <div class="page-heading">
+            <div><div class="page-kicker">GOVERNANCE</div><h1>Policy workbench</h1><p>Define how workloads are routed across your infrastructure. Review built-in profiles, version tenant policies and simulate changes before rollout.</p></div>
+            <span class="state-badge blue">Simulation only · no provider execution</span>
           </div>
           <section class="panel">
             <div class="section-heading">
@@ -283,9 +301,9 @@
         </section>
 
         <section id="hybrid-planner" class="page-section">
-          <div class="section-heading">
-            <div><div class="section-label">Multi-stage workloads</div><h2>Hybrid execution planner</h2><p>Check whether a sequence of stages can span multiple targets while keeping workload sensitivity, routing policy and total budgets in bounds.</p></div>
-            <span class="state-badge blue">Planning only</span>
+          <div class="page-heading">
+            <div><div class="page-kicker">MULTI-STAGE WORKLOADS</div><h1>Hybrid execution planner</h1><p>Model a workload as a sequence of stages across distinct destinations. Validate data boundaries, routing policy, latency and total cost before any execution.</p></div>
+            <span class="state-badge blue">Planning only · dry-run gated</span>
           </div>
           <section class="panel">
             <div class="grid two">
@@ -317,8 +335,8 @@
         </section>
 
         <section id="telemetry" class="page-section">
-          <div class="section-heading">
-            <div><div class="section-label">Observability</div><h2>Reliability &amp; decision activity</h2><p>Inspect provider health, service objectives, recorded outcomes and estimate calibration from this tenant.</p></div>
+          <div class="page-heading">
+            <div><div class="page-kicker">OBSERVABILITY</div><h1>Reliability &amp; decision activity</h1><p>Understand provider health, service objectives, placement outcomes and estimate calibration across the active tenant.</p></div>
             <span id="activityStatus" class="status">Loading history…</span>
           </div>
           <div class="observability-group-heading"><div><span class="section-label">Provider health</span><h3>Reliability &amp; service objectives</h3></div><span>Read-only operational signals</span></div>
@@ -500,7 +518,7 @@
         </section>
 
         <section id="system-settings" class="page-section">
-          <div class="section-heading"><div><div class="section-label">Configuration</div><h2>System & access</h2><p>Inspect runtime capabilities and provide a scoped API key when the control plane requires authentication.</p></div></div>
+          <div class="page-heading"><div><div class="page-kicker">ADMINISTRATION</div><h1>System &amp; access</h1><p>Manage this workspace's scoped access and inspect the capabilities actually reported by the running control plane.</p></div></div>
           <section class="panel">
             <div class="section-heading"><div><h2>API access</h2><p>The key is kept in this page's memory only. It is not saved to local storage, sent to analytics, or embedded in URLs.</p></div><span class="state-badge">Tenant-scoped</span></div>
             <label>LOCD API key
