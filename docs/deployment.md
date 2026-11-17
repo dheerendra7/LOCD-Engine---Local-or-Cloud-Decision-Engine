@@ -125,6 +125,10 @@ Rate limiting is intentionally local to a process; distributed deployments need 
 
 Live execution also requires the API rate limiter to be enabled. Set `LOCD_RATE_LIMIT_RPM` to a positive value (or supply an enabled custom limiter) before enabling live execution; otherwise `POST /v1/execute` returns HTTP 503 without invoking a provider.
 
+Live execution additionally requires `LOCD_EXECUTION_PLAN_SECRET` with at least 32 bytes. Set `LOCD_EXECUTION_PLAN_TTL_MS` to control the signed-plan lifetime (default 120 seconds, maximum 15 minutes). Use the same secret on every API instance behind the same load balancer. In strict production mode, enabling live execution without this secret fails startup.
+
+The API issues signed authorizations only for valid plans evaluated against the authenticated tenant's registered targets. Request-scoped target arrays are simulation-only. At execution time LOCD verifies the tenant-bound signature and expiry, reloads current targets, and re-runs policy/circuit validation before invoking any adapter. A stale or modified plan is rejected before provider admission.
+
 ## Provider circuit breaker
 
 Registered targets use a tenant-scoped circuit breaker. Provider execution failures and automatic/manual health-probe failures contribute to `LOCD_CIRCUIT_BREAKER_FAILURE_THRESHOLD` within `LOCD_CIRCUIT_BREAKER_FAILURE_WINDOW_MS`. Once open, the target is excluded from subsequent decisions and hybrid plans for `LOCD_CIRCUIT_BREAKER_COOLDOWN_MS`; scheduled and manual probes are skipped during that cooldown, so they do not continue hitting an isolated provider. A probe that throws or returns `available: false` counts as a failure.
