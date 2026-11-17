@@ -2571,6 +2571,203 @@ test("live execution fails closed when plan signing is not configured", async ()
   }
 });
 
+test("live plan authorization is tenant-bound and rejects post-planning policy changes", async () => {
+  let providerCalls = 0;
+  const authorizer = createScopedAuthorizer({
+    keys: [
+      { id: "acme-admin", secret: "acme-plan-secret", tenantId: "acme", scopes: ["admin"] },
+      { id: "beta-admin", secret: "beta-plan-secret", tenantId: "beta", scopes: ["admin"] }
+    ]
+  });
+  const targetRegistry = createTenantTargetRegistry();
+  for (const tenantId of ["acme", "beta"]) {
+    targetRegistry.forTenant(tenantId).register({
+      id: "tenant-local",
+      mode: "local",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1,
+      estimatedLatencyMs: 10,
+      estimatedCostUsd: 0
+    });
+    targetRegistry.forTenant(tenantId).register({
+      id: "tenant-private",
+      mode: "private",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1,
+      estimatedLatencyMs: 20,
+      estimatedCostUsd: 0.01
+    });
+  }
+  const executionServer = createServer({
+    authorizer,
+    targetRegistry,
+    executionRegistry: createExecutionRegistry([
+      {
+        id: "tenant-local-adapter",
+        targetId: "tenant-local",
+        async execute() { providerCalls++; return { ok: true }; }
+      },
+      {
+        id: "tenant-private-adapter",
+        targetId: "tenant-private",
+        async execute() { providerCalls++; return { ok: true }; }
+      }
+    ]),
+    executionEnabled: true,
+    executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
+    rateLimitMaxRequests: 20
+  });
+  await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + executionServer.address().port;
+  const acmeHeaders = {
+    authorization: "Bearer acme-plan-secret",
+    "content-type": "application/json"
+  };
+  const betaHeaders = {
+    authorization: "Bearer beta-plan-secret",
+    "content-type": "application/json"
+  };
+
+  try {
+    const grant = await getAuthorizedHybridPlan(url, acmeHeaders, {
+      workload: { type: "tenant-bound-live-plan", sensitivity: "low" },
+      steps: [
+        { id: "local-step", targetId: "tenant-local" },
+        { id: "private-step", targetId: "tenant-private" }
+      ]
+    });
+
+    const modifiedPlan = structuredClone(grant.plan);
+    modifiedPlan.steps[0].targetId = "tenant-private";
+    const modified = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers: acmeHeaders,
+      body: JSON.stringify({
+        mode: "live",
+        plan: modifiedPlan,
+        executionAuthorization: grant.executionAuthorization.token
+      })
+    });
+    assert.equal(modified.status, 409);
+    assert.deepEqual(await modified.json(), { error: "execution_plan_mismatch" });
+
+    const crossTenant = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers: betaHeaders,
+      body: JSON.stringify({
+        mode: "live",
+        plan: grant.plan,
+        executionAuthorization: grant.executionAuthorization.token
+      })
+    });
+    assert.equal(crossTenant.status, 403);
+    assert.deepEqual(await crossTenant.json(), { error: "execution_plan_tenant_mismatch" });
+    assert.equal(providerCalls, 0);
+  } finally {
+    await new Promise(resolve => executionServer.close(resolve));
+  }
+});
+
+test("live execution revalidates the tenant custom policy after planning", async () => {
+  let providerCalls = 0;
+  const policyStore = createPolicyStore();
+  policyStore.upsert("default", {
+    id: "live-policy",
+    name: "Live policy",
+    baseProfile: "balanced",
+    allowedModes: ["local", "private"]
+  });
+  const targetRegistry = createTargetRegistry([
+    {
+      id: "policy-local",
+      mode: "local",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1,
+      estimatedLatencyMs: 10,
+      estimatedCostUsd: 0
+    },
+    {
+      id: "policy-private",
+      mode: "private",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1,
+      estimatedLatencyMs: 20,
+      estimatedCostUsd: 0.01
+    }
+  ]);
+  const executionServer = createServer({
+    policyStore,
+    targetRegistry,
+    executionRegistry: createExecutionRegistry([
+      {
+        id: "policy-local-adapter",
+        targetId: "policy-local",
+        async execute() { providerCalls++; return { ok: true }; }
+      },
+      {
+        id: "policy-private-adapter",
+        targetId: "policy-private",
+        async execute() { providerCalls++; return { ok: true }; }
+      }
+    ]),
+    executionEnabled: true,
+    executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
+    apiKey: "server-secret",
+    rateLimitMaxRequests: 20
+  });
+  await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + executionServer.address().port;
+  const headers = {
+    authorization: "Bearer server-secret",
+    "content-type": "application/json"
+  };
+
+  try {
+    const grant = await getAuthorizedHybridPlan(url, headers, {
+      workload: { type: "policy-revalidation-live", sensitivity: "low" },
+      policy: { profile: "live-policy" },
+      steps: [
+        { id: "local-step", targetId: "policy-local" },
+        { id: "private-step", targetId: "policy-private" }
+      ]
+    });
+
+    policyStore.upsert("default", {
+      id: "live-policy",
+      name: "Live policy",
+      baseProfile: "balanced",
+      allowedModes: ["local"]
+    });
+
+    const response = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        mode: "live",
+        plan: grant.plan,
+        executionAuthorization: grant.executionAuthorization.token
+      })
+    });
+    assert.equal(response.status, 409);
+    const body = await response.json();
+    assert.equal(body.error, "execution_plan_stale");
+    assert.equal(body.rejected.some(item =>
+      item.stepId === "private-step" && item.reasons.includes("mode_not_allowed")
+    ), true);
+    assert.equal(providerCalls, 0);
+  } finally {
+    await new Promise(resolve => executionServer.close(resolve));
+  }
+});
+
 test("live execution returns provider results only when requested", async () => {
   const adapter = {
     id: "provider-adapter",
