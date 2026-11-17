@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
 const MAX_PLAN_TTL_MS = 15 * 60 * 1000;
 
@@ -51,7 +51,7 @@ function readNow(clock) {
 
 export function createExecutionPlanAuthorizer({
   secret,
-  ttlMs = 120_000,
+  ttlMs = 600_000,
   clock = Date.now
 } = {}) {
   if (typeof secret !== "string" || Buffer.byteLength(secret, "utf8") < 32) {
@@ -79,6 +79,7 @@ export function createExecutionPlanAuthorizer({
     }
     const envelope = {
       version: 1,
+      tokenId: randomUUID(),
       tenantId: tenant,
       issuedAt,
       expiresAt: issuedAt + ttlMs,
@@ -117,11 +118,12 @@ export function createExecutionPlanAuthorizer({
 
     const now = readNow(clock);
     if (!envelope || envelope.version !== 1 ||
+        typeof envelope.tokenId !== "string" || !envelope.tokenId ||
         !Number.isSafeInteger(envelope.issuedAt) ||
         !Number.isSafeInteger(envelope.expiresAt) ||
         envelope.expiresAt <= envelope.issuedAt ||
         envelope.expiresAt - envelope.issuedAt > ttlMs ||
-        envelope.issuedAt > now ||
+        envelope.issuedAt > now + 30_000 ||
         !envelope.request || !Array.isArray(envelope.request.steps)) {
       return { authorized: false, error: "execution_plan_authorization_invalid" };
     }
@@ -140,7 +142,8 @@ export function createExecutionPlanAuthorizer({
     return {
       authorized: true,
       request: structuredClone(envelope.request),
-      expiresAt: envelope.expiresAt
+      expiresAt: envelope.expiresAt,
+      tokenId: envelope.tokenId
     };
   }
 
