@@ -112,6 +112,21 @@ section.panel, .stat-card { background: var(--surface); border: 1px solid var(--
 .panel-grid { display: grid; grid-template-columns: minmax(0, 1.07fr) minmax(350px, .93fr); gap: 18px; align-items: start; }
 .inline-note { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border: 1px solid #dce6fa; background: #f4f7ff; border-radius: 10px; color: #566882; font-size: 11px; line-height: 1.6; }
 .inline-note svg { width: 15px; height: 15px; color: var(--blue); flex: none; margin-top: 1px; }
+.notice-card {
+  display: flex; align-items: center; gap: 13px; padding: 14px 16px; margin: 0 0 16px;
+  border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); min-width: 0;
+}
+.notice-card.notice-auth, .notice-card.notice-scope { border-color: #cbd8ff; background: #f4f7ff; }
+.notice-card.notice-preview { border-color: #ead7ae; background: #fff9ed; }
+.notice-icon {
+  display: grid; place-items: center; width: 30px; height: 30px; flex: none; border-radius: 9px;
+  background: var(--blue-soft); color: var(--blue); font-size: 15px; font-weight: 800;
+}
+.notice-preview .notice-icon { background: #fff0d2; color: var(--amber); }
+.notice-copy { min-width: 0; flex: 1; }
+.notice-copy strong { display: block; color: var(--ink); font-size: 12px; font-weight: 780; }
+.notice-copy p { margin: 3px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.notice-card .btn { flex: none; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
 .form-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 label { display: grid; gap: 7px; color: #526178; font-size: 11px; font-weight: 680; margin-bottom: 15px; min-width: 0; }
@@ -268,6 +283,9 @@ summary { color: #53627a; cursor: pointer; font-size: 11px; font-weight: 700; }
   .topbar-actions .btn { min-height: 32px; padding: 6px 9px; }
   .page-heading { display: block; margin-bottom: 18px; }
   .page-heading .button-row { margin-top: 15px; }
+  .notice-card { align-items: flex-start; flex-wrap: wrap; padding: 13px; }
+  .notice-card .notice-copy { flex-basis: calc(100% - 46px); }
+  .notice-card .btn { margin-left: 43px; }
   .stats-grid { gap: 9px; }
   .stat-card { padding: 13px; }
   .stat-value { font-size: 25px; margin-top: 10px; }
