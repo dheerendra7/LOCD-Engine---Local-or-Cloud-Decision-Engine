@@ -12,13 +12,20 @@ import { createLogger, createRequestId } from "../../../packages/observability/s
 import { createCalibrator } from "../../../packages/calibration/src/index.js";
 import { createIdempotencyStore } from "../../../packages/runtime/src/index.js";
 import { createRateLimiter, getClientKey } from "./rate-limit.js";
-import { createCoordinatedFixedWindowRateLimiter, createCoordinatedIdempotencyStore } from "../../../packages/coordination/src/index.js";
+import {
+  createCoordinatedFixedWindowRateLimiter,
+  createCoordinatedIdempotencyStore,
+  createInMemoryCoordinationStore
+} from "../../../packages/coordination/src/index.js";
+import { createCircuitBreaker } from "../../../packages/resilience/src/index.js";
+import { createReliabilitySloEvaluator } from "../../../packages/reliability/src/slo.js";
 import { createProbeScheduler } from "../../../packages/probing/src/index.js";
 import {
   createDryRunExecutionAdapter,
   createExecutionRegistry,
   executePlan
 } from "../../../packages/execution/src/index.js";
+import { createExecutionPlanAuthorizer } from "../../../packages/execution/src/index.js";
 import { loadProvidersFromFile } from "../../../packages/providers/src/index.js";
 import { loadScopedAuthFromEnv } from "../../../packages/auth/src/index.js";
 import { createSQLiteStateStores } from "../../../packages/sqlite/src/index.js";
@@ -33,12 +40,31 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
 
 
+function backendModeFor(store) {
+  const capabilities = store?.capabilities || {};
+  if (capabilities.shared === true) return "shared";
+  if (capabilities.durable === true) return "durable-local";
+  return "process-local";
+}
+
+function backendNameFor(store, configuredName) {
+  // Keep concrete adapter labels such as "sqlite" or "network", but do not
+  // let a stale "process-local" label contradict the store's capabilities.
+  if (typeof configuredName === "string" &&
+      configuredName.trim() &&
+      configuredName !== "process-local") return configuredName;
+  return backendModeFor(store);
+}
+
 function validateProductionSafety({
   strict = false,
   authEnabled,
   rateLimitEnabled,
   decisionStore,
-  policyStore
+  policyStore,
+  executionEnabled = false,
+  executionPlanAuthorizationEnabled = false,
+  executionPlanAuthorizationShared = false
 } = {}) {
   if (!strict) return;
 
@@ -50,6 +76,12 @@ function validateProductionSafety({
   }
   if (policyStore?.capabilities?.durable !== true) {
     failures.push("policy store is not durable");
+  }
+  if (executionEnabled && !executionPlanAuthorizationEnabled) {
+    failures.push("live execution plan authorization is not configured");
+  }
+  if (executionEnabled && !executionPlanAuthorizationShared) {
+    failures.push("live execution plan claims are not backed by shared coordination");
   }
 
   if (failures.length) {
@@ -154,7 +186,7 @@ async function serveWeb(res, pathname) {
     const type = types[extension] || "text/plain";
     res.writeHead(200, {
       ...SECURITY_HEADERS,
-      "content-security-policy": "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self';",
+      "content-security-policy": "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self';",
       "content-type": type + "; charset=utf-8",
       "cache-control": "no-store"
     });
@@ -280,7 +312,54 @@ export function createConfiguredProbeScheduler({
   if (!registry) throw new Error("registry is required");
   if (intervalMs <= 0) return null;
 
-  if (typeof registry.forTenant === "function" && typeof registry.listTenantIds === "function") {
+  let probeHooks = {
+    beforeProbe: null,
+    onResult: null
+  };
+
+  function setHooks(hooks = {}) {
+    if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) {
+      throw new Error("probe hooks must be an object");
+    }
+    for (const name of ["beforeProbe", "onResult"]) {
+      if (hooks[name] != null && typeof hooks[name] !== "function") {
+        throw new Error(name + " probe hook must be a function");
+      }
+    }
+    probeHooks = { ...probeHooks, ...hooks };
+    return true;
+  }
+
+  function createTenantHooks(tenantId) {
+    return {
+      beforeProbe: details => probeHooks.beforeProbe
+        ? probeHooks.beforeProbe({ ...details, tenantId })
+        : null,
+      onResult: async result => {
+        try {
+          logger.info({
+            event: "target_probe",
+            tenantId,
+            targetId: result.targetId,
+            status: result.status,
+            reason: result.reason || null,
+            errorClass: result.errorClass || null,
+            available: result.snapshot?.available,
+            health: result.snapshot?.health,
+            latencyMs: result.snapshot?.estimatedLatencyMs
+          });
+        } catch {
+          // Logging must not prevent circuit-breaker result processing.
+        }
+        if (probeHooks.onResult) {
+          await probeHooks.onResult({ ...result, tenantId });
+        }
+      }
+    };
+  }
+
+  if (typeof registry.forTenant === "function" &&
+      typeof registry.listTenantIds === "function") {
     const schedulers = new Map();
 
     function syncSchedulers() {
@@ -290,18 +369,7 @@ export function createConfiguredProbeScheduler({
           registry: registry.forTenant(tenantId),
           intervalMs,
           maxConcurrent,
-          onResult: result => {
-            logger.info({
-              event: "target_probe",
-              tenantId,
-              targetId: result.targetId,
-              status: result.status,
-              errorClass: result.errorClass || null,
-              available: result.snapshot?.available,
-              health: result.snapshot?.health,
-              latencyMs: result.snapshot?.estimatedLatencyMs
-            });
-          }
+          ...createTenantHooks(tenantId)
         }));
       }
     }
@@ -318,6 +386,7 @@ export function createConfiguredProbeScheduler({
 
     return {
       runOnce: runAll,
+      setHooks,
       start() {
         if (running) return false;
         running = true;
@@ -347,22 +416,17 @@ export function createConfiguredProbeScheduler({
     };
   }
 
-  return createProbeScheduler({
+  const tenantId = registry.tenantId || "default";
+  const scheduler = createProbeScheduler({
     registry,
     intervalMs,
     maxConcurrent,
-    onResult: result => {
-      logger.info({
-        event: "target_probe",
-        targetId: result.targetId,
-        status: result.status,
-        errorClass: result.errorClass || null,
-        available: result.snapshot?.available,
-        health: result.snapshot?.health,
-        latencyMs: result.snapshot?.estimatedLatencyMs
-      });
-    }
+    ...createTenantHooks(tenantId)
   });
+  return {
+    ...scheduler,
+    setHooks
+  };
 }
 
 export async function createConfiguredTargetRegistry({
@@ -467,12 +531,26 @@ export function createServer({
   rateLimitMaxRequests = Number(process.env.LOCD_RATE_LIMIT_RPM || 0),
   rateLimitWindowMs = 60_000,
   trustProxy = process.env.LOCD_TRUST_PROXY === "true",
+  trustedProxyHops = Number(process.env.LOCD_TRUST_PROXY_HOPS || 1),
   idempotencyLockTtlMs = Number(process.env.LOCD_IDEMPOTENCY_LOCK_TTL_MS || 30_000),
+  circuitBreaker = null,
+  circuitBreakerFailureThreshold = Number(process.env.LOCD_CIRCUIT_BREAKER_FAILURE_THRESHOLD || 3),
+  circuitBreakerFailureWindowMs = Number(process.env.LOCD_CIRCUIT_BREAKER_FAILURE_WINDOW_MS || 30_000),
+  circuitBreakerCooldownMs = Number(process.env.LOCD_CIRCUIT_BREAKER_COOLDOWN_MS || 15_000),
+  circuitBreakerProbeLeaseMs = Number(process.env.LOCD_CIRCUIT_BREAKER_PROBE_LEASE_MS || 60_000),
+  circuitBreakerHistoryRetentionMs = Number(process.env.LOCD_CIRCUIT_BREAKER_HISTORY_RETENTION_MS || 604_800_000),
+  circuitBreakerHistoryMaxEntries = Number(process.env.LOCD_CIRCUIT_BREAKER_HISTORY_MAX_ENTRIES || 2_000),
+  reliabilitySloAvailabilityTarget = Number(process.env.LOCD_RELIABILITY_SLO_TARGET || 0.999),
+  reliabilitySloMinimumSamples = Number(process.env.LOCD_RELIABILITY_SLO_MIN_SAMPLES || 20),
+  reliabilitySloWarningBurnRate = Number(process.env.LOCD_RELIABILITY_SLO_WARNING_BURN_RATE || 2),
+  reliabilitySloCriticalBurnRate = Number(process.env.LOCD_RELIABILITY_SLO_CRITICAL_BURN_RATE || 5),
   logger = createLogger({
     level: process.env.LOCD_LOG_LEVEL || "info"
   }),
   executionRegistry = null,
   executionEnabled = process.env.LOCD_EXECUTION_ENABLED === "true",
+  executionPlanSecret = process.env.LOCD_EXECUTION_PLAN_SECRET?.trim() || null,
+  executionPlanTtlMs = Number(process.env.LOCD_EXECUTION_PLAN_TTL_MS || 600_000),
   authorizer = null,
   probeScheduler = null,
   serviceVersion = "0.1.0",
@@ -489,6 +567,9 @@ export function createServer({
 } = {}) {
   if (!Number.isFinite(maxBodyBytes) || maxBodyBytes < 1) {
     throw new Error("maxBodyBytes must be >= 1");
+  }
+  if (trustProxy && (!Number.isSafeInteger(trustedProxyHops) || trustedProxyHops < 1)) {
+    throw new Error("trustedProxyHops must be a positive safe integer when trustProxy is enabled");
   }
   if (!Number.isFinite(idempotencyLockTtlMs) || idempotencyLockTtlMs < 1) {
     throw new Error("idempotencyLockTtlMs must be >= 1");
@@ -540,6 +621,32 @@ export function createServer({
     legacyApiKey: apiKey
   });
 
+  const executionPlanAuthorizer = executionPlanSecret
+    ? createExecutionPlanAuthorizer({
+        secret: executionPlanSecret,
+        ttlMs: executionPlanTtlMs
+      })
+    : null;
+  const executionPlanClaimStore = coordinationStore || createInMemoryCoordinationStore();
+
+  async function resolvePolicyForTenant(tenantId, input) {
+    const candidate = input && typeof input === "object" ? input : {};
+    if (!candidate.profile) return candidate;
+
+    const custom = await policyStore.get(tenantId, candidate.profile);
+    if (custom) {
+      return {
+        ...custom.policy,
+        ...candidate,
+        profile: custom.baseProfile
+      };
+    }
+
+    const builtIn = listPolicyProfiles().some(profile => profile.id === candidate.profile);
+    if (!builtIn) throw new Error("unknown_policy_profile");
+    return candidate;
+  }
+
   const effectiveIdempotencyStore = idempotencyStore ||
     (coordinationStore
       ? createCoordinatedIdempotencyStore({ store: coordinationStore })
@@ -557,12 +664,114 @@ export function createServer({
           windowMs: rateLimitWindowMs
         }));
 
+  const hasAtomicCircuitCoordination = coordinationStore &&
+    typeof coordinationStore.setIfValue === "function" &&
+    typeof coordinationStore.deleteIfValue === "function";
+  const coordinationMode = backendModeFor(coordinationStore);
+  const circuitBreakerStore = hasAtomicCircuitCoordination
+    ? coordinationStore
+    : createInMemoryCoordinationStore();
+  const effectiveCircuitBreaker = circuitBreaker || createCircuitBreaker({
+    store: circuitBreakerStore,
+    failureThreshold: circuitBreakerFailureThreshold,
+    failureWindowMs: circuitBreakerFailureWindowMs,
+    cooldownMs: circuitBreakerCooldownMs,
+    probeLeaseMs: circuitBreakerProbeLeaseMs,
+    historyRetentionMs: circuitBreakerHistoryRetentionMs,
+    historyMaxEntries: circuitBreakerHistoryMaxEntries
+  });
+  // A compare-and-set API is necessary for safe breaker transitions, but it
+  // does not by itself make the state cross-instance. Both atomic operations
+  // and an explicitly shared backend capability are required for that claim.
+  const circuitBreakerBackend = circuitBreaker
+    ? "custom"
+    : hasAtomicCircuitCoordination
+      ? coordinationMode
+      : "process-local";
+  const telemetryBackendName = backendNameFor(decisionStore, telemetryBackend);
+  const policyBackendName = backendNameFor(policyStore, policyBackend);
+  const coordinationBackendName = backendNameFor(coordinationStore, coordinationBackend);
+  for (const method of ["annotateTargets", "acquire", "recordFailure", "recordSuccess", "snapshot"]) {
+    if (typeof effectiveCircuitBreaker?.[method] !== "function") {
+      throw new Error("circuitBreaker must implement " + method + "()");
+    }
+  }
+  const reliabilitySloEvaluator = createReliabilitySloEvaluator({
+    availabilityTarget: reliabilitySloAvailabilityTarget,
+    minimumSamples: reliabilitySloMinimumSamples,
+    warningBurnRate: reliabilitySloWarningBurnRate,
+    criticalBurnRate: reliabilitySloCriticalBurnRate
+  });
+
+  if (probeScheduler && typeof probeScheduler.setHooks === "function") {
+    probeScheduler.setHooks({
+      beforeProbe: async ({ targetId, tenantId: probeTenantId = "default" }) => {
+        const admission = await effectiveCircuitBreaker.acquire(probeTenantId, targetId, {
+          source: "scheduled_probe"
+        });
+        return admission.allowed
+          ? {
+              allowed: true,
+              context: { probeToken: admission.probeToken ?? null }
+            }
+          : {
+              allowed: false,
+              reason: admission.reason
+            };
+      },
+      onResult: async ({
+        targetId,
+        tenantId: probeTenantId = "default",
+        status,
+        probeContext
+      }) => {
+        if (!targetId || (status !== "success" && status !== "failed")) return;
+        const options = {
+          probeToken: probeContext?.probeToken ?? null,
+          source: "scheduled_probe"
+        };
+        try {
+          const updated = status === "success"
+            ? await effectiveCircuitBreaker.recordSuccess(probeTenantId, targetId, options)
+            : await effectiveCircuitBreaker.recordFailure(probeTenantId, targetId, options);
+          if (updated === false) {
+            logger.warn({
+              event: "probe_circuit_breaker_update_ignored",
+              tenantId: probeTenantId,
+              targetId,
+              status,
+              reason: options.probeToken ? "stale_probe_owner" : "circuit_state_changed"
+            });
+          }
+        } catch (error) {
+          logger.warn({
+            event: "probe_circuit_breaker_update_failed",
+            tenantId: probeTenantId,
+            targetId,
+            status,
+            errorClass: error instanceof Error ? error.constructor.name : "unknown_error"
+          });
+        }
+      }
+    });
+  }
+
+  if (coordinationStore && !hasAtomicCircuitCoordination && !circuitBreaker) {
+    logger.warn({
+      event: "circuit_breaker_using_process_local_state",
+      reason: "coordination_backend_missing_atomic_compare"
+    });
+  }
+
   validateProductionSafety({
     strict: productionStrict,
     authEnabled: auth.enabled,
     rateLimitEnabled: effectiveRateLimiter.enabled,
     decisionStore,
-    policyStore
+    policyStore,
+    executionEnabled,
+    executionPlanAuthorizationEnabled: Boolean(executionPlanAuthorizer),
+    executionPlanAuthorizationShared: coordinationStore?.capabilities?.shared === true
   });
 
   const server = http.createServer(async (req, res) => {
@@ -570,6 +779,48 @@ export function createServer({
     const startedAt = process.hrtime.bigint();
     let requestLogWritten = false;
     let pathname = "unknown";
+    let idempotencyClaim = null;
+    let idempotencyResultProduced = false;
+    let idempotencyRenewalTimer = null;
+    let idempotencyRenewalPromise = null;
+
+    const stopIdempotencyRenewal = async () => {
+      if (idempotencyRenewalTimer) {
+        clearInterval(idempotencyRenewalTimer);
+        idempotencyRenewalTimer = null;
+      }
+      if (idempotencyRenewalPromise) await idempotencyRenewalPromise;
+    };
+
+    const startIdempotencyRenewal = claim => {
+      if (typeof effectiveIdempotencyStore.renew !== "function") return;
+      const intervalMs = Math.max(1, Math.floor(idempotencyLockTtlMs / 3));
+      idempotencyRenewalTimer = setInterval(() => {
+        if (idempotencyRenewalPromise || idempotencyClaim !== claim) return;
+        idempotencyRenewalPromise = (async () => {
+          try {
+            const renewed = await effectiveIdempotencyStore.renew(
+              claim.scope, claim.key, claim.body, claim.claimToken, idempotencyLockTtlMs
+            );
+            if (!renewed && idempotencyClaim === claim && !idempotencyResultProduced) {
+              if (idempotencyRenewalTimer) clearInterval(idempotencyRenewalTimer);
+              idempotencyRenewalTimer = null;
+              logger.warn({ event: "idempotency_claim_renewal_lost", requestId, method: req.method, path: pathname });
+            }
+          } catch (error) {
+            logger.warn({
+              event: "idempotency_claim_renewal_failed",
+              requestId,
+              errorClass: error instanceof Error ? error.constructor.name : "unknown_error"
+            });
+          }
+        })().finally(() => {
+          idempotencyRenewalPromise = null;
+        });
+        idempotencyRenewalPromise.catch(() => {});
+      }, intervalMs);
+      idempotencyRenewalTimer.unref?.();
+    };
 
     try {
       const url = new URL(req.url || "/", "http://localhost");
@@ -636,7 +887,16 @@ export function createServer({
             idempotencyLockTtlMs
           );
 
-          if (claim.claimed) return null;
+          if (claim.claimed) {
+            idempotencyClaim = {
+              scope,
+              key: idempotencyKey,
+              body: structuredClone(body),
+              claimToken: claim.claimToken
+            };
+            startIdempotencyRenewal(idempotencyClaim);
+            return null;
+          }
 
           if (claim.reason === "in_progress") {
             return {
@@ -657,12 +917,23 @@ export function createServer({
       };
       const rememberResponse = async (body, status, responseBody) => {
         if (!idempotencyKey) return;
+        const scope = scopeKey(tenantId, req.method + " " + pathname);
+        const activeClaim = idempotencyClaim?.scope === scope &&
+          idempotencyClaim.key === idempotencyKey
+          ? idempotencyClaim
+          : null;
+        // Once the business operation has produced a result, a cache write failure
+        // must not release the claim and permit an immediate duplicate side effect.
+        if (activeClaim) idempotencyResultProduced = true;
         await effectiveIdempotencyStore.remember(
-          scopeKey(tenantId, req.method + " " + pathname),
+          scope,
           idempotencyKey,
-          body,
-          { status, body: responseBody }
+          activeClaim?.body ?? body,
+          { status, body: responseBody },
+          activeClaim?.claimToken ?? null
         );
+        if (activeClaim) await stopIdempotencyRenewal();
+        idempotencyClaim = null;
       };
       const sendReplay = replay => sendJson(res, replay.status, replay.body, {
         "idempotency-replayed": "true"
@@ -670,7 +941,7 @@ export function createServer({
 
       if (pathname.startsWith("/v1/")) {
         const rate = await effectiveRateLimiter.consume(
-          scopeKey(tenantId, getClientKey(req, { trustProxy }))
+          scopeKey(tenantId, getClientKey(req, { trustProxy, trustedProxyHops }))
         );
         if (effectiveRateLimiter.enabled) {
           res.setHeader("x-ratelimit-limit", String(rate.limit));
@@ -730,6 +1001,8 @@ export function createServer({
           return;
         }
 
+        let executablePlan = body.plan;
+        let registry = null;
         if (mode === "live") {
           if (!executionEnabled) {
             sendJson(res, 403, { error: "live_execution_disabled" });
@@ -743,21 +1016,181 @@ export function createServer({
             sendJson(res, 503, { error: "live_execution_requires_rate_limit" });
             return;
           }
+          if (!executionPlanAuthorizer) {
+            sendJson(res, 503, { error: "execution_plan_signing_unavailable" });
+            return;
+          }
+
+          const authorization = executionPlanAuthorizer.verify({
+            token: body.executionAuthorization,
+            tenantId,
+            plan: body.plan
+          });
+          if (!authorization.authorized) {
+            const status = authorization.error === "execution_plan_tenant_mismatch" ? 403 : 409;
+            sendJson(res, status, { error: authorization.error });
+            return;
+          }
+
+          // Re-evaluate the signed plan against the current tenant registry and
+          // current breaker state. Request-scoped simulation targets can never
+          // authorize a live provider call.
+          const currentTargets = await effectiveCircuitBreaker.annotateTargets(
+            await requestRegistry.list(),
+            tenantId
+          );
+          if (!currentTargets.length) {
+            sendJson(res, 409, { error: "execution_plan_stale" });
+            return;
+          }
+
+          const currentPlan = planHybridExecution({
+            ...authorization.request,
+            policy: await resolvePolicyForTenant(tenantId, authorization.request.policy),
+            targets: currentTargets
+          });
+          if (!currentPlan.valid) {
+            sendJson(res, 409, {
+              error: "execution_plan_stale",
+              reasons: currentPlan.reasons,
+              rejected: currentPlan.rejected
+            });
+            return;
+          }
+
+          // A global targetId -> adapter map is unsafe when target IDs are
+          // tenant-local. Resolve a tenant-specific adapter registry before
+          // consuming the single-use authorization token.
+          if (executionRegistry && typeof executionRegistry.forTenant === "function") {
+            registry = await executionRegistry.forTenant(tenantId);
+          } else if (executionRegistry && typeof targetRegistry.forTenant === "function") {
+            sendJson(res, 503, { error: "tenant_scoped_execution_registry_required" });
+            return;
+          } else {
+            registry = executionRegistry ||
+              await createConfiguredExecutionRegistry({ targetRegistry: requestRegistry });
+          }
+          if (!registry || typeof registry.get !== "function") {
+            sendJson(res, 503, { error: "execution_registry_unavailable" });
+            return;
+          }
+
+          const claimNow = Date.now();
+          const claimTtlMs = authorization.expiresAt - claimNow;
+          if (claimTtlMs <= 0) {
+            sendJson(res, 409, { error: "execution_plan_authorization_expired" });
+            return;
+          }
+          const claimKey = "locd:execution-plan:consumed:" +
+            encodeURIComponent(tenantId) + ":" + authorization.tokenId;
+          const claimed = await executionPlanClaimStore.setIfAbsent(
+            claimKey,
+            { tenantId, consumedAt: claimNow },
+            { ttlMs: claimTtlMs }
+          );
+          if (!claimed) {
+            sendJson(res, 409, { error: "execution_plan_authorization_replayed" });
+            return;
+          }
+
+          const payloadsByStep = new Map(
+            body.plan.steps.map(step => [String(step.id), step])
+          );
+          executablePlan = {
+            ...currentPlan,
+            steps: currentPlan.steps.map(step => {
+              const supplied = payloadsByStep.get(String(step.id));
+              return supplied && Object.hasOwn(supplied, "payload")
+                ? { ...step, payload: supplied.payload }
+                : step;
+            })
+          };
         }
 
-        const registry = executionRegistry ||
-          await createConfiguredExecutionRegistry({ targetRegistry: requestRegistry });
+        if (!registry) {
+          registry = executionRegistry && typeof executionRegistry.forTenant === "function"
+            ? await executionRegistry.forTenant(tenantId)
+            : executionRegistry ||
+              await createConfiguredExecutionRegistry({ targetRegistry: requestRegistry });
+        }
 
-        const responseBody = await executePlan(body.plan, {
+        const executionAbortController = new AbortController();
+        const abortExecutionOnDisconnect = () => {
+          if (!res.writableEnded && !executionAbortController.signal.aborted) {
+            executionAbortController.abort();
+          }
+        };
+        if (req.aborted || res.destroyed) abortExecutionOnDisconnect();
+        req.once("aborted", abortExecutionOnDisconnect);
+        res.once("close", abortExecutionOnDisconnect);
+
+        let responseBody;
+        try {
+          responseBody = await executePlan(executablePlan, {
           registry,
+          signal: executionAbortController.signal,
           mode,
           timeoutMs: body.timeoutMs,
           failFast: body.failFast !== false,
-          includeOutputs: body.includeOutputs === true
-        });
+          includeOutputs: body.includeOutputs === true,
+          beforeStep: mode === "live"
+            ? async ({ step }) => {
+                const admission = await effectiveCircuitBreaker.acquire(tenantId, step.targetId, {
+                  source: "execution"
+                });
+                return admission.allowed
+                  ? { allowed: true, context: admission }
+                  : { allowed: false, errorClass: admission.reason };
+              }
+            : null,
+          onStepResult: mode === "live"
+            ? async ({ step, status, executionContext, cancelled }) => {
+                const breakerOptions = {
+                  probeToken: executionContext?.probeToken ?? null,
+                  source: "execution"
+                };
+                try {
+                  if (cancelled) {
+                    if (breakerOptions.probeToken && typeof effectiveCircuitBreaker.release === "function") {
+                      await effectiveCircuitBreaker.release(
+                        tenantId,
+                        step.targetId,
+                        breakerOptions
+                      );
+                    }
+                    return;
+                  }
+                  if (status === "completed") {
+                    await effectiveCircuitBreaker.recordSuccess(
+                      tenantId,
+                      step.targetId,
+                      breakerOptions
+                    );
+                  } else {
+                    await effectiveCircuitBreaker.recordFailure(
+                      tenantId,
+                      step.targetId,
+                      breakerOptions
+                    );
+                  }
+                } catch (error) {
+                  logger.warn({
+                    event: "circuit_breaker_update_failed",
+                    requestId,
+                    targetId: step.targetId,
+                    errorClass: error instanceof Error ? error.constructor.name : "unknown_error"
+                  });
+                }
+              }
+            : null
+          });
+        } finally {
+          req.off("aborted", abortExecutionOnDisconnect);
+          res.off("close", abortExecutionOnDisconnect);
+        }
 
         await rememberResponse(body, 200, responseBody);
-        sendJson(res, 200, responseBody);
+        if (!res.destroyed) sendJson(res, 200, responseBody);
         return;
       }
 
@@ -769,16 +1202,37 @@ export function createServer({
           return;
         }
         const hasRequestTargets = Array.isArray(body.targets) && body.targets.length > 0;
-        const request = hasRequestTargets
-          ? body
-          : { ...body, targets: await requestRegistry.list() };
-
-        if (!request.targets.length) {
+        const registeredTargets = hasRequestTargets
+          ? body.targets
+          : await effectiveCircuitBreaker.annotateTargets(
+              await requestRegistry.list(),
+              tenantId
+            );
+        if (!registeredTargets.length) {
           sendJson(res, 503, { error: "no_registered_targets" });
           return;
         }
 
+        const policy = await resolvePolicyForTenant(tenantId, body.policy || {});
+        const request = { ...body, policy, targets: registeredTargets };
         const responseBody = planHybridExecution(request);
+
+        // Only plans evaluated against the server's registered tenant targets
+        // can receive a live-execution authorization. Request-scoped targets
+        // remain useful for simulations, but never cross the live boundary.
+        if (!hasRequestTargets && responseBody.valid && executionPlanAuthorizer) {
+          responseBody.executionAuthorization = executionPlanAuthorizer.issue({
+            tenantId,
+            plan: responseBody,
+            request: {
+              workload: body.workload,
+              constraints: body.constraints || {},
+              policy: body.policy || {},
+              steps: body.steps
+            }
+          });
+        }
+
         await rememberResponse(body, 200, responseBody);
         sendJson(res, 200, responseBody);
         return;
@@ -799,6 +1253,9 @@ export function createServer({
         const calibratedTargets = calibrationEnabled
           ? calibrator.apply(rawTargets, body.workload?.type || "unknown", tenantId)
           : rawTargets;
+        const decisionTargets = hasRequestTargets
+          ? calibratedTargets
+          : await effectiveCircuitBreaker.annotateTargets(calibratedTargets, tenantId);
         let policy = body.policy || {};
         if (policyStore && policy.profile) {
           const custom = await policyStore.get(tenantId, policy.profile);
@@ -810,7 +1267,7 @@ export function createServer({
             };
           }
         }
-        const request = { ...body, policy, targets: calibratedTargets };
+        const request = { ...body, policy, targets: decisionTargets };
 
         if (!request.targets.length) {
           sendJson(res, 503, { error: "no_registered_targets" });
@@ -819,7 +1276,7 @@ export function createServer({
 
         const decision = decide(request);
 
-        const selectedTarget = calibratedTargets.find(
+        const selectedTarget = decisionTargets.find(
           target => String(target?.id) === String(decision.targetId)
         );
 
@@ -841,7 +1298,8 @@ export function createServer({
             .filter((target, index) => {
               const original = rawTargets[index];
               return target.estimatedLatencyMs !== original.estimatedLatencyMs ||
-                target.estimatedCostUsd !== original.estimatedCostUsd;
+                target.estimatedCostUsd !== original.estimatedCostUsd ||
+                JSON.stringify(target.pricing) !== JSON.stringify(original.pricing);
             })
             .map(target => target.id)
           : [];
@@ -875,22 +1333,28 @@ export function createServer({
 
         try {
           const event = await decisionStore.recordOutcome(body.decisionId, body, { tenantId });
-          calibrator.observe({
-            tenantId,
-            targetId: event.targetId,
-            workloadType: event.workloadType,
-            estimatedLatencyMs: event.estimatedLatencyMs,
-            actualLatencyMs: event.actualLatencyMs,
-            estimatedCostUsd: event.estimatedCostUsd,
-            actualCostUsd: event.actualCostUsd,
-            outcome: event.outcome,
-            utilization: event.targetUtilization
-          });
+          if (event.targetId != null) {
+            calibrator.observe({
+              tenantId,
+              targetId: event.targetId,
+              workloadType: event.workloadType,
+              estimatedLatencyMs: event.estimatedLatencyMs,
+              actualLatencyMs: event.actualLatencyMs,
+              estimatedCostUsd: event.estimatedCostUsd,
+              actualCostUsd: event.actualCostUsd,
+              outcome: event.outcome,
+              utilization: event.targetUtilization
+            });
+          }
           await rememberResponse(body, 200, event);
           sendJson(res, 200, event);
         } catch (error) {
           if (error instanceof Error && error.message === "decision_not_found") {
             sendJson(res, 404, { error: "decision_not_found" });
+            return;
+          }
+          if (error instanceof Error && error.message === "decision_already_completed") {
+            sendJson(res, 409, { error: "decision_already_completed" });
             return;
           }
           throw error;
@@ -916,7 +1380,11 @@ export function createServer({
           if (!candidate.profile) return candidate;
 
           const custom = await policyStore.get(tenantId, candidate.profile);
-          if (!custom) return candidate;
+          if (!custom) {
+            const builtIn = listPolicyProfiles().some(profile => profile.id === candidate.profile);
+            if (!builtIn) throw new Error("unknown_policy_profile");
+            return candidate;
+          }
 
           return {
             ...custom.policy,
@@ -1192,17 +1660,72 @@ export function createServer({
           return;
         }
 
+        if (typeof requestRegistry.get === "function") {
+          const existingTarget = await requestRegistry.get(id);
+          if (existingTarget == null) {
+            sendJson(res, 404, { error: "target_not_found" });
+            return;
+          }
+        }
+        if (typeof requestRegistry.listProbeable === "function") {
+          const probeableTargets = await requestRegistry.listProbeable();
+          if (!probeableTargets.some(target => String(target.id) === id)) {
+            sendJson(res, 501, { error: "target_does_not_support_probe" });
+            return;
+          }
+        }
+
+        const admission = await effectiveCircuitBreaker.acquire(tenantId, id, {
+          source: "manual_probe"
+        });
+        if (!admission.allowed) {
+          sendJson(res, 503, {
+            error: admission.reason,
+            circuitBreaker: admission.state
+          });
+          return;
+        }
+        const breakerOptions = {
+          probeToken: admission.probeToken ?? null,
+          source: "manual_probe"
+        };
+
         try {
           const snapshot = await requestRegistry.probe(id);
+          const updated = snapshot?.available === false
+            ? await effectiveCircuitBreaker.recordFailure(tenantId, id, breakerOptions)
+            : await effectiveCircuitBreaker.recordSuccess(tenantId, id, breakerOptions);
+          if (updated === false) {
+            logger.warn({
+              event: "manual_probe_circuit_breaker_update_ignored",
+              requestId,
+              tenantId,
+              targetId: id
+            });
+          }
           if (targetFile) await targetRegistry.saveToFile(targetFile);
           await rememberResponse(body, 200, snapshot);
           sendJson(res, 200, snapshot);
         } catch (error) {
-          if (error instanceof Error && error.message === "target_not_found") {
+          const message = error instanceof Error ? error.message : "probe_failed";
+          if (message !== "target_not_found" && message !== "target_does_not_support_probe") {
+            try {
+              await effectiveCircuitBreaker.recordFailure(tenantId, id, breakerOptions);
+            } catch (updateError) {
+              logger.warn({
+                event: "manual_probe_circuit_breaker_update_failed",
+                requestId,
+                tenantId,
+                targetId: id,
+                errorClass: updateError instanceof Error ? updateError.constructor.name : "unknown_error"
+              });
+            }
+          }
+          if (message === "target_not_found") {
             sendJson(res, 404, { error: "target_not_found" });
             return;
           }
-          if (error instanceof Error && error.message === "target_does_not_support_probe") {
+          if (message === "target_does_not_support_probe") {
             sendJson(res, 501, { error: "target_does_not_support_probe" });
             return;
           }
@@ -1287,15 +1810,45 @@ export function createServer({
         return;
       }
 
+      if (req.method === "GET" && pathname === "/v1/reliability") {
+        if (typeof effectiveCircuitBreaker.history !== "function") {
+          sendJson(res, 503, { error: "reliability_history_unavailable" });
+          return;
+        }
+        const query = new URL(req.url, "http://locd.invalid").searchParams;
+        const rawWindowMs = query.get("windowMs");
+        const rawLimit = query.get("limit");
+        const windowMs = rawWindowMs == null ? 86_400_000 : Number(rawWindowMs);
+        const limit = rawLimit == null ? 50 : Number(rawLimit);
+        const retentionMs = effectiveCircuitBreaker.config?.historyRetentionMs ?? 604_800_000;
+        if (!Number.isSafeInteger(windowMs) || windowMs < 60_000 || windowMs > retentionMs) {
+          sendJson(res, 400, { error: "windowMs must be between 60000 and configured history retention" });
+          return;
+        }
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+          sendJson(res, 400, { error: "limit must be between 1 and 100" });
+          return;
+        }
+        const report = await effectiveCircuitBreaker.history(tenantId, { windowMs, limit });
+        const slo = reliabilitySloEvaluator.evaluate(report);
+        sendJson(res, 200, { ...report, slo });
+        return;
+      }
+
       if (req.method === "GET" && pathname === "/v1/status") {
-        const targets = await requestRegistry.list();
+        const rawTargets = await requestRegistry.list();
+        const targets = await effectiveCircuitBreaker.annotateTargets(rawTargets, tenantId);
+        const circuitSummary = await effectiveCircuitBreaker.snapshot(rawTargets, tenantId);
         const probeableTargets = typeof requestRegistry.listProbeable === "function"
           ? await requestRegistry.listProbeable()
           : [];
-        const scopedExecutionRegistry = executionRegistry ||
-          (typeof targetRegistry.forTenant === "function"
-            ? await createConfiguredExecutionRegistry({ targetRegistry: requestRegistry })
-            : null);
+        const scopedExecutionRegistry = executionRegistry
+          ? (typeof executionRegistry.forTenant === "function"
+              ? await executionRegistry.forTenant(tenantId)
+              : (typeof targetRegistry.forTenant === "function" ? null : executionRegistry))
+          : (typeof targetRegistry.forTenant === "function"
+              ? await createConfiguredExecutionRegistry({ targetRegistry: requestRegistry })
+              : null);
         const executionAdapters = scopedExecutionRegistry && typeof scopedExecutionRegistry.list === "function"
           ? scopedExecutionRegistry.list()
           : [];
@@ -1307,29 +1860,79 @@ export function createServer({
           stateBackend: describeStateBackend({
             telemetry: decisionStore,
             coordination: coordinationStore,
-            kind: telemetryBackend || "process-local"
+            kind: telemetryBackendName
           }),
           capabilities: {
             executionEnabled: Boolean(executionEnabled),
-            persistentTargets: Boolean(targetFile),
-            persistentTelemetry: Boolean(
-              telemetryBackend && telemetryBackend !== "process-local"
+            executionPlanAuthorizationEnabled: Boolean(executionPlanAuthorizer),
+            executionPlanAuthorizationBackend: executionPlanAuthorizer
+              ? (coordinationStore?.capabilities?.shared === true ? "shared" : "process-local")
+              : "disabled",
+            sharedExecutionPlanAuthorization: Boolean(
+              executionPlanAuthorizer && coordinationStore?.capabilities?.shared === true
             ),
+            liveExecutionRequiresSignedPlan: true,
+            persistentTargets: Boolean(targetFile),
+            persistentTelemetry: decisionStore?.capabilities?.durable === true,
             automaticProbing: Boolean(probeScheduler?.isRunning?.()),
             calibrationEnabled: Boolean(calibrationEnabled),
-            sharedCoordination: Boolean(coordinationStore),
-            coordinationBackend: coordinationBackend ||
-              (coordinationStore ? "shared" : "process-local"),
-            telemetryBackend: telemetryBackend || "process-local",
-            policyBackend: policyBackend || "process-local",
-            rateLimitMode: coordinationStore ? "shared" : "process-local",
-            idempotencyMode: coordinationStore ? "shared" : "process-local"
+            circuitBreakerEnabled: true,
+            circuitBreakerBackend,
+            sharedCircuitBreaker: circuitBreakerBackend === "shared",
+            reliabilityHistoryEnabled: typeof effectiveCircuitBreaker.history === "function",
+            reliabilityHistoryBackend: circuitBreakerBackend,
+            reliabilitySloEnabled: true,
+            reliabilitySloTarget: reliabilitySloEvaluator.policy.availabilityTarget,
+            sharedCoordination: coordinationStore?.capabilities?.shared === true,
+            durableCoordination: coordinationStore?.capabilities?.durable === true,
+            coordinationBackend: coordinationBackendName,
+            telemetryBackend: telemetryBackendName,
+            policyBackend: policyBackendName,
+            rateLimitMode: effectiveRateLimiter.enabled === false
+              ? "disabled"
+              : backendModeFor(effectiveRateLimiter),
+            idempotencyMode: backendModeFor(effectiveIdempotencyStore)
+          },
+          circuitBreakers: {
+            policy: {
+              failureThreshold: Number.isSafeInteger(effectiveCircuitBreaker.config?.failureThreshold)
+                ? effectiveCircuitBreaker.config.failureThreshold
+                : null,
+              failureWindowMs: Number.isSafeInteger(effectiveCircuitBreaker.config?.failureWindowMs)
+                ? effectiveCircuitBreaker.config.failureWindowMs
+                : null,
+              cooldownMs: Number.isSafeInteger(effectiveCircuitBreaker.config?.cooldownMs)
+                ? effectiveCircuitBreaker.config.cooldownMs
+                : null,
+              probeLeaseMs: Number.isSafeInteger(effectiveCircuitBreaker.config?.probeLeaseMs)
+                ? effectiveCircuitBreaker.config.probeLeaseMs
+                : null
+            },
+            targets: targets.map(target => {
+              const breaker = target.circuitBreaker || {};
+              const state = breaker.state === "open" || breaker.state === "half-open"
+                ? breaker.state
+                : "closed";
+              return {
+                targetId: target.id,
+                state,
+                failureCount: Number.isSafeInteger(breaker.failureCount) && breaker.failureCount >= 0
+                  ? breaker.failureCount
+                  : 0,
+                openedAt: Number.isFinite(breaker.openedAt) ? breaker.openedAt : null,
+                retryAt: Number.isFinite(breaker.retryAt) ? breaker.retryAt : null,
+                probeInFlight: breaker.probeInFlight === true
+              };
+            })
           },
           counts: {
             targets: targets.length,
             customPolicies: (await policyStore.list(tenantId)).length,
             probeableTargets: probeableTargets.length,
             executionAdapters: executionAdapters.length,
+            openCircuitTargets: circuitSummary.open,
+            halfOpenCircuitTargets: circuitSummary.halfOpen,
+            closedCircuitTargets: circuitSummary.closed,
             decisions: (await decisionStore.summary({ tenantId })).totalDecisions
           }
         });
@@ -1345,6 +1948,10 @@ export function createServer({
     } catch (error) {
       const message = error instanceof Error ? error.message : "internal_server_error";
 
+      if (message === "unknown_policy_profile") {
+        sendJson(res, 400, { error: "unknown policy profile" });
+        return;
+      }
       if (message === "idempotency_key_reused") {
         sendJson(res, 409, { error: message });
         return;
@@ -1384,6 +1991,25 @@ export function createServer({
         error: "internal_server_error",
         requestId
       });
+    } finally {
+      await stopIdempotencyRenewal();
+      if (idempotencyClaim && !idempotencyResultProduced &&
+          typeof effectiveIdempotencyStore.release === "function") {
+        try {
+          await effectiveIdempotencyStore.release(
+            idempotencyClaim.scope,
+            idempotencyClaim.key,
+            idempotencyClaim.body,
+            idempotencyClaim.claimToken
+          );
+        } catch (error) {
+          logger.warn({
+            event: "idempotency_claim_release_failed",
+            requestId,
+            errorClass: error instanceof Error ? error.constructor.name : "unknown_error"
+          });
+        }
+      }
     }
   });
 

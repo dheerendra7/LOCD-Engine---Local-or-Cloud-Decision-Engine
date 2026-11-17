@@ -1,21 +1,30 @@
 # Deployment
 
-## Render
+## Render production profile
 
-The repository includes render.yaml for a simple Node web-service deployment.
+The checked-in `render.yaml` describes one paid Node web service named `locd-engine`:
 
-Current configuration:
+- Build: `npm ci`; start: `npm start`; runtime: Node 24.21.0 via `.node-version`.
+- Health check: `/ready`; the process listens on Render's `PORT` and binds to `0.0.0.0`. Automatic deploys require the linked Git checks to pass.
+- Compute: Starter plan, Singapore region, one instance.
+- Persistent disk: 1 GB mounted at `/data`.
+- State: SQLite at `/data/locd.db`; registered targets at `/data/targets.json`.
+- Security defaults: strict production safety enabled, API rate limiting enabled, generated `LOCD_API_KEY` and `LOCD_EXECUTION_PLAN_SECRET`.
+- Live provider execution remains disabled (`LOCD_EXECUTION_ENABLED=false`) until operators have configured and verified server-side provider adapters and credentials.
 
-- runtime: Node
-- branch: main
-- build: npm install
-- start: npm start
-- health check: /health
-- compute plan: free
+### Frontend + API topology
 
-Render currently documents free web services as suitable for testing, hobby projects and previews, with limitations; they should not be treated as production infrastructure. Free web services also spin down after 15 minutes of inactivity.
+This is a single-origin full-stack deployment. The API process serves `apps/web/index.html`, `apps/web/styles.css` and `apps/web/app.js` at `/`, `/styles.css` and `/app.js`; the same process handles the dashboard's `/v1/*` requests. No separate frontend host, public API URL or permissive CORS configuration is required.
 
-Source: https://render.com/docs/free
+After the first Blueprint deploy, retrieve the generated `LOCD_API_KEY` from the Render service's Environment page and paste it into **System & access** in the dashboard. The browser keeps the key in page memory only; do not place it in source code, a checked-in config file or a public frontend variable. Keep `LOCD_EXECUTION_PLAN_SECRET` server-side.
+
+### Persistence and scaling boundary
+
+The persistent disk protects the SQLite database and target registry across restarts and deploys. The SQLite implementation is a single-host state backend: keep this service at one instance. Do not increase `numInstances` or attach multiple API instances to this database. Before horizontal scaling or high availability, move coordination, telemetry, policy and target state to managed shared services and validate the migration/backup/restore path.
+
+A persistent disk disables Render's zero-downtime deploy sequence. Schedule deployments accordingly and maintain verified SQLite backups. Render documents persistent disks as a paid-service feature and describes the zero-downtime limitation in its deployment documentation: https://render.com/docs/disks and https://render.com/docs/deploys.
+
+The Free plan is suitable for previews and evaluation only: it spins down after inactivity and does not provide the persistent-disk production profile above. See https://render.com/docs/free.
 
 ## CI runner reproducibility
 
@@ -75,24 +84,19 @@ Set `LOCD_PRODUCTION_STRICT=true` for hosted production deployments that should 
 
 Strict mode requires API authentication, an enabled rate limiter, durable telemetry, and durable policy state. Local development remains unchanged with the default `false`.
 
-## Production checklist
+## Remaining production operations
 
-Before production use, add:
+The Render profile supplies the single-instance baseline: API authentication, an enabled rate limiter, durable SQLite telemetry/policy/coordination state, and a persistent target registry. These are not a substitute for operating the service safely.
 
-- authentication and authorization
-- secret management
-- durable database-backed telemetry
-- managed/shared policy storage with backup and migration controls (the built-in State Service now provides a reference shared policy store)
-- persistent target registry (LOCD_TARGETS_FILE; use durable storage for hosted production)
-- rate limiting
-- structured logs and traces with request-correlated internal error logging
-- provider credential isolation
-- backups and migration strategy
-- uptime/error monitoring
-- SLOs for the LOCD control plane
-- generic 500 responses with request-correlated server-side diagnostics
+Before exposing it to real workloads:
 
-The free deployment is a useful demo and evaluation environment, not a production SLA.
+- Configure a custom domain and verify HTTPS, DNS and rollback behavior.
+- Set up uptime, error-rate, latency, disk-capacity and backup-failure alerts.
+- Schedule SQLite backups and run a restore drill against a separate environment.
+- Add only the provider adapters and credentials that the deployment actually needs; keep credentials in Render secrets, not in provider JSON or browser code.
+- Load-test the API and dashboard with the intended workload and request volume.
+- Keep live execution disabled until provider configuration, authorization scopes, target isolation, idempotency and cancellation behavior have been verified in staging.
+- Do not claim multi-instance availability, a 30-day SLO or a permanent compliance audit trail from the current single-host SQLite backend and bounded reliability history.
 
 ## Persistent target registry
 
@@ -102,7 +106,7 @@ Set:
 
 The server restores targets from this JSON file at startup and writes the file after target registration/removal.
 
-The file is an operator-controlled configuration/state artifact. On managed platforms with ephemeral filesystems, attach persistent storage or use a database-backed registry before depending on restart durability.
+The file is an operator-controlled configuration/state artifact. On managed platforms with ephemeral filesystems, attach persistent storage or use a database-backed registry before depending on restart durability. The Render production profile mounts this file on its `/data` persistent disk.
 
 ## HTTP resource guards
 
@@ -119,11 +123,27 @@ Tune these with the deployment proxy/load balancer in mind.
 
 Use LOCD_MAX_BODY_BYTES to cap JSON request size.
 
-Use LOCD_RATE_LIMIT_RPM to enable an in-process /v1 rate limit. Use LOCD_TRUST_PROXY=true only behind a trusted reverse proxy.
+Use `LOCD_RATE_LIMIT_RPM` to enable an in-process `/v1` rate limit. Only enable `LOCD_TRUST_PROXY=true` when the API cannot be reached directly from untrusted networks and a trusted ingress proxy appends or overwrites `X-Forwarded-For`. Configure `LOCD_TRUST_PROXY_HOPS` to the exact number of trusted proxy hops (default `1`). LOCD selects the client address by counting from the right edge of the forwarding chain, so untrusted entries on the left do not override the address appended by the trusted ingress. If the selected entry is not a valid IP address or the chain is shorter than configured, LOCD falls back to the socket peer address. Incorrect hop counts may group users behind a proxy or select the wrong address; do not turn on proxy trust without matching the real network topology.
 
 Rate limiting is intentionally local to a process; distributed deployments need a shared limiter for a global quota.
 
 Live execution also requires the API rate limiter to be enabled. Set `LOCD_RATE_LIMIT_RPM` to a positive value (or supply an enabled custom limiter) before enabling live execution; otherwise `POST /v1/execute` returns HTTP 503 without invoking a provider.
+
+Live execution additionally requires `LOCD_EXECUTION_PLAN_SECRET` with at least 32 bytes. Set `LOCD_EXECUTION_PLAN_TTL_MS` to control the signed-plan lifetime (default 600 seconds, maximum 15 minutes). Use the same secret on every API instance behind the same load balancer. In strict production mode, enabling live execution without this secret or without shared coordination for single-use plan claims fails startup. A process-local coordination store provides only per-process replay protection; use the shared backend for a multi-instance deployment.
+
+The API issues signed authorizations only for valid plans evaluated against the authenticated tenant's registered targets. Request-scoped target arrays are simulation-only. At execution time LOCD verifies the tenant-bound signature and expiry, reloads current targets, and re-runs policy/circuit validation before invoking any adapter. A stale or modified plan is rejected before provider admission. For multi-tenant deployments that inject execution adapters, use `createTenantExecutionRegistry()` and register adapters through `forTenant(tenantId)`. A flat global execution registry is not accepted for live execution when the target registry is tenant-scoped; this prevents duplicate tenant-local target IDs from resolving to another tenant's provider adapter.
+
+## Provider circuit breaker
+
+Registered targets use a tenant-scoped circuit breaker. Provider execution failures and automatic/manual health-probe failures contribute to `LOCD_CIRCUIT_BREAKER_FAILURE_THRESHOLD` within `LOCD_CIRCUIT_BREAKER_FAILURE_WINDOW_MS`. Once open, the target is excluded from subsequent decisions and hybrid plans for `LOCD_CIRCUIT_BREAKER_COOLDOWN_MS`; scheduled and manual probes are skipped during that cooldown, so they do not continue hitting an isolated provider. A probe that throws or returns `available: false` counts as a failure.
+
+After cooldown, only one owner-token-fenced half-open operation is admitted across the shared coordination backend: either a live execution or a health probe. Its success closes and clears the breaker; failure reopens it with a fresh cooldown. Defaults are 3 failures, a 30-second failure window, a 15-second cooldown and a 60-second probe lease. Keep the probe lease longer than the maximum live execution timeout so stale operations cannot close or overwrite a newer half-open trial. Successful live executions and ordinary health probes reset consecutive closed-state failures, but cannot close an already-open circuit without owning its half-open lease.
+
+Live execution deadlines and HTTP client disconnects are propagated as AbortSignals to provider adapters. Built-in adapters abort their active HTTP request; custom adapters must honor the signal in their own I/O. This is best-effort cancellation only: a remote provider may continue processing a request it accepted before the abort. Caller cancellation releases an owned half-open lease without recording a provider failure; execution timeouts remain provider failures for circuit-breaker accounting.
+
+When SQLite state or the network State Service is configured, circuit state uses the same atomic coordination backend and is shared across API instances. Without an atomic shared coordination backend, the breaker is process-local; `GET /v1/status` exposes `circuitBreakerBackend` and open/half-open target counts. Use a shared backend before relying on fleet-wide failover.
+
+Request-scoped target arrays are simulation inputs and are not overlaid with registered circuit state. Live execution still checks the registered execution target's circuit admission before invoking its provider adapter.
 
 ## HTTP security headers
 
@@ -171,7 +191,7 @@ Keep migrations backward-compatible and additive where possible. A failed migrat
 
 ## SQLite backup and recovery
 
-Use `npm run state:backup -- <source.db> <destination.db>` or the equivalent CLI command to create a native online SQLite backup. The backup refuses to overwrite an existing destination unless `--force` is supplied, and writes through a temporary file before the final rename. Native SQLite online backup support requires Node.js 22.16+; the application itself remains compatible with Node.js 22+.
+Use `npm run state:backup -- <source.db> <destination.db>` or the equivalent CLI command to create a native online SQLite backup. The backup refuses to overwrite an existing destination unless `--force` is supplied, and writes through a temporary file before the final rename. The application declares Node.js >=22.16.0 <25.0.0. CI tests Node.js 22 and 24. Native SQLite online backup support requires Node.js 22.16+.
 
 ## State Service client timeout
 
@@ -203,3 +223,17 @@ The internal State Service requires `LOCD_STATE_SERVICE_API_KEY`. Its health end
 For multiple API instances, set LOCD_STATE_SERVICE_URL and LOCD_STATE_SERVICE_API_KEY to share telemetry and coordination through the internal State Service.
 
 Use LOCD_COORDINATION_URL instead when you need shared rate limiting/idempotency without moving decision telemetry off the API process.
+
+## Provider reliability history
+
+The circuit breaker also maintains a bounded, tenant-scoped operational event history. Defaults are seven days and 2,000 events per tenant. Configure with `LOCD_CIRCUIT_BREAKER_HISTORY_RETENTION_MS` and `LOCD_CIRCUIT_BREAKER_HISTORY_MAX_ENTRIES`. Events contain provider identifiers, timestamps, operation source, success/failure and circuit transitions only; workload payloads and credentials are excluded.
+
+When SQLite or the network State Service provides shared atomic coordination, history is shared across API instances and survives API restarts within the configured retention. With process-local coordination it is isolated to the process and is lost on restart. Treat this bounded history as operational analytics, not as a permanent compliance or audit record. The authenticated `GET /v1/reliability` endpoint exposes time-window summaries, provider breakdowns and recent events.
+
+## Availability SLO and error-budget alerts
+
+LOCD evaluates provider availability from the bounded success/failure history. Defaults are a 99.9% availability target, 20 minimum outcomes before evaluation, warning at 2× the permitted error-budget burn rate and critical at 5×. Configure these with `LOCD_RELIABILITY_SLO_TARGET`, `LOCD_RELIABILITY_SLO_MIN_SAMPLES`, `LOCD_RELIABILITY_SLO_WARNING_BURN_RATE` and `LOCD_RELIABILITY_SLO_CRITICAL_BURN_RATE`.
+
+The selected API history window defines the measurement period. Error-budget consumption is observed failures divided by the failures permitted by that objective for the same window; burn rate may exceed 100% of budget. Low sample volume yields `insufficient_data`. Any known history truncation or write gap yields `incomplete_data` and suppresses threshold alerts to avoid false confidence.
+
+Alerts are deterministic, tenant-scoped API/dashboard signals only. This implementation does not deliver notifications or trigger provider routing changes. Configure history retention to cover the operational SLO window you need; the default seven-day history is not a 30-day SLO store.

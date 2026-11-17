@@ -11,6 +11,10 @@ For a multi-instance deployment, inject a coordination store that implements:
 - setIfAbsent(key, value, options)
 - delete(key)
 - incr(key, options)
+- deleteIfValue(key, expectedValue) — atomic compare-and-delete
+- setIfValue(key, expectedValue, value, options) — atomic compare-and-set
+
+All backends used for coordinated idempotency must implement the two compare operations. The idempotency store fails at construction if either operation is missing; it never silently falls back to an unsafe read-then-write sequence. Rate limiting alone still uses the base contract.
 
 The contract is asynchronous so the backing system can be Redis, a database-backed service, or another atomic shared-state implementation.
 
@@ -22,7 +26,9 @@ The fixed-window limiter uses an atomic increment per client/bucket. The API pre
 
 Completed POST responses can be stored in shared state and replayed by another instance. The API prefixes idempotency scopes with the authenticated tenant so an idempotency key is never replayed across tenants.
 
-The coordination package also exposes claim() using setIfAbsent(). A future execution gateway can use this primitive to prevent concurrent duplicate work before a response exists.
+A claim carries an opaque owner token and a bounded lease. The built-in in-memory and coordinated idempotency stores renew that lease while the API request is still processing. Renewal uses the current owner token and, for shared stores, atomic compare-and-set; a stale owner cannot extend a replacement claim. The API releases its claim when an operation fails before producing its side effect, and only commits a completed response if the same claim still owns the key. If response caching fails after the side effect has been produced, the claim is deliberately retained until its lease expires rather than immediately allowing a duplicate operation.
+
+If an application injects a custom `idempotencyStore`, implement `renew(scope, key, body, claimToken, lockTtlMs)` with owner-token fencing to receive the same long-running request protection. Without that optional method, the custom store's claim remains bounded only by the initial `LOCD_IDEMPOTENCY_LOCK_TTL_MS` lease. In-memory, SQLite and HTTP State Service coordination backends provide the atomic compare operations; custom distributed backends must implement them with native CAS/transactions rather than a separate GET followed by SET or DELETE.
 
 ## Important boundary
 

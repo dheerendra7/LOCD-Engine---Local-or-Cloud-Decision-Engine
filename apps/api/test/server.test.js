@@ -1,7 +1,7 @@
 import http from "node:http";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { checkReadiness, createConfiguredExecutionRegistry, createConfiguredProbeScheduler, createConfiguredTargetRegistry, createGracefulShutdown, createServer } from "../src/server.js";
+import { checkReadiness, readBody, createConfiguredExecutionRegistry, createConfiguredProbeScheduler, createConfiguredTargetRegistry, createGracefulShutdown, createServer } from "../src/server.js";
 import { createDecisionStore, createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { createCalibrator } from "../../../packages/calibration/src/index.js";
 import { createPolicyStore } from "../../../packages/policy-store/src/index.js";
@@ -14,14 +14,35 @@ import {
   createHTTPCoordinationStore
 } from "../../../packages/state-client/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
-import { createExecutionRegistry } from "../../../packages/execution/src/index.js";
+import {
+  createExecutionRegistry,
+  createTenantExecutionRegistry
+} from "../../../packages/execution/src/index.js";
 import { createInMemoryCoordinationStore } from "../../../packages/coordination/src/index.js";
+import { createCircuitBreaker } from "../../../packages/resilience/src/index.js";
+import { createTenantTargetRegistry } from "../../../packages/tenancy/src/index.js";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 let server;
 let baseUrl;
+
+const TEST_EXECUTION_PLAN_SECRET = "api-test-execution-plan-secret-with-at-least-32-bytes";
+
+async function getAuthorizedHybridPlan(url, headers, request) {
+  const response = await fetch(url + "/v1/hybrid-plan", {
+    method: "POST",
+    headers: { ...headers, "content-type": "application/json" },
+    body: JSON.stringify(request)
+  });
+  const body = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(body));
+  assert.equal(body.valid, true, JSON.stringify(body.rejected));
+  assert.ok(body.executionAuthorization?.token, "registered-target plan should carry a signed authorization");
+  const { executionAuthorization, ...plan } = body;
+  return { plan, executionAuthorization };
+}
 
 test.before(async () => {
   server = createServer();
@@ -43,6 +64,68 @@ test("production strict mode rejects unsafe control-plane configuration", () => 
     }),
     /authentication is disabled.*rate limiting is disabled.*telemetry store is not durable.*policy store is not durable/
   );
+});
+
+test("production strict mode requires a plan signing secret when live execution is enabled", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-strict-execution-plan-"));
+  const file = path.join(dir, "state.db");
+  const stores = createSQLiteStateStores({ filePath: file, maxEntries: 20 });
+
+  try {
+    assert.throws(
+      () => createServer({
+        productionStrict: true,
+        authorizer: createScopedAuthorizer({
+          keys: [{
+            id: "ops",
+            secret: "ops-secret",
+            tenantId: "default",
+            scopes: ["admin"]
+          }]
+        }),
+        rateLimitMaxRequests: 60,
+        executionEnabled: true,
+        decisionStore: stores.telemetry,
+        policyStore: stores.policies,
+        coordinationStore: stores.coordination
+      }),
+      /live execution plan authorization is not configured/
+    );
+  } finally {
+    stores.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("production strict mode requires shared coordination for single-use live plan claims", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-strict-shared-plan-"));
+  const file = path.join(dir, "state.db");
+  const stores = createSQLiteStateStores({ filePath: file, maxEntries: 20 });
+
+  try {
+    assert.throws(
+      () => createServer({
+        productionStrict: true,
+        authorizer: createScopedAuthorizer({
+          keys: [{
+            id: "ops",
+            secret: "ops-secret",
+            tenantId: "default",
+            scopes: ["admin"]
+          }]
+        }),
+        rateLimitMaxRequests: 60,
+        executionEnabled: true,
+        executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
+        decisionStore: stores.telemetry,
+        policyStore: stores.policies
+      }),
+      /live execution plan claims are not backed by shared coordination/
+    );
+  } finally {
+    stores.close();
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("production strict mode accepts genuinely durable stores", async () => {
@@ -107,6 +190,14 @@ test("graceful shutdown rejects an invalid timeout", () => {
 
 test("HTTP server rejects invalid resource guard configuration", () => {
   assert.throws(
+    () => createServer({ trustProxy: true, trustedProxyHops: 0 }),
+    /trustedProxyHops must be a positive safe integer when trustProxy is enabled/
+  );
+  assert.throws(
+    () => createServer({ trustProxy: true, trustedProxyHops: 1.5 }),
+    /trustedProxyHops must be a positive safe integer when trustProxy is enabled/
+  );
+  assert.throws(
     () => createServer({ requestTimeoutMs: 0 }),
     /requestTimeoutMs must be >= 1/
   );
@@ -163,7 +254,7 @@ test("readBody enforces the limit across streamed chunks", async () => {
 
 test("API replaces unsafe caller request IDs with a generated ID", async () => {
   const response = await fetch(baseUrl + "/health", {
-    headers: { "x-request-id": "trace\nforged" }
+    headers: { "x-request-id": "trace id forged" }
   });
 
   assert.equal(response.status, 200);
@@ -190,6 +281,223 @@ test("API responses include browser security headers", async () => {
     /script-src 'self'/
   );
 });
+
+test("light dashboard serves its real stylesheet and script under the browser CSP", async () => {
+  const pageResponse = await fetch(baseUrl + "/");
+  assert.equal(pageResponse.status, 200);
+  const page = await pageResponse.text();
+  assert.match(page, /href="\/styles\.css"/);
+  assert.match(page, /<script src="\/app\.js" defer><\/script>/);
+
+  const stylesheetResponse = await fetch(baseUrl + "/styles.css");
+  assert.equal(stylesheetResponse.status, 200);
+  assert.match(stylesheetResponse.headers.get("content-type") || "", /^text\/css/);
+  assert.match(stylesheetResponse.headers.get("content-security-policy") || "", /style-src 'self'/);
+  assert.match(await stylesheetResponse.text(), /color-scheme:\s*light/);
+
+  const scriptResponse = await fetch(baseUrl + "/app.js");
+  assert.equal(scriptResponse.status, 200);
+  assert.match(scriptResponse.headers.get("content-type") || "", /^text\/javascript/);
+  assert.match(scriptResponse.headers.get("content-security-policy") || "", /script-src 'self'/);
+  const script = await scriptResponse.text();
+  for (const endpoint of [
+    "/v1/decide", "/v1/targets", "/v1/policies", "/v1/policies/simulate",
+    "/v1/hybrid-plan", "/v1/execute", "/v1/decisions?limit=25",
+    "/v1/outcomes", "/v1/calibration", "/v1/status", "/v1/metrics"
+  ]) {
+    assert.ok(script.includes(endpoint), "dashboard is missing API endpoint " + endpoint);
+  }
+  assert.doesNotMatch(script, /fetch\(["']\/v1\//);
+});
+
+test("dashboard API workflow connects target management, decision, simulation, feedback, policy history and hybrid dry-run", async () => {
+  const targetRegistry = await createConfiguredTargetRegistry({ targetFile: null, providerFile: null });
+  const decisionStore = createDecisionStore({ maxEntries: 50 });
+  const policyStore = createPolicyStore();
+  const calibrator = createCalibrator({ minSamples: 1 });
+  const workflowServer = createServer({
+    targetRegistry,
+    decisionStore,
+    policyStore,
+    calibrator,
+    calibrationEnabled: true,
+    authorizer: createScopedAuthorizer()
+  });
+
+  await new Promise(resolve => workflowServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + workflowServer.address().port;
+  const json = (route, body, extraHeaders = {}) => fetch(url + route, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...extraHeaders },
+    body: JSON.stringify(body)
+  });
+  const localId = "ui-workflow-local";
+  const cloudId = "ui-workflow-cloud";
+  const targetPayloads = [
+    {
+      id: localId,
+      mode: "local",
+      available: true,
+      health: 1,
+      capacity: 0.15,
+      privacy: 1,
+      regions: ["local"],
+      capabilities: ["text-generation"],
+      estimatedLatencyMs: 60,
+      estimatedCostUsd: 0.01
+    },
+    {
+      id: cloudId,
+      mode: "cloud",
+      available: true,
+      health: 0.99,
+      capacity: 0.2,
+      privacy: 0.5,
+      regions: ["ap-south-1"],
+      capabilities: ["text-generation"],
+      estimatedLatencyMs: 35,
+      estimatedCostUsd: 0.025
+    }
+  ];
+
+  try {
+    for (const route of [
+      "/health", "/ready", "/v1/status", "/v1/metrics", "/v1/targets",
+      "/v1/policies", "/v1/decisions?limit=25", "/v1/calibration"
+    ]) {
+      const response = await fetch(url + route);
+      assert.equal(response.status, 200, "dashboard read endpoint failed: " + route);
+      await response.arrayBuffer();
+    }
+
+    for (const target of targetPayloads) {
+      const response = await json("/v1/targets", target);
+      assert.equal(response.status, 201);
+      assert.equal((await response.json()).id, target.id);
+    }
+
+    const registeredResponse = await fetch(url + "/v1/targets");
+    const registered = await registeredResponse.json();
+    assert.equal(registered.targets.length, 2);
+
+    const decisionResponse = await json("/v1/decide", {
+      workload: {
+        type: "ui-workflow-inference",
+        sensitivity: "low",
+        requiredCapabilities: ["text-generation"]
+      },
+      constraints: {
+        latencyBudgetMs: 500,
+        maxCostUsd: 0.1,
+        strictLatency: true,
+        strictCost: true
+      },
+      policy: { profile: "balanced" }
+    });
+    assert.equal(decisionResponse.status, 200);
+    const decision = await decisionResponse.json();
+    assert.ok(decision.decisionId);
+    assert.ok([localId, cloudId].includes(decision.targetId));
+
+    const activityResponse = await fetch(url + "/v1/decisions?limit=25");
+    const activity = await activityResponse.json();
+    assert.equal(activity.decisions.some(item => item.id === decision.decisionId), true);
+
+    const outcomeResponse = await json("/v1/outcomes", {
+      decisionId: decision.decisionId,
+      outcome: "success",
+      actualLatencyMs: 55,
+      actualCostUsd: 0.012
+    });
+    assert.equal(outcomeResponse.status, 200);
+    assert.equal((await outcomeResponse.json()).outcome, "success");
+
+    const metricsResponse = await fetch(url + "/v1/metrics");
+    const metrics = await metricsResponse.json();
+    assert.equal(metrics.totalDecisions, 1);
+    assert.equal(metrics.successRate, 1);
+
+    const calibrationResponse = await fetch(url + "/v1/calibration");
+    const calibration = await calibrationResponse.json();
+    assert.equal(calibration.enabled, true);
+    assert.equal(calibration.entries.length >= 1, true);
+
+    const simulationResponse = await json("/v1/policies/simulate", {
+      workload: { type: "ui-workflow-inference", sensitivity: "low" },
+      constraints: { latencyBudgetMs: 500, maxCostUsd: 0.1 },
+      targets: registered.targets,
+      currentPolicy: { profile: "balanced", allowedModes: ["cloud"] },
+      candidatePolicy: { profile: "balanced", allowedModes: ["local"] }
+    });
+    assert.equal(simulationResponse.status, 200);
+    const simulation = await simulationResponse.json();
+    assert.equal(simulation.mutatedState, false);
+    assert.equal(simulation.executedProvider, false);
+    assert.equal(simulation.current.targetId, cloudId);
+    assert.equal(simulation.candidate.targetId, localId);
+
+    const policyId = "ui-workflow-policy";
+    const policyCreate = await json("/v1/policies", {
+      id: policyId,
+      name: "UI workflow policy",
+      description: "Integration verification",
+      baseProfile: "balanced",
+      weights: {},
+      rules: []
+    });
+    assert.equal(policyCreate.status, 201);
+    const policyList = await fetch(url + "/v1/policies");
+    assert.equal((await policyList.json()).policies.some(item => item.id === policyId), true);
+
+    const historyResponse = await fetch(url + "/v1/policies/" + policyId + "/history");
+    assert.equal(historyResponse.status, 200);
+    assert.equal((await historyResponse.json()).versions.length, 1);
+
+    const rollbackResponse = await json("/v1/policies/" + policyId + "/rollback", { version: 1 });
+    assert.equal(rollbackResponse.status, 200);
+    assert.equal((await rollbackResponse.json()).rolledBackFromVersion, 1);
+    const policyDelete = await fetch(url + "/v1/policies/" + policyId, { method: "DELETE" });
+    assert.equal(policyDelete.status, 200);
+    assert.equal((await policyDelete.json()).removed, policyId);
+
+    const hybridResponse = await json("/v1/hybrid-plan", {
+      workload: { type: "ui-workflow-inference", sensitivity: "low" },
+      constraints: {
+        maxLatencyMs: 500,
+        maxCostUsd: 0.1,
+        strictLatency: true,
+        strictCost: true
+      },
+      policy: { profile: "balanced" },
+      steps: [
+        { id: "prepare", purpose: "Pre-process", targetId: localId, dataSensitivity: "low" },
+        { id: "infer", purpose: "Model inference", targetId: cloudId, dataSensitivity: "low" }
+      ],
+      targets: registered.targets
+    });
+    assert.equal(hybridResponse.status, 200);
+    const plan = await hybridResponse.json();
+    assert.equal(plan.valid, true);
+    assert.equal(plan.steps.length, 2);
+
+    const dryRunResponse = await json("/v1/execute", { plan, mode: "dry-run" });
+    assert.equal(dryRunResponse.status, 200);
+    const dryRun = await dryRunResponse.json();
+    assert.equal(dryRun.mode, "dry-run");
+    assert.equal(dryRun.status, "completed");
+    assert.equal(dryRun.completedSteps, 2);
+    assert.equal(dryRun.receipts.every(item => item.status === "completed"), true);
+
+    for (const id of [localId, cloudId]) {
+      const removed = await fetch(url + "/v1/targets/" + encodeURIComponent(id), { method: "DELETE" });
+      assert.equal(removed.status, 200);
+      assert.equal((await removed.json()).removed, id);
+    }
+  } finally {
+    await new Promise(resolve => workflowServer.close(resolve));
+  }
+});
+
 
 test("health endpoint reports service readiness", async () => {
   const response = await fetch(baseUrl + "/health");
@@ -235,11 +543,9 @@ test("readiness probe reports dependency health", async () => {
 });
 
 test("ready endpoint returns 503 when a dependency is unavailable", async () => {
-  const degradedServer = createServer({
-    decisionStore: {
-      summary: async () => { throw new Error("telemetry unavailable"); }
-    }
-  });
+  const decisionStore = createDecisionStore({ maxEntries: 20 });
+  decisionStore.summary = async () => { throw new Error("telemetry unavailable"); };
+  const degradedServer = createServer({ decisionStore });
 
   await new Promise(resolve => degradedServer.listen(0, "127.0.0.1", resolve));
   const address = degradedServer.address();
@@ -452,7 +758,7 @@ test("unexpected dependency failures return a generic 500 without leaking intern
     const body = await response.json();
     assert.equal(body.error, "internal_server_error");
     assert.equal(body.requestId, "error-contract-test");
-    assert.equal("database credential leaked in internal failure" in JSON.stringify(body), false);
+    assert.equal(JSON.stringify(body).includes("database credential leaked in internal failure"), false);
   } finally {
     await new Promise(resolve => failingServer.close(resolve));
   }
@@ -1100,10 +1406,257 @@ test("decision outcome endpoint closes the prediction feedback loop", async () =
   assert.equal(outcomeBody.outcome, "success");
   assert.equal(outcomeBody.actualLatencyMs, 90);
 
+  const duplicateOutcome = await fetch(baseUrl + "/v1/outcomes", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      decisionId: decisionBody.decisionId,
+      outcome: "failure",
+      actualLatencyMs: 900,
+      errorClass: "duplicate_feedback"
+    })
+  });
+  assert.equal(duplicateOutcome.status, 409);
+  assert.deepEqual(await duplicateOutcome.json(), { error: "decision_already_completed" });
+
   const metrics = await fetch(baseUrl + "/v1/metrics");
   const metricsBody = await metrics.json();
   assert.equal(metricsBody.successRate > 0, true);
   assert.equal(metricsBody.meanAbsoluteLatencyErrorMs >= 0, true);
+});
+
+test("outcomes for no-route decisions are recorded without attempting target calibration", async () => {
+  const decisionStore = createDecisionStore({ maxEntries: 10 });
+  const calibrator = createCalibrator({ minSamples: 1 });
+  const scopedServer = createServer({
+    decisionStore,
+    calibrator,
+    calibrationEnabled: true
+  });
+  await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + scopedServer.address().port;
+
+  try {
+    const decisionResponse = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workload: { type: "regulated", sensitivity: "high" },
+        policy: { sensitiveDataMode: "local-only" },
+        targets: [{
+          id: "cloud-only",
+          mode: "cloud",
+          health: 1,
+          capacity: 0.1,
+          privacy: 1,
+          estimatedLatencyMs: 20,
+          estimatedCostUsd: 0.01
+        }]
+      })
+    });
+    assert.equal(decisionResponse.status, 200);
+    const decision = await decisionResponse.json();
+    assert.equal(decision.route, "none");
+    assert.equal(decision.targetId, null);
+
+    const outcomeResponse = await fetch(url + "/v1/outcomes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decisionId: decision.decisionId,
+        outcome: "failure",
+        errorClass: "no_eligible_target"
+      })
+    });
+    assert.equal(outcomeResponse.status, 200);
+    assert.equal((await outcomeResponse.json()).outcome, "failure");
+    assert.equal(calibrator.snapshot().length, 0);
+    assert.equal(decisionStore.summary().outcomes.failure, 1);
+  } finally {
+    await new Promise(resolve => scopedServer.close(resolve));
+  }
+});
+
+test("live provider failures open a tenant circuit and route subsequent decisions to a healthy alternative", async () => {
+  let failedProviderCalls = 0;
+  let healthyProviderCalls = 0;
+  const targetRegistry = createTargetRegistry([
+    {
+      id: "provider-a",
+      targetId: "provider-a",
+      async getSnapshot() {
+        return {
+          id: "provider-a",
+          mode: "cloud",
+          available: true,
+          health: 1,
+          capacity: 0.1,
+          privacy: 1,
+          estimatedLatencyMs: 20,
+          estimatedCostUsd: 0.01,
+          regions: ["ap-south-1"],
+          capabilities: ["text-generation"]
+        };
+      },
+      async execute() {
+        failedProviderCalls++;
+        throw new Error("provider_unavailable");
+      }
+    },
+    {
+      id: "provider-b",
+      targetId: "provider-b",
+      async getSnapshot() {
+        return {
+          id: "provider-b",
+          mode: "cloud",
+          available: true,
+          health: 0.6,
+          capacity: 0.7,
+          privacy: 0.4,
+          estimatedLatencyMs: 100,
+          estimatedCostUsd: 0.05,
+          regions: ["ap-south-1"],
+          capabilities: ["text-generation"]
+        };
+      },
+      async execute() {
+        healthyProviderCalls++;
+        return { status: "ok" };
+      }
+    }
+  ]);
+  const authorizer = createScopedAuthorizer({
+    keys: [{
+      id: "operator",
+      secret: "circuit-operator-secret",
+      tenantId: "acme",
+      scopes: ["admin"]
+    }]
+  });
+  const scopedServer = createServer({
+    targetRegistry,
+    authorizer,
+    executionEnabled: true,
+    executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
+    rateLimitMaxRequests: 100,
+    circuitBreakerFailureThreshold: 1,
+    circuitBreakerFailureWindowMs: 5_000,
+    circuitBreakerCooldownMs: 10_000
+  });
+  await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + scopedServer.address().port;
+  const headers = {
+    authorization: "Bearer circuit-operator-secret",
+    "content-type": "application/json"
+  };
+
+  try {
+    const firstDecisionResponse = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        workload: { type: "resilient-inference", sensitivity: "low" }
+      })
+    });
+    assert.equal(firstDecisionResponse.status, 200);
+    const firstDecision = await firstDecisionResponse.json();
+    assert.equal(firstDecision.targetId, "provider-a");
+
+    const grant = await getAuthorizedHybridPlan(url, headers, {
+      workload: { type: "resilient-inference", sensitivity: "low" },
+      steps: [
+        { id: "provider-a-inference", targetId: "provider-a", purpose: "inference" },
+        { id: "provider-b-follow-up", targetId: "provider-b", purpose: "post-process" }
+      ]
+    });
+    grant.plan.steps[0].payload = { prompt: "example" };
+    const execution = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        mode: "live",
+        timeoutMs: 1_000,
+        plan: grant.plan,
+        executionAuthorization: grant.executionAuthorization.token
+      })
+    });
+    assert.equal(execution.status, 200);
+    const executionBody = await execution.json();
+    assert.equal(executionBody.status, "failed");
+    assert.equal(executionBody.receipts[0].errorClass, "provider_unavailable");
+    assert.equal(failedProviderCalls, 1);
+
+    const staleExecution = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        mode: "live",
+        plan: grant.plan,
+        executionAuthorization: grant.executionAuthorization.token
+      })
+    });
+    assert.equal(staleExecution.status, 409);
+    const staleBody = await staleExecution.json();
+    assert.equal(staleBody.error, "execution_plan_stale");
+    assert.equal(Array.isArray(staleBody.rejected), true);
+    assert.equal(failedProviderCalls, 1);
+
+    const nextDecisionResponse = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        workload: { type: "resilient-inference", sensitivity: "low" }
+      })
+    });
+    assert.equal(nextDecisionResponse.status, 200);
+    const nextDecision = await nextDecisionResponse.json();
+    assert.equal(nextDecision.targetId, "provider-b");
+    assert.deepEqual(
+      nextDecision.rejected.find(item => item.targetId === "provider-a").reasons,
+      ["circuit_breaker_open"]
+    );
+
+    const hybrid = await fetch(url + "/v1/hybrid-plan", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        workload: { type: "resilient-inference", sensitivity: "low" },
+        steps: [
+          { id: "preprocess", targetId: "provider-b" },
+          { id: "inference", targetId: "provider-a" }
+        ]
+      })
+    });
+    assert.equal(hybrid.status, 200);
+    const hybridBody = await hybrid.json();
+    assert.equal(hybridBody.valid, false);
+    assert.equal("executionAuthorization" in hybridBody, false);
+    assert.ok(hybridBody.rejected.some(item =>
+      item.stepId === "inference" && item.reasons.includes("circuit_breaker_open")
+    ));
+
+    const status = await fetch(url + "/v1/status", { headers });
+    assert.equal(status.status, 200);
+    const statusBody = await status.json();
+    assert.equal(statusBody.capabilities.circuitBreakerEnabled, true);
+    assert.equal(statusBody.capabilities.circuitBreakerBackend, "process-local");
+    assert.equal(statusBody.counts.openCircuitTargets, 1);
+    assert.equal(statusBody.circuitBreakers.policy.failureThreshold, 1);
+    const openCircuit = statusBody.circuitBreakers.targets.find(item => item.targetId === "provider-a");
+    assert.equal(openCircuit.state, "open");
+    assert.equal(openCircuit.failureCount, 1);
+    assert.equal(Number.isFinite(openCircuit.openedAt), true);
+    assert.equal(Number.isFinite(openCircuit.retryAt), true);
+    assert.equal(openCircuit.probeInFlight, false);
+    assert.equal(Object.hasOwn(openCircuit, "probeToken"), false);
+    const healthyCircuit = statusBody.circuitBreakers.targets.find(item => item.targetId === "provider-b");
+    assert.equal(healthyCircuit.state, "closed");
+    assert.equal(healthyCircuit.failureCount, 0);
+    assert.equal(healthyProviderCalls, 0);
+  } finally {
+    await new Promise(resolve => scopedServer.close(resolve));
+  }
 });
 
 test("unknown decision outcome IDs return not found", async () => {
@@ -1897,6 +2450,515 @@ test("live execution requires an enabled rate limiter", async () => {
   }
 });
 
+test("live execution rejects caller-forged and request-scoped plans before provider admission", async () => {
+  let providerCalls = 0;
+  const targetRegistry = createTargetRegistry([
+    { id: "registered-local", mode: "local", available: true, health: 1, capacity: 0.1, privacy: 1 },
+    { id: "registered-private", mode: "private", available: true, health: 1, capacity: 0.1, privacy: 1 }
+  ]);
+  const executionServer = createServer({
+    targetRegistry,
+    executionRegistry: createExecutionRegistry([
+      {
+        id: "registered-provider",
+        targetId: "registered-local",
+        async execute() { providerCalls++; return { ok: true }; }
+      },
+      {
+        id: "registered-secondary",
+        targetId: "registered-private",
+        async execute() { providerCalls++; return { ok: true }; }
+      }
+    ]),
+    executionEnabled: true,
+    executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
+    apiKey: "server-secret",
+    rateLimitMaxRequests: 20
+  });
+  await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + executionServer.address().port;
+  const headers = {
+    authorization: "Bearer server-secret",
+    "content-type": "application/json"
+  };
+
+  try {
+    const forged = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        mode: "live",
+        plan: {
+          valid: true,
+          steps: [{ id: "forged-step", targetId: "registered-local" }]
+        }
+      })
+    });
+    assert.equal(forged.status, 409);
+    assert.deepEqual(await forged.json(), {
+      error: "execution_plan_authorization_invalid"
+    });
+    assert.equal(providerCalls, 0);
+
+    const simulated = await fetch(url + "/v1/hybrid-plan", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        workload: { type: "request-scoped-simulation", sensitivity: "low" },
+        steps: [
+          { id: "sim-local", targetId: "sim-local" },
+          { id: "sim-private", targetId: "sim-private" }
+        ],
+        targets: [
+          { id: "sim-local", mode: "local", available: true, health: 1, capacity: 0.1, privacy: 1 },
+          { id: "sim-private", mode: "private", available: true, health: 1, capacity: 0.1, privacy: 1 }
+        ]
+      })
+    });
+    assert.equal(simulated.status, 200);
+    const simulatedPlan = await simulated.json();
+    assert.equal(simulatedPlan.valid, true);
+    assert.equal("executionAuthorization" in simulatedPlan, false);
+    assert.equal(providerCalls, 0);
+  } finally {
+    await new Promise(resolve => executionServer.close(resolve));
+  }
+});
+
+test("live execution fails closed when plan signing is not configured", async () => {
+  let providerCalls = 0;
+  const executionServer = createServer({
+    targetRegistry: createTargetRegistry([
+      { id: "unsigned-local", mode: "local", available: true, health: 1, capacity: 0.1, privacy: 1 },
+      { id: "unsigned-private", mode: "private", available: true, health: 1, capacity: 0.1, privacy: 1 }
+    ]),
+    executionRegistry: createExecutionRegistry([
+      {
+        id: "unsigned-local-adapter",
+        targetId: "unsigned-local",
+        async execute() { providerCalls++; return { ok: true }; }
+      },
+      {
+        id: "unsigned-private-adapter",
+        targetId: "unsigned-private",
+        async execute() { providerCalls++; return { ok: true }; }
+      }
+    ]),
+    executionEnabled: true,
+    apiKey: "server-secret",
+    rateLimitMaxRequests: 20
+  });
+  await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + executionServer.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer server-secret"
+      },
+      body: JSON.stringify({
+        mode: "live",
+        plan: {
+          valid: true,
+          steps: [{ id: "forged-a", targetId: "unsigned-local" }, { id: "forged-b", targetId: "unsigned-private" }]
+        }
+      })
+    });
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { error: "execution_plan_signing_unavailable" });
+    assert.equal(providerCalls, 0);
+  } finally {
+    await new Promise(resolve => executionServer.close(resolve));
+  }
+});
+
+test("live plan authorization is tenant-bound and rejects post-planning policy changes", async () => {
+  let acmeProviderCalls = 0;
+  let betaProviderCalls = 0;
+  const authorizer = createScopedAuthorizer({
+    keys: [
+      { id: "acme-admin", secret: "acme-plan-secret", tenantId: "acme", scopes: ["admin"] },
+      { id: "beta-admin", secret: "beta-plan-secret", tenantId: "beta", scopes: ["admin"] }
+    ]
+  });
+  const targetRegistry = createTenantTargetRegistry();
+  for (const tenantId of ["acme", "beta"]) {
+    targetRegistry.forTenant(tenantId).register({
+      id: "tenant-local",
+      mode: "local",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1,
+      estimatedLatencyMs: 10,
+      estimatedCostUsd: 0
+    });
+    targetRegistry.forTenant(tenantId).register({
+      id: "tenant-private",
+      mode: "private",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1,
+      estimatedLatencyMs: 20,
+      estimatedCostUsd: 0.01
+    });
+  }
+  const executionRegistry = createTenantExecutionRegistry();
+  executionRegistry.forTenant("acme").register({
+    id: "acme-local-adapter",
+    targetId: "tenant-local",
+    async execute() { acmeProviderCalls++; return { ok: true }; }
+  });
+  executionRegistry.forTenant("acme").register({
+    id: "acme-private-adapter",
+    targetId: "tenant-private",
+    async execute() { acmeProviderCalls++; return { ok: true }; }
+  });
+  executionRegistry.forTenant("beta").register({
+    id: "beta-local-adapter",
+    targetId: "tenant-local",
+    async execute() { betaProviderCalls++; return { ok: true }; }
+  });
+  executionRegistry.forTenant("beta").register({
+    id: "beta-private-adapter",
+    targetId: "tenant-private",
+    async execute() { betaProviderCalls++; return { ok: true }; }
+  });
+  const executionServer = createServer({
+    authorizer,
+    targetRegistry,
+    executionRegistry,
+    executionEnabled: true,
+    executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
+    rateLimitMaxRequests: 20
+  });
+  await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + executionServer.address().port;
+  const acmeHeaders = {
+    authorization: "Bearer acme-plan-secret",
+    "content-type": "application/json"
+  };
+  const betaHeaders = {
+    authorization: "Bearer beta-plan-secret",
+    "content-type": "application/json"
+  };
+
+  try {
+    const grant = await getAuthorizedHybridPlan(url, acmeHeaders, {
+      workload: { type: "tenant-bound-live-plan", sensitivity: "low" },
+      steps: [
+        { id: "local-step", targetId: "tenant-local" },
+        { id: "private-step", targetId: "tenant-private" }
+      ]
+    });
+
+    const modifiedPlan = structuredClone(grant.plan);
+    modifiedPlan.steps[0].targetId = "tenant-private";
+    const modified = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers: acmeHeaders,
+      body: JSON.stringify({
+        mode: "live",
+        plan: modifiedPlan,
+        executionAuthorization: grant.executionAuthorization.token
+      })
+    });
+    assert.equal(modified.status, 409);
+    assert.deepEqual(await modified.json(), { error: "execution_plan_mismatch" });
+
+    const crossTenant = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers: betaHeaders,
+      body: JSON.stringify({
+        mode: "live",
+        plan: grant.plan,
+        executionAuthorization: grant.executionAuthorization.token
+      })
+    });
+    assert.equal(crossTenant.status, 403);
+    assert.deepEqual(await crossTenant.json(), { error: "execution_plan_tenant_mismatch" });
+
+    const betaGrant = await getAuthorizedHybridPlan(url, betaHeaders, {
+      workload: { type: "tenant-bound-live-plan", sensitivity: "low" },
+      steps: [
+        { id: "local-step", targetId: "tenant-local" },
+        { id: "private-step", targetId: "tenant-private" }
+      ]
+    });
+    const betaExecution = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers: betaHeaders,
+      body: JSON.stringify({
+        mode: "live",
+        plan: betaGrant.plan,
+        executionAuthorization: betaGrant.executionAuthorization.token
+      })
+    });
+    assert.equal(betaExecution.status, 200);
+    const betaExecutionBody = await betaExecution.json();
+    assert.equal(betaExecutionBody.receipts[0].adapterId, "beta-local-adapter");
+    assert.equal(betaExecutionBody.receipts[1].adapterId, "beta-private-adapter");
+    assert.equal(acmeProviderCalls, 0);
+    assert.equal(betaProviderCalls, 2);
+  } finally {
+    await new Promise(resolve => executionServer.close(resolve));
+  }
+});
+
+test("live execution rejects a global adapter registry for tenant-scoped targets", async () => {
+  let providerCalls = 0;
+  const authorizer = createScopedAuthorizer({
+    keys: [{ id: "beta-admin", secret: "beta-only-secret", tenantId: "beta", scopes: ["admin"] }]
+  });
+  const targetRegistry = createTenantTargetRegistry();
+  for (const targetId of ["shared-local", "shared-private"]) {
+    targetRegistry.forTenant("beta").register({
+      id: targetId,
+      mode: targetId.endsWith("local") ? "local" : "private",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1,
+      estimatedLatencyMs: 10,
+      estimatedCostUsd: 0
+    });
+  }
+  const executionServer = createServer({
+    authorizer,
+    targetRegistry,
+    executionRegistry: createExecutionRegistry([
+      { id: "global-local", targetId: "shared-local", async execute() { providerCalls++; return { ok: true }; } },
+      { id: "global-private", targetId: "shared-private", async execute() { providerCalls++; return { ok: true }; } }
+    ]),
+    executionEnabled: true,
+    executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
+    rateLimitMaxRequests: 20
+  });
+  await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + executionServer.address().port;
+  const headers = {
+    authorization: "Bearer beta-only-secret",
+    "content-type": "application/json"
+  };
+
+  try {
+    const grant = await getAuthorizedHybridPlan(url, headers, {
+      workload: { type: "tenant-isolation-fail-closed", sensitivity: "low" },
+      steps: [
+        { id: "local-step", targetId: "shared-local" },
+        { id: "private-step", targetId: "shared-private" }
+      ]
+    });
+    const response = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        mode: "live",
+        plan: grant.plan,
+        executionAuthorization: grant.executionAuthorization.token
+      })
+    });
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), {
+      error: "tenant_scoped_execution_registry_required"
+    });
+    assert.equal(providerCalls, 0);
+  } finally {
+    await new Promise(resolve => executionServer.close(resolve));
+  }
+});
+
+test("client disconnect aborts the live provider request and stops later steps", async () => {
+  let startedResolve;
+  let abortedResolve;
+  const started = new Promise(resolve => { startedResolve = resolve; });
+  const aborted = new Promise(resolve => { abortedResolve = resolve; });
+  const calls = [];
+  const targetRegistry = createTargetRegistry([
+    { id: "disconnect-local", mode: "local", available: true, health: 1, capacity: 0.1, privacy: 1 },
+    { id: "disconnect-private", mode: "private", available: true, health: 1, capacity: 0.1, privacy: 1 }
+  ]);
+  const executionRegistry = createExecutionRegistry([
+    {
+      id: "disconnect-local-adapter",
+      targetId: "disconnect-local",
+      async execute({ signal }) {
+        calls.push("local");
+        startedResolve();
+        return new Promise((_, reject) => {
+          signal.addEventListener("abort", () => {
+            abortedResolve();
+            reject(new Error("adapter_cancelled"));
+          }, { once: true });
+        });
+      }
+    },
+    {
+      id: "disconnect-private-adapter",
+      targetId: "disconnect-private",
+      async execute() {
+        calls.push("private");
+        return { ok: true };
+      }
+    }
+  ]);
+  const executionServer = createServer({
+    targetRegistry,
+    executionRegistry,
+    executionEnabled: true,
+    executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
+    apiKey: "disconnect-secret",
+    rateLimitMaxRequests: 20
+  });
+  await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
+  const url = new URL("http://127.0.0.1:" + executionServer.address().port);
+  const headers = {
+    authorization: "Bearer disconnect-secret",
+    "content-type": "application/json"
+  };
+
+  try {
+    const grant = await getAuthorizedHybridPlan(url.origin, headers, {
+      workload: { type: "client-disconnect-cancellation", sensitivity: "low" },
+      steps: [
+        { id: "local-step", targetId: "disconnect-local" },
+        { id: "private-step", targetId: "disconnect-private" }
+      ]
+    });
+
+    const request = http.request({
+      hostname: url.hostname,
+      port: Number(url.port),
+      path: "/v1/execute",
+      method: "POST",
+      headers
+    }, response => response.resume());
+    request.on("error", () => {});
+    request.end(JSON.stringify({
+      mode: "live",
+      plan: grant.plan,
+      executionAuthorization: grant.executionAuthorization.token
+    }));
+
+    await started;
+    request.destroy();
+    let abortTimer;
+    try {
+      await Promise.race([
+        aborted,
+        new Promise((_, reject) => {
+          abortTimer = setTimeout(() => reject(new Error("provider signal was not aborted")), 1000);
+        })
+      ]);
+    } finally {
+      clearTimeout(abortTimer);
+    }
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(calls, ["local"]);
+  } finally {
+    await new Promise(resolve => executionServer.close(resolve));
+  }
+});
+
+test("live execution revalidates the tenant custom policy after planning", async () => {
+  let providerCalls = 0;
+  const policyStore = createPolicyStore();
+  policyStore.upsert("default", {
+    id: "live-policy",
+    name: "Live policy",
+    baseProfile: "balanced",
+    allowedModes: ["local", "private"]
+  });
+  const targetRegistry = createTargetRegistry([
+    {
+      id: "policy-local",
+      mode: "local",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1,
+      estimatedLatencyMs: 10,
+      estimatedCostUsd: 0
+    },
+    {
+      id: "policy-private",
+      mode: "private",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1,
+      estimatedLatencyMs: 20,
+      estimatedCostUsd: 0.01
+    }
+  ]);
+  const executionServer = createServer({
+    policyStore,
+    targetRegistry,
+    executionRegistry: createExecutionRegistry([
+      {
+        id: "policy-local-adapter",
+        targetId: "policy-local",
+        async execute() { providerCalls++; return { ok: true }; }
+      },
+      {
+        id: "policy-private-adapter",
+        targetId: "policy-private",
+        async execute() { providerCalls++; return { ok: true }; }
+      }
+    ]),
+    executionEnabled: true,
+    executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
+    apiKey: "server-secret",
+    rateLimitMaxRequests: 20
+  });
+  await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + executionServer.address().port;
+  const headers = {
+    authorization: "Bearer server-secret",
+    "content-type": "application/json"
+  };
+
+  try {
+    const grant = await getAuthorizedHybridPlan(url, headers, {
+      workload: { type: "policy-revalidation-live", sensitivity: "low" },
+      policy: { profile: "live-policy" },
+      steps: [
+        { id: "local-step", targetId: "policy-local" },
+        { id: "private-step", targetId: "policy-private" }
+      ]
+    });
+
+    policyStore.upsert("default", {
+      id: "live-policy",
+      name: "Live policy",
+      baseProfile: "balanced",
+      allowedModes: ["local"]
+    });
+
+    const response = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        mode: "live",
+        plan: grant.plan,
+        executionAuthorization: grant.executionAuthorization.token
+      })
+    });
+    assert.equal(response.status, 409);
+    const body = await response.json();
+    assert.equal(body.error, "execution_plan_stale");
+    assert.equal(body.rejected.some(item =>
+      item.stepId === "private-step" && item.reasons.includes("mode_not_allowed")
+    ), true);
+    assert.equal(providerCalls, 0);
+  } finally {
+    await new Promise(resolve => executionServer.close(resolve));
+  }
+});
+
 test("live execution returns provider results only when requested", async () => {
   const adapter = {
     id: "provider-adapter",
@@ -1912,18 +2974,36 @@ test("live execution returns provider results only when requested", async () => 
       };
     }
   };
+  const secondaryAdapter = {
+    id: "secondary-adapter",
+    targetId: "secondary-target",
+    async execute() {
+      return { status: "secondary-ok" };
+    }
+  };
 
   const executionServer = createServer({
-    targetRegistry: createTargetRegistry([{
-      id: "provider-target",
-      mode: "private",
-      available: true,
-      health: 1,
-      capacity: 0.1,
-      privacy: 1
-    }]),
-    executionRegistry: createExecutionRegistry([adapter]),
+    targetRegistry: createTargetRegistry([
+      {
+        id: "provider-target",
+        mode: "private",
+        available: true,
+        health: 1,
+        capacity: 0.1,
+        privacy: 1
+      },
+      {
+        id: "secondary-target",
+        mode: "local",
+        available: true,
+        health: 1,
+        capacity: 0.1,
+        privacy: 1
+      }
+    ]),
+    executionRegistry: createExecutionRegistry([adapter, secondaryAdapter]),
     executionEnabled: true,
+    executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
     apiKey: "server-secret",
     rateLimitMaxRequests: 20
   });
@@ -1936,30 +3016,40 @@ test("live execution returns provider results only when requested", async () => 
       "content-type": "application/json",
       authorization: "Bearer server-secret"
     };
-
-    const plan = {
-      valid: true,
-      steps: [{
-        id: "provider-step",
-        targetId: "provider-target",
-        purpose: "inference",
-        payload: { prompt: "hello" }
-      }]
+    const planRequest = {
+      workload: { type: "live-output-test", sensitivity: "low" },
+      steps: [
+        { id: "provider-step", targetId: "provider-target", purpose: "inference" },
+        { id: "secondary-step", targetId: "secondary-target", purpose: "post-process" }
+      ]
     };
+    const hiddenGrant = await getAuthorizedHybridPlan(url, headers, planRequest);
+    hiddenGrant.plan.steps[0].payload = { prompt: "hello" };
 
     const hiddenResponse = await fetch(url + "/v1/execute", {
       method: "POST",
       headers,
-      body: JSON.stringify({ mode: "live", plan })
+      body: JSON.stringify({
+        mode: "live",
+        plan: hiddenGrant.plan,
+        executionAuthorization: hiddenGrant.executionAuthorization.token
+      })
     });
     assert.equal(hiddenResponse.status, 200);
     const hidden = await hiddenResponse.json();
     assert.deepEqual(hidden.results, []);
 
+    const visibleGrant = await getAuthorizedHybridPlan(url, headers, planRequest);
+    visibleGrant.plan.steps[0].payload = { prompt: "hello" };
     const visibleResponse = await fetch(url + "/v1/execute", {
       method: "POST",
       headers: { ...headers, "idempotency-key": "execute-visible-1" },
-      body: JSON.stringify({ mode: "live", plan, includeOutputs: true })
+      body: JSON.stringify({
+        mode: "live",
+        plan: visibleGrant.plan,
+        executionAuthorization: visibleGrant.executionAuthorization.token,
+        includeOutputs: true
+      })
     });
     assert.equal(visibleResponse.status, 200);
     const visible = await visibleResponse.json();
@@ -1976,23 +3066,43 @@ test("live execution returns provider results only when requested", async () => 
 test("execution retries replay the original result", async () => {
   let executions = 0;
   const executionServer = createServer({
-    targetRegistry: createTargetRegistry([{
-      id: "retry-target",
-      mode: "local",
-      available: true,
-      health: 1,
-      capacity: 0.1,
-      privacy: 1
-    }]),
-    executionRegistry: createExecutionRegistry([{
-      id: "retry-adapter",
-      targetId: "retry-target",
-      async execute() {
-        executions++;
-        return { ok: true, executions };
+    targetRegistry: createTargetRegistry([
+      {
+        id: "retry-target",
+        mode: "local",
+        available: true,
+        health: 1,
+        capacity: 0.1,
+        privacy: 1
+      },
+      {
+        id: "retry-secondary",
+        mode: "private",
+        available: true,
+        health: 1,
+        capacity: 0.1,
+        privacy: 1
       }
-    }]),
+    ]),
+    executionRegistry: createExecutionRegistry([
+      {
+        id: "retry-adapter",
+        targetId: "retry-target",
+        async execute() {
+          executions++;
+          return { ok: true, executions };
+        }
+      },
+      {
+        id: "retry-secondary-adapter",
+        targetId: "retry-secondary",
+        async execute() {
+          return { secondary: true };
+        }
+      }
+    ]),
     executionEnabled: true,
+    executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
     apiKey: "server-secret",
     rateLimitMaxRequests: 20
   });
@@ -2001,18 +3111,23 @@ test("execution retries replay the original result", async () => {
   const url = "http://127.0.0.1:" + executionServer.address().port;
 
   try {
-    const request = {
-      mode: "live",
-      includeOutputs: true,
-      plan: {
-        valid: true,
-        steps: [{ id: "retry-step", targetId: "retry-target" }]
-      }
-    };
     const headers = {
       "content-type": "application/json",
       authorization: "Bearer server-secret",
       "idempotency-key": "execution-retry-1"
+    };
+    const grant = await getAuthorizedHybridPlan(url, headers, {
+      workload: { type: "execution-retry-test", sensitivity: "low" },
+      steps: [
+        { id: "retry-step", targetId: "retry-target" },
+        { id: "retry-secondary-step", targetId: "retry-secondary" }
+      ]
+    });
+    const request = {
+      mode: "live",
+      includeOutputs: true,
+      plan: grant.plan,
+      executionAuthorization: grant.executionAuthorization.token
     };
 
     const first = await fetch(url + "/v1/execute", {
@@ -2029,6 +3144,17 @@ test("execution retries replay the original result", async () => {
     assert.equal(first.status, 200);
     assert.equal(second.status, 200);
     assert.equal(second.headers.get("idempotency-replayed"), "true");
+    assert.equal(executions, 1);
+
+    const independentReplay = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers: { ...headers, "idempotency-key": "execution-retry-new-key" },
+      body: JSON.stringify(request)
+    });
+    assert.equal(independentReplay.status, 409);
+    assert.deepEqual(await independentReplay.json(), {
+      error: "execution_plan_authorization_replayed"
+    });
     assert.equal(executions, 1);
   } finally {
     await new Promise(resolve => executionServer.close(resolve));
@@ -2052,15 +3178,26 @@ test("configured execution registry adds dry-run fallbacks for static targets", 
 
 test("live execution rejects static target fallbacks", async () => {
   const executionServer = createServer({
-    targetRegistry: createTargetRegistry([{
-      id: "static-live-target",
-      mode: "local",
-      available: true,
-      health: 1,
-      capacity: 0.1,
-      privacy: 1
-    }]),
+    targetRegistry: createTargetRegistry([
+      {
+        id: "static-live-target",
+        mode: "local",
+        available: true,
+        health: 1,
+        capacity: 0.1,
+        privacy: 1
+      },
+      {
+        id: "static-live-secondary",
+        mode: "private",
+        available: true,
+        health: 1,
+        capacity: 0.1,
+        privacy: 1
+      }
+    ]),
     executionEnabled: true,
+    executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
     apiKey: "server-secret",
     rateLimitMaxRequests: 20
   });
@@ -2069,18 +3206,24 @@ test("live execution rejects static target fallbacks", async () => {
   const url = "http://127.0.0.1:" + executionServer.address().port;
 
   try {
+    const headers = {
+      "content-type": "application/json",
+      authorization: "Bearer server-secret"
+    };
+    const grant = await getAuthorizedHybridPlan(url, headers, {
+      workload: { type: "static-live-test", sensitivity: "low" },
+      steps: [
+        { id: "static-live-step", targetId: "static-live-target" },
+        { id: "static-live-secondary-step", targetId: "static-live-secondary" }
+      ]
+    });
     const response = await fetch(url + "/v1/execute", {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: "Bearer server-secret"
-      },
+      headers,
       body: JSON.stringify({
         mode: "live",
-        plan: {
-          valid: true,
-          steps: [{ id: "static-live-step", targetId: "static-live-target" }]
-        }
+        plan: grant.plan,
+        executionAuthorization: grant.executionAuthorization.token
       })
     });
 
@@ -2092,8 +3235,6 @@ test("live execution rejects static target fallbacks", async () => {
     await new Promise(resolve => executionServer.close(resolve));
   }
 });
-
-
 
 test("scoped API keys enforce route permissions", async () => {
   const authorizer = createScopedAuthorizer({
@@ -2172,37 +3313,65 @@ test("scoped API keys enforce route permissions", async () => {
   }
 });
 
-test("live execution requires execute scope even when execution is enabled", async () => {
+test("live execution requires execute scope and a planner-issued authorization", async () => {
   const authorizer = createScopedAuthorizer({
     keys: [
       { id: "reader", secret: "reader-secret", scopes: ["read"] },
-      { id: "executor", secret: "executor-secret", scopes: ["execute"] }
+      { id: "executor", secret: "executor-secret", scopes: ["execute", "decide"] }
     ]
   });
 
-  const executionRegistry = createExecutionRegistry([{
-    id: "live",
-    targetId: "live-target",
-    async execute() {
-      return { status: "ok" };
+  const targetRegistry = createTargetRegistry([
+    {
+      id: "live-target",
+      mode: "local",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1
+    },
+    {
+      id: "live-secondary",
+      mode: "private",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1
     }
-  }]);
+  ]);
+  const executionRegistry = createExecutionRegistry([
+    {
+      id: "live",
+      targetId: "live-target",
+      async execute() {
+        return { status: "ok" };
+      }
+    },
+    {
+      id: "live-secondary-adapter",
+      targetId: "live-secondary",
+      async execute() {
+        return { secondary: "ok" };
+      }
+    }
+  ]);
 
   const scopedServer = createServer({
     authorizer,
+    targetRegistry,
     executionEnabled: true,
+    executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
     executionRegistry,
     rateLimitMaxRequests: 20
   });
   await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
   const url = "http://127.0.0.1:" + scopedServer.address().port;
 
-  const plan = {
-    valid: true,
-    steps: [{ id: "step-1", targetId: "live-target", purpose: "inference" }]
-  };
-
   try {
+    const plan = {
+      valid: true,
+      steps: [{ id: "step-1", targetId: "live-target", purpose: "inference" }]
+    };
     const denied = await fetch(url + "/v1/execute", {
       method: "POST",
       headers: {
@@ -2214,13 +3383,25 @@ test("live execution requires execute scope even when execution is enabled", asy
     assert.equal(denied.status, 403);
     assert.deepEqual(await denied.json(), { error: "insufficient_scope" });
 
+    const executorHeaders = {
+      authorization: "Bearer executor-secret",
+      "content-type": "application/json"
+    };
+    const grant = await getAuthorizedHybridPlan(url, executorHeaders, {
+      workload: { type: "scoped-execution-test", sensitivity: "low" },
+      steps: [
+        { id: "step-1", targetId: "live-target", purpose: "inference" },
+        { id: "step-2", targetId: "live-secondary", purpose: "post-process" }
+      ]
+    });
     const allowed = await fetch(url + "/v1/execute", {
       method: "POST",
-      headers: {
-        authorization: "Bearer executor-secret",
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({ plan, mode: "live" })
+      headers: executorHeaders,
+      body: JSON.stringify({
+        plan: grant.plan,
+        executionAuthorization: grant.executionAuthorization.token,
+        mode: "live"
+      })
     });
     assert.equal(allowed.status, 200);
     const body = await allowed.json();
@@ -2362,7 +3543,13 @@ test("readiness endpoint reports public service readiness", async () => {
   assert.deepEqual(await response.json(), {
     status: "ready",
     service: "locd-api",
-    version: "0.1.0"
+    version: "0.1.0",
+    checks: {
+      telemetry: "ok",
+      targets: "ok",
+      policies: "ok",
+      coordination: "not_configured"
+    }
   });
 });
 
@@ -2637,6 +3824,78 @@ test("API calibration improves estimates after observed outcomes", async () => {
   }
 });
 
+test("API calibration adjusts provider pricing when cost is derived from rates", async () => {
+  const calibrator = createCalibrator({ minSamples: 1, alpha: 1 });
+  const calibrationServer = createServer({
+    calibrator,
+    calibrationEnabled: true
+  });
+  await new Promise(resolve => calibrationServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + calibrationServer.address().port;
+
+  try {
+    const request = {
+      workload: {
+        type: "pricing-calibration-test",
+        sensitivity: "low",
+        requests: 1
+      },
+      targets: [{
+        id: "pricing-calibration-target",
+        mode: "cloud",
+        health: 1,
+        capacity: 0.1,
+        privacy: 0.8,
+        estimatedLatencyMs: 100,
+        pricing: {
+          unit: "per-request",
+          requestUsd: 0.01
+        }
+      }]
+    };
+
+    const first = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request)
+    });
+    assert.equal(first.status, 200);
+    const firstDecision = await first.json();
+    assert.equal(firstDecision.estimated.costUsd, 0.01);
+    assert.deepEqual(firstDecision.calibration.adjustedTargetIds, []);
+
+    const outcome = await fetch(url + "/v1/outcomes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decisionId: firstDecision.decisionId,
+        outcome: "success",
+        actualCostUsd: 0.02
+      })
+    });
+    assert.equal(outcome.status, 200);
+
+    const second = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request)
+    });
+    assert.equal(second.status, 200);
+    const secondDecision = await second.json();
+    assert.equal(secondDecision.estimated.costUsd, 0.02);
+    assert.deepEqual(secondDecision.calibration.adjustedTargetIds, [
+      "pricing-calibration-target"
+    ]);
+
+    const state = await fetch(url + "/v1/calibration");
+    const calibration = await state.json();
+    assert.equal(calibration.entries[0].costFactor, 2);
+    assert.equal(calibration.entries[0].samples, 1);
+  } finally {
+    await new Promise(resolve => calibrationServer.close(resolve));
+  }
+});
+
 test("API calibration rehydrates from durable telemetry without double counting", async () => {
   const telemetryDir = await mkdtemp(path.join(os.tmpdir(), "locd-calibration-hydrate-"));
   const telemetryFile = path.join(telemetryDir, "events.json");
@@ -2682,6 +3941,104 @@ test("API calibration rehydrates from durable telemetry without double counting"
   }
 });
 
+
+test("SQLite startup hydration replays calibration by outcome time, not decision order", async () => {
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "locd-calibration-order-"));
+  const stateFile = path.join(stateDir, "state.db");
+  const stores = createSQLiteStateStores({ filePath: stateFile, maxEntries: 20 });
+  const observations = [
+    {
+      id: "decision-old",
+      timestamp: "2026-11-16T10:00:00.000Z",
+      outcomeTimestamp: "2026-11-16T10:20:00.000Z",
+      latencyRatio: 1.2
+    },
+    {
+      id: "decision-middle",
+      timestamp: "2026-11-16T10:10:00.000Z",
+      outcomeTimestamp: "2026-11-16T10:30:00.000Z",
+      latencyRatio: 1.4
+    },
+    {
+      id: "decision-new",
+      timestamp: "2026-11-16T10:15:00.000Z",
+      outcomeTimestamp: "2026-11-16T10:10:00.000Z",
+      latencyRatio: 1.8
+    }
+  ];
+
+  for (const observation of observations) {
+    stores.telemetry.record({
+      id: observation.id,
+      timestamp: observation.timestamp,
+      route: "local",
+      targetId: "hydrate-target",
+      workloadType: "hydrate-test",
+      estimatedLatencyMs: 100,
+      estimatedCostUsd: 0.01,
+      targetUtilization: 0.1,
+      confidence: 0.9
+    });
+    stores.telemetry.recordOutcome(observation.id, {
+      outcome: "success",
+      actualLatencyMs: 100 * observation.latencyRatio,
+      actualCostUsd: 0.01 * observation.latencyRatio,
+      timestamp: observation.outcomeTimestamp
+    });
+  }
+
+  const listed = stores.telemetry.list({ limit: 10 });
+  assert.deepEqual(listed.map(event => event.id), [
+    "decision-new",
+    "decision-middle",
+    "decision-old"
+  ]);
+
+  const calibrator = createCalibrator({ minSamples: 1, alpha: 0.5 });
+  const hydrationServer = createServer({
+    decisionStore: stores.telemetry,
+    calibrator,
+    calibrationEnabled: true
+  });
+  await new Promise(resolve => hydrationServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + hydrationServer.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/decide", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workload: { type: "hydrate-test", sensitivity: "low" },
+        targets: [{
+          id: "hydrate-target",
+          mode: "local",
+          health: 1,
+          capacity: 0.1,
+          privacy: 1,
+          estimatedLatencyMs: 100,
+          estimatedCostUsd: 0.01
+        }]
+      })
+    });
+    assert.equal(response.status, 200);
+    const decision = await response.json();
+    assert.equal(decision.estimated.latencyMs, 145);
+    assert.equal(decision.estimated.costUsd, 0.0145);
+    assert.deepEqual(decision.calibration.adjustedTargetIds, ["hydrate-target"]);
+
+    const stateResponse = await fetch(url + "/v1/calibration");
+    assert.equal(stateResponse.status, 200);
+    const state = await stateResponse.json();
+    assert.equal(state.entries.length, 1);
+    assert.equal(state.entries[0].samples, 3);
+    assert.equal(state.entries[0].latencyFactor, 1.45);
+    assert.equal(state.entries[0].costFactor, 1.45);
+  } finally {
+    await new Promise(resolve => hydrationServer.close(resolve));
+    stores.close();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
 
 test("two API instances can share coordination state through an async coordination backend", async () => {
   const coordination = createInMemoryCoordinationStore();
@@ -2777,9 +4134,12 @@ test("two API instances share idempotency responses through the same backend", a
 });
 
 
-test("status endpoint reports shared coordination mode", async () => {
+test("status endpoint does not misreport in-memory coordination as shared or durable", async () => {
   const coordination = createInMemoryCoordinationStore();
-  const statusServer = createServer({ coordinationStore: coordination });
+  const statusServer = createServer({
+    coordinationStore: coordination,
+    rateLimitMaxRequests: 5
+  });
 
   await new Promise(resolve => statusServer.listen(0, "127.0.0.1", resolve));
   const url = "http://127.0.0.1:" + statusServer.address().port;
@@ -2789,11 +4149,73 @@ test("status endpoint reports shared coordination mode", async () => {
     assert.equal(response.status, 200);
     const body = await response.json();
 
+    assert.equal(body.capabilities.sharedCoordination, false);
+    assert.equal(body.capabilities.durableCoordination, false);
+    assert.equal(body.capabilities.coordinationBackend, "process-local");
+    assert.equal(body.capabilities.circuitBreakerBackend, "process-local");
+    assert.equal(body.capabilities.sharedCircuitBreaker, false);
+    assert.equal(body.capabilities.rateLimitMode, "process-local");
+    assert.equal(body.capabilities.idempotencyMode, "process-local");
+  } finally {
+    await new Promise(resolve => statusServer.close(resolve));
+  }
+});
+
+test("status endpoint reports disabled rate limiting when no request limit is configured", async () => {
+  const statusServer = createServer();
+  await new Promise(resolve => statusServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + statusServer.address().port;
+  try {
+    const response = await fetch(url + "/v1/status");
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.capabilities.rateLimitMode, "disabled");
+  } finally {
+    await new Promise(resolve => statusServer.close(resolve));
+  }
+});
+test("status endpoint reports shared and durable capabilities from SQLite backends", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-status-capabilities-"));
+  const file = path.join(dir, "state.db");
+  const stores = createSQLiteStateStores({ filePath: file, maxEntries: 20 });
+  const statusServer = createServer({
+    decisionStore: stores.telemetry,
+    policyStore: stores.policies,
+    coordinationStore: stores.coordination,
+    // Stale process-local labels must not contradict durable/shared stores.
+    telemetryBackend: "process-local",
+    policyBackend: "process-local",
+    coordinationBackend: "process-local",
+    rateLimitMaxRequests: 10
+  });
+
+  await new Promise(resolve => statusServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + statusServer.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/status");
+    assert.equal(response.status, 200);
+    const body = await response.json();
+
+    assert.equal(body.stateBackend.kind, "shared");
+    assert.equal(body.stateBackend.telemetry.durable, true);
+    assert.equal(body.stateBackend.telemetry.shared, true);
+    assert.equal(body.stateBackend.coordination.durable, true);
+    assert.equal(body.stateBackend.coordination.shared, true);
+    assert.equal(body.capabilities.persistentTelemetry, true);
     assert.equal(body.capabilities.sharedCoordination, true);
+    assert.equal(body.capabilities.durableCoordination, true);
+    assert.equal(body.capabilities.coordinationBackend, "shared");
+    assert.equal(body.capabilities.telemetryBackend, "shared");
+    assert.equal(body.capabilities.policyBackend, "shared");
+    assert.equal(body.capabilities.circuitBreakerBackend, "shared");
+    assert.equal(body.capabilities.sharedCircuitBreaker, true);
     assert.equal(body.capabilities.rateLimitMode, "shared");
     assert.equal(body.capabilities.idempotencyMode, "shared");
   } finally {
     await new Promise(resolve => statusServer.close(resolve));
+    stores.close();
+    await rm(dir, { recursive: true, force: true });
   }
 });
 
@@ -3255,9 +4677,442 @@ test("concurrent identical idempotency keys reject the in-progress duplicate", a
   }
 });
 
+test("cache-write failure preserves an idempotency claim after the operation mutates state", async () => {
+  const targetRegistry = createTargetRegistry();
+  const originalRegister = targetRegistry.register.bind(targetRegistry);
+  let registerCalls = 0;
+  targetRegistry.register = (...args) => {
+    registerCalls++;
+    return originalRegister(...args);
+  };
+
+  let claimed = false;
+  let releaseCalls = 0;
+  const idempotencyStore = {
+    async claim() {
+      if (claimed) return { claimed: false, reason: "in_progress" };
+      claimed = true;
+      return { claimed: true, claimToken: "claim-token" };
+    },
+    async remember() {
+      throw new Error("simulated idempotency cache write failure");
+    },
+    async release() {
+      releaseCalls++;
+      claimed = false;
+      return true;
+    }
+  };
+  const scopedServer = createServer({ targetRegistry, idempotencyStore });
+  await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + scopedServer.address().port;
+  const request = () => fetch(url + "/v1/targets", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": "target-create-cache-failure"
+    },
+    body: JSON.stringify({
+      id: "cache-failure-target",
+      mode: "local",
+      available: true,
+      capabilities: ["text-generation"],
+      regions: ["local"]
+    })
+  });
+
+  try {
+    const first = await request();
+    assert.equal(first.status, 500);
+    const second = await request();
+    assert.equal(second.status, 409);
+    assert.deepEqual(await second.json(), { error: "idempotency_request_in_progress" });
+    assert.equal(registerCalls, 1);
+    assert.equal(releaseCalls, 0);
+  } finally {
+    await new Promise(resolve => scopedServer.close(resolve));
+  }
+});
+
 test("invalid idempotency lock TTL fails at server creation", () => {
   assert.throws(
     () => createServer({ idempotencyLockTtlMs: 0 }),
     /idempotencyLockTtlMs must be >= 1/
   );
+});
+
+
+test("failed idempotent operations release claims for immediate shared-store retry", async () => {
+  const scopedServer = createServer({
+    targetRegistry: createTargetRegistry(),
+    coordinationStore: createInMemoryCoordinationStore()
+  });
+  await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + scopedServer.address().port;
+  const request = () => fetch(url + "/v1/targets/idempotency-missing-target/probe", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": "failed-probe-retry"
+    },
+    body: "{}"
+  });
+
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await request();
+      assert.equal(response.status, 404);
+      assert.deepEqual(await response.json(), { error: "target_not_found" });
+    }
+  } finally {
+    await new Promise(resolve => scopedServer.close(resolve));
+  }
+});
+
+test("long-running idempotent operations renew their claim and reject duplicate side effects", async () => {
+  let recordCalls = 0;
+  const decisionStore = {
+    async record(event) {
+      recordCalls++;
+      await new Promise(resolve => setTimeout(resolve, 240));
+      return { ...event, id: "decision-long-running-" + recordCalls };
+    },
+    async recordOutcome() { throw new Error("not used"); },
+    async list() { return []; },
+    async summary() { return { totalDecisions: 0 }; },
+    async clear() {}
+  };
+  const scopedServer = createServer({ decisionStore, idempotencyLockTtlMs: 60 });
+  await new Promise(resolve => scopedServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + scopedServer.address().port;
+  const request = () => fetch(url + "/v1/decide", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": "long-running-decision"
+    },
+    body: JSON.stringify({
+      workload: { type: "long-running", sensitivity: "low" },
+      targets: [{
+        id: "long-running-target", mode: "local", health: 1, capacity: 0.1,
+        privacy: 1, estimatedLatencyMs: 10, estimatedCostUsd: 0
+      }]
+    })
+  });
+
+  try {
+    const firstPending = request();
+    await new Promise(resolve => setTimeout(resolve, 130));
+    const duplicate = await request();
+    assert.equal(duplicate.status, 409);
+    assert.deepEqual(await duplicate.json(), { error: "idempotency_request_in_progress" });
+    const first = await firstPending;
+    assert.equal(first.status, 200);
+    const firstBody = await first.json();
+    assert.equal(recordCalls, 1);
+    const replay = await request();
+    assert.equal(replay.status, 200);
+    assert.equal(replay.headers.get("idempotency-replayed"), "true");
+    assert.equal((await replay.json()).decisionId, firstBody.decisionId);
+    assert.equal(recordCalls, 1);
+  } finally {
+    await new Promise(resolve => scopedServer.close(resolve));
+  }
+});
+
+
+test("scheduled probes open tenant circuits, skip open providers, and recover through one half-open probe", async () => {
+  let now = 1_000;
+  let providerCalls = 0;
+  let providerFails = true;
+  const targetRegistry = createTenantTargetRegistry();
+  targetRegistry.forTenant("acme").register({
+    id: "scheduled-probe-target",
+    async getSnapshot() {
+      return {
+        id: "scheduled-probe-target",
+        mode: "private",
+        available: true,
+        health: 1
+      };
+    },
+    async probe() {
+      providerCalls++;
+      if (providerFails) throw new Error("provider_probe_unavailable");
+      return {
+        id: "scheduled-probe-target",
+        mode: "private",
+        available: true,
+        health: 1
+      };
+    }
+  });
+  const circuitBreaker = createCircuitBreaker({
+    store: createInMemoryCoordinationStore(),
+    failureThreshold: 1,
+    failureWindowMs: 1_000,
+    cooldownMs: 50,
+    probeLeaseMs: 100,
+    clock: () => now
+  });
+  const probeScheduler = createConfiguredProbeScheduler({
+    registry: targetRegistry,
+    intervalMs: 1_000,
+    logger: { info() {} }
+  });
+  createServer({ targetRegistry, probeScheduler, circuitBreaker });
+
+  const failed = await probeScheduler.runOnce();
+  assert.equal(failed[0].status, "failed");
+  assert.equal((await circuitBreaker.inspect("acme", "scheduled-probe-target")).state, "open");
+  assert.equal(providerCalls, 1);
+
+  const skipped = await probeScheduler.runOnce();
+  assert.equal(skipped[0].status, "skipped");
+  assert.equal(skipped[0].reason, "circuit_breaker_open");
+  assert.equal(providerCalls, 1);
+
+  now += 50;
+  providerFails = false;
+  const recovered = await probeScheduler.runOnce();
+  assert.equal(recovered[0].status, "success");
+  assert.equal(providerCalls, 2);
+  assert.equal((await circuitBreaker.inspect("acme", "scheduled-probe-target")).state, "closed");
+});
+
+test("manual provider probes are fenced by the circuit breaker and can recover after cooldown", async () => {
+  let now = 2_000;
+  let providerCalls = 0;
+  let providerFails = true;
+  const registry = createTargetRegistry([{
+    id: "manual-probe-circuit-target",
+    async getSnapshot() {
+      return {
+        id: "manual-probe-circuit-target",
+        mode: "private",
+        available: true,
+        health: 1
+      };
+    },
+    async probe() {
+      providerCalls++;
+      if (providerFails) throw new Error("manual_provider_unavailable");
+      return {
+        id: "manual-probe-circuit-target",
+        mode: "private",
+        available: true,
+        health: 1
+      };
+    }
+  }]);
+  const circuitBreaker = createCircuitBreaker({
+    store: createInMemoryCoordinationStore(),
+    failureThreshold: 1,
+    failureWindowMs: 1_000,
+    cooldownMs: 40,
+    probeLeaseMs: 100,
+    clock: () => now
+  });
+  const probeServer = createServer({ targetRegistry: registry, circuitBreaker });
+  await new Promise(resolve => probeServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + probeServer.address().port;
+  const request = () => fetch(url + "/v1/targets/manual-probe-circuit-target/probe", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}"
+  });
+
+  try {
+    const first = await request();
+    assert.equal(first.status, 500);
+    assert.equal(providerCalls, 1);
+    assert.equal((await circuitBreaker.inspect("default", "manual-probe-circuit-target")).state, "open");
+
+    const blocked = await request();
+    assert.equal(blocked.status, 503);
+    assert.equal((await blocked.json()).error, "circuit_breaker_open");
+    assert.equal(providerCalls, 1);
+
+    now += 40;
+    providerFails = false;
+    const recovered = await request();
+    assert.equal(recovered.status, 200);
+    assert.equal(providerCalls, 2);
+    assert.equal((await circuitBreaker.inspect("default", "manual-probe-circuit-target")).state, "closed");
+  } finally {
+    await new Promise(resolve => probeServer.close(resolve));
+  }
+});
+
+
+test("circuit-breaker status details remain isolated by authenticated tenant", async () => {
+  const targetRegistry = createTenantTargetRegistry();
+  for (const tenantId of ["tenant-alpha", "tenant-beta"]) {
+    await targetRegistry.forTenant(tenantId).register({
+      id: "shared-provider-id",
+      mode: "cloud",
+      available: true,
+      health: 0.9,
+      capacity: 0.5,
+      privacy: 0.4,
+      estimatedLatencyMs: 50,
+      estimatedCostUsd: 0.01,
+      regions: ["ap-south-1"],
+      capabilities: ["text-generation"]
+    });
+  }
+
+  const circuitBreaker = createCircuitBreaker({
+    store: createInMemoryCoordinationStore(),
+    failureThreshold: 1,
+    failureWindowMs: 60_000,
+    cooldownMs: 30_000
+  });
+  await circuitBreaker.recordFailure("tenant-alpha", "shared-provider-id");
+
+  const authorizer = createScopedAuthorizer({
+    keys: [
+      { id: "alpha-admin", secret: "alpha-status-secret", tenantId: "tenant-alpha", scopes: ["admin"] },
+      { id: "beta-admin", secret: "beta-status-secret", tenantId: "tenant-beta", scopes: ["admin"] }
+    ]
+  });
+  const statusServer = createServer({ targetRegistry, circuitBreaker, authorizer });
+  await new Promise(resolve => statusServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + statusServer.address().port;
+
+  try {
+    const alphaResponse = await fetch(url + "/v1/status", {
+      headers: { authorization: "Bearer alpha-status-secret" }
+    });
+    const betaResponse = await fetch(url + "/v1/status", {
+      headers: { authorization: "Bearer beta-status-secret" }
+    });
+    assert.equal(alphaResponse.status, 200);
+    assert.equal(betaResponse.status, 200);
+
+    const alpha = await alphaResponse.json();
+    const beta = await betaResponse.json();
+    assert.deepEqual(alpha.circuitBreakers.targets.map(item => item.targetId), ["shared-provider-id"]);
+    assert.deepEqual(beta.circuitBreakers.targets.map(item => item.targetId), ["shared-provider-id"]);
+    assert.equal(alpha.circuitBreakers.targets[0].state, "open");
+    assert.equal(alpha.circuitBreakers.targets[0].failureCount, 1);
+    assert.equal(beta.circuitBreakers.targets[0].state, "closed");
+    assert.equal(beta.circuitBreakers.targets[0].failureCount, 0);
+    assert.equal(alpha.counts.openCircuitTargets, 1);
+    assert.equal(beta.counts.openCircuitTargets, 0);
+  } finally {
+    await new Promise(resolve => statusServer.close(resolve));
+  }
+});
+
+
+test("reliability history is tenant-isolated and accessible with read scope", async () => {
+  const circuitBreaker = createCircuitBreaker({
+    store: createInMemoryCoordinationStore(),
+    failureThreshold: 1,
+    failureWindowMs: 60_000,
+    cooldownMs: 30_000
+  });
+  await circuitBreaker.recordFailure("history-alpha", "shared-target", { source: "manual_probe" });
+  await circuitBreaker.recordSuccess("history-beta", "shared-target", { source: "execution" });
+
+  const authorizer = createScopedAuthorizer({
+    keys: [
+      { id: "alpha-reader", secret: "history-alpha-read-secret", tenantId: "history-alpha", scopes: ["read"] },
+      { id: "beta-reader", secret: "history-beta-read-secret", tenantId: "history-beta", scopes: ["read"] }
+    ]
+  });
+  const reliabilityServer = createServer({ circuitBreaker, authorizer });
+  await new Promise(resolve => reliabilityServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + reliabilityServer.address().port;
+
+  try {
+    const alphaResponse = await fetch(url + "/v1/reliability?windowMs=3600000&limit=10", {
+      headers: { authorization: "Bearer history-alpha-read-secret" }
+    });
+    const betaResponse = await fetch(url + "/v1/reliability?windowMs=3600000&limit=10", {
+      headers: { authorization: "Bearer history-beta-read-secret" }
+    });
+    assert.equal(alphaResponse.status, 200);
+    assert.equal(betaResponse.status, 200);
+
+    const alpha = await alphaResponse.json();
+    const beta = await betaResponse.json();
+    assert.equal(alpha.summary.attempts, 1);
+    assert.equal(alpha.summary.failures, 1);
+    assert.equal(alpha.summary.circuitOpenings, 1);
+    assert.equal(alpha.providers[0].targetId, "shared-target");
+    assert.equal(alpha.providers[0].failureRate, 1);
+    assert.equal(alpha.recentEvents[0].source, "manual_probe");
+    assert.equal(Object.hasOwn(alpha.recentEvents[0], "tenantId"), false);
+
+    assert.equal(beta.summary.attempts, 1);
+    assert.equal(beta.summary.successes, 1);
+    assert.equal(beta.summary.failures, 0);
+    assert.equal(beta.recentEvents[0].source, "execution");
+
+    const invalidWindow = await fetch(url + "/v1/reliability?windowMs=1000", {
+      headers: { authorization: "Bearer history-alpha-read-secret" }
+    });
+    assert.equal(invalidWindow.status, 400);
+    assert.equal((await invalidWindow.json()).error.includes("windowMs"), true);
+  } finally {
+    await new Promise(resolve => reliabilityServer.close(resolve));
+  }
+});
+
+
+test("reliability endpoint evaluates tenant-scoped SLO burn and read-only alerts", async () => {
+  const circuitBreaker = createCircuitBreaker({
+    store: createInMemoryCoordinationStore(),
+    failureThreshold: 1,
+    failureWindowMs: 60_000,
+    cooldownMs: 30_000
+  });
+  await circuitBreaker.recordFailure("slo-tenant", "failed-provider-a");
+  await circuitBreaker.recordFailure("slo-tenant", "failed-provider-b");
+  for (let index = 0; index < 8; index++) {
+    await circuitBreaker.recordSuccess("slo-tenant", "healthy-provider-" + index);
+  }
+
+  const authorizer = createScopedAuthorizer({
+    keys: [{
+      id: "slo-reader",
+      secret: "slo-read-secret",
+      tenantId: "slo-tenant",
+      scopes: ["read"]
+    }]
+  });
+  const sloServer = createServer({
+    circuitBreaker,
+    authorizer,
+    reliabilitySloAvailabilityTarget: 0.9,
+    reliabilitySloMinimumSamples: 10,
+    reliabilitySloWarningBurnRate: 2,
+    reliabilitySloCriticalBurnRate: 5
+  });
+  await new Promise(resolve => sloServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + sloServer.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/reliability?windowMs=3600000", {
+      headers: { authorization: "Bearer slo-read-secret" }
+    });
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.equal(data.summary.attempts, 10);
+    assert.equal(data.summary.failures, 2);
+    assert.equal(data.slo.policy.availabilityTarget, 0.9);
+    assert.equal(data.slo.overall.status, "warning");
+    assert.equal(data.slo.overall.errorBudgetBurnRate, 2);
+    assert.equal(data.slo.overall.errorBudgetConsumedPercent, 200);
+    assert.equal(data.slo.overall.errorBudgetRemainingPercent, 0);
+    assert.equal(data.slo.alertCount, 1);
+    assert.equal(data.slo.alerts[0].scope, "overall");
+    assert.equal(data.slo.alerts[0].severity, "warning");
+    assert.equal(data.slo.alerts[0].code, "availability_slo_burn_high");
+    assert.equal(data.slo.dataQuality.complete, true);
+  } finally {
+    await new Promise(resolve => sloServer.close(resolve));
+  }
 });

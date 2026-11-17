@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   createDryRunExecutionAdapter,
   createExecutionRegistry,
+  createTenantExecutionRegistry,
   executePlan
 } from "../src/index.js";
 
@@ -114,6 +115,99 @@ test("execution timeout is classified without leaking adapter errors", async () 
   assert.equal(result.receipts[0].errorClass, "execution_timeout");
 });
 
+test("execution timeout aborts the provider signal and returns a deterministic timeout", async () => {
+  let abortObserved = false;
+  const registry = createExecutionRegistry([{
+    id: "slow",
+    targetId: "local",
+    async execute({ signal }) {
+      return new Promise((_, reject) => {
+        signal.addEventListener("abort", () => {
+          abortObserved = true;
+          reject(new Error("adapter_cancelled"));
+        }, { once: true });
+      });
+    }
+  }]);
+
+  const result = await executePlan(
+    { ...plan(), steps: [plan().steps[0]] },
+    { registry, mode: "live", timeoutMs: 5 }
+  );
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.receipts[0].errorClass, "execution_timeout");
+  assert.equal(abortObserved, true);
+});
+
+test("caller abort cancels the in-flight step and prevents later provider steps", async () => {
+  const controller = new AbortController();
+  const calls = [];
+  const outcomes = [];
+  const registry = createExecutionRegistry([
+    {
+      id: "local",
+      targetId: "local",
+      async execute({ signal }) {
+        calls.push("local");
+        return new Promise((_, reject) => {
+          signal.addEventListener("abort", () => reject(new Error("adapter_cancelled")), { once: true });
+        });
+      }
+    },
+    {
+      id: "private",
+      targetId: "private",
+      async execute() {
+        calls.push("private");
+        return { ok: true };
+      }
+    }
+  ]);
+
+  const execution = executePlan(plan(), {
+    registry,
+    mode: "live",
+    signal: controller.signal,
+    onStepResult: event => outcomes.push({
+      stepId: event.step.id,
+      errorClass: event.errorClass,
+      cancelled: event.cancelled === true
+    })
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  controller.abort();
+  const result = await execution;
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.receipts[0].errorClass, "execution_aborted");
+  assert.deepEqual(calls, ["local"]);
+  assert.deepEqual(outcomes, [{
+    stepId: "pre",
+    errorClass: "execution_aborted",
+    cancelled: true
+  }]);
+});
+
+test("an already-aborted execution signal prevents provider admission", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let calls = 0;
+  const registry = createExecutionRegistry([{
+    id: "local",
+    targetId: "local",
+    async execute() { calls++; return {}; }
+  }]);
+
+  const result = await executePlan(
+    { ...plan(), steps: [plan().steps[0]] },
+    { registry, signal: controller.signal }
+  );
+
+  assert.equal(result.receipts[0].errorClass, "execution_aborted");
+  assert.equal(calls, 0);
+});
+
 test("registry rejects duplicate target adapters", () => {
   const registry = createExecutionRegistry([
     createDryRunExecutionAdapter({ id: "one", targetId: "local" })
@@ -124,6 +218,94 @@ test("registry rejects duplicate target adapters", () => {
     /already registered/
   );
 });
+
+test("execution admission can reject an open circuit without calling the provider", async () => {
+  let providerCalls = 0;
+  const registry = createExecutionRegistry([{
+    id: "provider",
+    targetId: "local",
+    async execute() {
+      providerCalls++;
+      return { ok: true };
+    }
+  }]);
+  let admitted = 0;
+
+  const result = await executePlan(
+    { ...plan(), steps: [plan().steps[0]] },
+    {
+      registry,
+      mode: "live",
+      beforeStep: async () => {
+        admitted++;
+        return { allowed: false, errorClass: "circuit_breaker_open" };
+      }
+    }
+  );
+
+  assert.equal(admitted, 1);
+  assert.equal(providerCalls, 0);
+  assert.equal(result.status, "failed");
+  assert.equal(result.receipts[0].errorClass, "circuit_breaker_open");
+});
+
+test("execution step callbacks receive provider success and failure exactly once", async () => {
+  const registry = createExecutionRegistry([
+    {
+      id: "success",
+      targetId: "local",
+      async execute() { return { ok: true }; }
+    },
+    {
+      id: "failure",
+      targetId: "private",
+      async execute() { throw new Error("provider_unavailable"); }
+    }
+  ]);
+  const outcomes = [];
+  const result = await executePlan(plan(), {
+    registry,
+    mode: "live",
+    failFast: false,
+    beforeStep: async ({ step }) => ({ allowed: true, context: { permitId: step.id } }),
+    onStepResult: async event => outcomes.push({
+      stepId: event.step.id,
+      status: event.status,
+      permitId: event.executionContext.permitId,
+      errorClass: event.errorClass ?? null
+    })
+  });
+
+  assert.equal(result.status, "failed");
+  assert.deepEqual(outcomes, [
+    { stepId: "pre", status: "completed", permitId: "pre", errorClass: null },
+    { stepId: "infer", status: "failed", permitId: "infer", errorClass: "provider_unavailable" }
+  ]);
+});
+
+test("execution timeout is reported to the failure callback", async () => {
+  const registry = createExecutionRegistry([{
+    id: "slow",
+    targetId: "local",
+    async execute() {
+      await new Promise(resolve => setTimeout(resolve, 30));
+    }
+  }]);
+  const outcomes = [];
+  const result = await executePlan(
+    { ...plan(), steps: [plan().steps[0]] },
+    {
+      registry,
+      mode: "live",
+      timeoutMs: 5,
+      onStepResult: event => outcomes.push(event.errorClass)
+    }
+  );
+
+  assert.equal(result.receipts[0].errorClass, "execution_timeout");
+  assert.deepEqual(outcomes, ["execution_timeout"]);
+});
+
 
 test("execution outputs are caller-scoped and omitted by default", async () => {
   const registry = createExecutionRegistry([{
@@ -153,4 +335,24 @@ test("execution outputs are caller-scoped and omitted by default", async () => {
     result: { echoed: "hello" }
   }]);
   assert.equal("payload" in visible.receipts[0], false);
+});
+
+
+test("tenant execution registries isolate identical target IDs", () => {
+  const registry = createTenantExecutionRegistry();
+  registry.forTenant("acme").register({
+    id: "acme-provider",
+    targetId: "shared-target",
+    async execute() { return { tenant: "acme" }; }
+  });
+  registry.forTenant("beta").register({
+    id: "beta-provider",
+    targetId: "shared-target",
+    async execute() { return { tenant: "beta" }; }
+  });
+
+  assert.equal(registry.forTenant("acme").get("shared-target").id, "acme-provider");
+  assert.equal(registry.forTenant("beta").get("shared-target").id, "beta-provider");
+  assert.equal(registry.get("shared-target"), null);
+  assert.deepEqual(registry.listTenantIds(), ["acme", "beta", "default"]);
 });

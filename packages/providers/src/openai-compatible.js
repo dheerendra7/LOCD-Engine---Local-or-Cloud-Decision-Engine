@@ -31,15 +31,45 @@ function authHeaders(apiKey) {
   return apiKey ? { authorization: "Bearer " + apiKey } : {};
 }
 
-function timeoutSignal(timeoutMs) {
+function optionalNonNegative(value) {
+  if (value == null || (typeof value === "string" && value.trim() === "")) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function timeoutSignal(timeoutMs, parentSignal = null) {
+  if (parentSignal != null && (
+    typeof parentSignal.aborted !== "boolean" ||
+    typeof parentSignal.addEventListener !== "function"
+  )) {
+    throw new Error("signal must be an AbortSignal");
+  }
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return { signal: undefined, cancel: () => {} };
 
   const controller = new AbortController();
+  let parentAbortListener = null;
+  if (parentSignal?.aborted) {
+    controller.abort(parentSignal.reason);
+  } else if (parentSignal) {
+    parentAbortListener = () => controller.abort(parentSignal.reason);
+    parentSignal.addEventListener("abort", parentAbortListener, { once: true });
+  }
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   return {
     signal: controller.signal,
-    cancel: () => clearTimeout(timer)
+    cancel: () => {
+      clearTimeout(timer);
+      if (parentSignal && parentAbortListener) {
+        parentSignal.removeEventListener("abort", parentAbortListener);
+      }
+    }
   };
+}
+
+function finiteOrFallback(value, fallback) {
+  if (value == null || (typeof value === "string" && value.trim() === "")) return fallback;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : fallback;
 }
 
 function normalizeSnapshot(snapshot) {
@@ -47,16 +77,16 @@ function normalizeSnapshot(snapshot) {
     id: snapshot.id,
     mode: snapshot.mode,
     available: snapshot.available !== false,
-    health: Number.isFinite(Number(snapshot.health)) ? Math.min(1, Math.max(0, Number(snapshot.health))) : 0,
-    capacity: Number.isFinite(Number(snapshot.capacity)) ? Math.min(1, Math.max(0, Number(snapshot.capacity))) : 1,
-    privacy: Number.isFinite(Number(snapshot.privacy)) ? Math.min(1, Math.max(0, Number(snapshot.privacy))) : 0,
-    estimatedLatencyMs: Number.isFinite(Number(snapshot.estimatedLatencyMs)) ? Math.max(0, Number(snapshot.estimatedLatencyMs)) : null,
-    estimatedCostUsd: Number.isFinite(Number(snapshot.estimatedCostUsd)) ? Math.max(0, Number(snapshot.estimatedCostUsd)) : null,
+    health: Math.min(1, Math.max(0, finiteOrFallback(snapshot.health, 0))),
+    capacity: Math.min(1, Math.max(0, finiteOrFallback(snapshot.capacity, 1))),
+    privacy: Math.min(1, Math.max(0, finiteOrFallback(snapshot.privacy, 0))),
+    estimatedLatencyMs: optionalNonNegative(snapshot.estimatedLatencyMs),
+    estimatedCostUsd: optionalNonNegative(snapshot.estimatedCostUsd),
     pricing: snapshot.pricing && typeof snapshot.pricing === "object"
       ? structuredClone(snapshot.pricing)
       : null,
-    availableMemoryGb: Number.isFinite(Number(snapshot.availableMemoryGb)) ? Math.max(0, Number(snapshot.availableMemoryGb)) : null,
-    maxContextTokens: Number.isFinite(Number(snapshot.maxContextTokens)) ? Math.max(0, Number(snapshot.maxContextTokens)) : null,
+    availableMemoryGb: optionalNonNegative(snapshot.availableMemoryGb),
+    maxContextTokens: optionalNonNegative(snapshot.maxContextTokens),
     lastHeartbeatAt: snapshot.lastHeartbeatAt ? new Date(snapshot.lastHeartbeatAt).toISOString() : null,
     errorClass: snapshot.errorClass ? String(snapshot.errorClass) : null,
     regions: Array.isArray(snapshot.regions) ? [...new Set(snapshot.regions.map(String))] : [],
@@ -85,6 +115,9 @@ export function createOpenAICompatibleAdapter({
   if (!targetId) throw new Error("targetId is required");
   if (!MODES.has(mode)) throw new Error("mode must be local, private, cloud or hybrid");
   if (typeof fetchImpl !== "function") throw new Error("fetch implementation is required");
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("timeoutMs must be a positive finite number");
+  }
 
   const url = assertSafeBaseUrl(baseUrl, { allowInsecureHttp });
   let snapshot = normalizeSnapshot({
@@ -154,7 +187,7 @@ export function createOpenAICompatibleAdapter({
     }
   }
 
-  async function execute({ payload, mode: executionMode = "live" } = {}) {
+  async function execute({ payload, mode: executionMode = "live", signal = null } = {}) {
     if (executionMode !== "live") {
       throw new Error("provider execution requires live mode");
     }
@@ -162,7 +195,7 @@ export function createOpenAICompatibleAdapter({
       throw new Error("execution payload must be an object");
     }
 
-    const timeout = timeoutSignal(timeoutMs);
+    const timeout = timeoutSignal(timeoutMs, signal);
     try {
       const body = {
         ...payload,
@@ -186,6 +219,7 @@ export function createOpenAICompatibleAdapter({
 
       return await response.json();
     } catch (error) {
+      if (signal?.aborted) throw new Error("provider_aborted");
       if (error?.name === "AbortError") throw new Error("provider_timeout");
       throw error;
     } finally {

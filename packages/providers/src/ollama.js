@@ -31,23 +31,48 @@ function authHeaders(apiKey) {
   return apiKey ? { authorization: "Bearer " + apiKey } : {};
 }
 
-function timeoutSignal(timeoutMs) {
+function timeoutSignal(timeoutMs, parentSignal = null) {
+  if (parentSignal != null && (
+    typeof parentSignal.aborted !== "boolean" ||
+    typeof parentSignal.addEventListener !== "function"
+  )) {
+    throw new Error("signal must be an AbortSignal");
+  }
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     return { signal: undefined, cancel: () => {} };
   }
 
   const controller = new AbortController();
+  let parentAbortListener = null;
+  if (parentSignal?.aborted) {
+    controller.abort(parentSignal.reason);
+  } else if (parentSignal) {
+    parentAbortListener = () => controller.abort(parentSignal.reason);
+    parentSignal.addEventListener("abort", parentAbortListener, { once: true });
+  }
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   return {
     signal: controller.signal,
-    cancel: () => clearTimeout(timer)
+    cancel: () => {
+      clearTimeout(timer);
+      if (parentSignal && parentAbortListener) {
+        parentSignal.removeEventListener("abort", parentAbortListener);
+      }
+    }
   };
 }
 
 function snapshotValue(value, fallback, { min = 0, max = 1 } = {}) {
+  if (value == null || (typeof value === "string" && value.trim() === "")) return fallback;
   const number = Number(value);
-  if (!Number.isFinite(number)) return fallback;
-  return Math.min(max, Math.max(min, number));
+  if (!Number.isFinite(number) || number < min) return fallback;
+  return Math.min(max, number);
+}
+
+function optionalNonNegative(value) {
+  if (value == null || (typeof value === "string" && value.trim() === "")) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
 export function createOllamaAdapter({
@@ -58,7 +83,7 @@ export function createOllamaAdapter({
   apiKey = null,
   model = null,
   privacy = 1,
-  estimatedCostUsd = 0,
+  estimatedCostUsd,
   regions = ["local"],
   capabilities = ["text-generation"],
   allowInsecureHttp = false,
@@ -70,8 +95,14 @@ export function createOllamaAdapter({
   if (!targetId) throw new Error("targetId is required");
   if (!MODES.has(mode)) throw new Error("mode must be local, private, cloud or hybrid");
   if (typeof fetchImpl !== "function") throw new Error("fetch implementation is required");
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("timeoutMs must be a positive finite number");
+  }
 
   const url = assertSafeBaseUrl(baseUrl, { allowInsecureHttp });
+  const fallbackEstimatedCostUsd = estimatedCostUsd === undefined
+    ? 0
+    : optionalNonNegative(estimatedCostUsd);
 
   let snapshot = {
     id: String(targetId),
@@ -80,18 +111,12 @@ export function createOllamaAdapter({
     health: snapshotValue(initial.health, 0),
     capacity: snapshotValue(initial.capacity, 1),
     privacy: snapshotValue(initial.privacy, privacy),
-    estimatedLatencyMs: Number.isFinite(Number(initial.estimatedLatencyMs))
-      ? Math.max(0, Number(initial.estimatedLatencyMs))
-      : null,
-    estimatedCostUsd: Number.isFinite(Number(initial.estimatedCostUsd))
-      ? Math.max(0, Number(initial.estimatedCostUsd))
-      : Math.max(0, Number(estimatedCostUsd) || 0),
-    availableMemoryGb: Number.isFinite(Number(initial.availableMemoryGb))
-      ? Math.max(0, Number(initial.availableMemoryGb))
-      : null,
-    maxContextTokens: Number.isFinite(Number(initial.maxContextTokens))
-      ? Math.max(0, Number(initial.maxContextTokens))
-      : null,
+    estimatedLatencyMs: optionalNonNegative(initial.estimatedLatencyMs),
+    estimatedCostUsd: Object.hasOwn(initial, "estimatedCostUsd")
+      ? optionalNonNegative(initial.estimatedCostUsd)
+      : fallbackEstimatedCostUsd,
+    availableMemoryGb: optionalNonNegative(initial.availableMemoryGb),
+    maxContextTokens: optionalNonNegative(initial.maxContextTokens),
     lastHeartbeatAt: initial.lastHeartbeatAt
       ? new Date(initial.lastHeartbeatAt).toISOString()
       : null,
@@ -144,7 +169,7 @@ export function createOllamaAdapter({
     }
   }
 
-  async function execute({ payload, mode: executionMode = "live" } = {}) {
+  async function execute({ payload, mode: executionMode = "live", signal = null } = {}) {
     if (executionMode !== "live") {
       throw new Error("provider execution requires live mode");
     }
@@ -162,7 +187,7 @@ export function createOllamaAdapter({
       throw new Error("Ollama execution requires a model");
     }
 
-    const timeout = timeoutSignal(timeoutMs);
+    const timeout = timeoutSignal(timeoutMs, signal);
     try {
       const response = await fetchImpl(new URL("/api/chat", url), {
         method: "POST",
@@ -181,6 +206,7 @@ export function createOllamaAdapter({
 
       return await response.json();
     } catch (error) {
+      if (signal?.aborted) throw new Error("provider_aborted");
       if (error?.name === "AbortError") throw new Error("provider_timeout");
       throw error;
     } finally {

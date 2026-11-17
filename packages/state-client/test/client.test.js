@@ -167,13 +167,16 @@ test("HTTP policy client maps tenant-scoped CRUD and rollback", async () => {
     { id: "acme-policy", baseProfile: "balanced" },
     { updatedBy: "admin" }
   )).version, 2);
-  assert.equal((await store.rollback("acme", "acme-policy", 1, { updatedBy: "rollback" })).version, 2);
+  const rolledBack = await store.rollback("acme", "acme-policy", 1, { updatedBy: "rollback" });
+  assert.equal(rolledBack.version, 3);
+  assert.equal(rolledBack.rolledBackFromVersion, 1);
   assert.equal(await store.remove("acme", "acme-policy"), true);
 
   assert.equal(calls.every(call => call.options.headers.authorization === "Bearer secret"), true);
   assert.equal(calls[0].options.headers["x-locd-tenant-id"], "acme");
   assert.match(calls[2].url, /\/history$/);
-  assert.match(calls[4].url, /\/acme-policy$/);
+  assert.match(calls[4].url, /\/acme-policy\/rollback$/);
+  assert.match(calls[5].url, /\/acme-policy$/);
 });
 
 test("HTTP state client surfaces non-2xx errors", async () => {
@@ -239,4 +242,29 @@ test("HTTP telemetry propagates tenant context to the state service", async () =
   assert.equal(calls[1].options.headers["x-locd-tenant-id"], "acme");
   assert.equal(calls[2].options.headers["x-locd-tenant-id"], "acme");
   assert.equal(calls[3].options.headers["x-locd-tenant-id"], "acme");
+});
+
+
+test("HTTP coordination exposes atomic compare-delete and compare-set", async () => {
+  const { fetchImpl, calls } = fakeFetch({ deleted: true, updated: true });
+  const store = createHTTPCoordinationStore({
+    baseUrl: "http://state.internal:8890",
+    apiKey: "service-secret",
+    fetchImpl
+  });
+
+  assert.equal(await store.deleteIfValue("lease/a", { token: "old" }), true);
+  assert.equal(calls[0].url, "http://state.internal:8890/v1/state/kv/lease%2Fa/delete-if-value");
+  assert.deepEqual(JSON.parse(calls[0].options.body), { expectedValue: { token: "old" } });
+
+  assert.equal(
+    await store.setIfValue("lease/a", { token: "old" }, { token: "done" }, { ttlMs: 5000 }),
+    true
+  );
+  assert.equal(calls[1].url, "http://state.internal:8890/v1/state/kv/lease%2Fa/set-if-value");
+  assert.deepEqual(JSON.parse(calls[1].options.body), {
+    expectedValue: { token: "old" },
+    value: { token: "done" },
+    ttlMs: 5000
+  });
 });

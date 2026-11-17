@@ -3,6 +3,7 @@ export function createProbeScheduler({
   intervalMs = 30_000,
   maxConcurrent = 4,
   onResult = () => {},
+  beforeProbe = null,
   setIntervalImpl = setInterval,
   clearIntervalImpl = clearInterval
 } = {}) {
@@ -20,6 +21,9 @@ export function createProbeScheduler({
     throw new Error("maxConcurrent must be a positive integer");
   }
   if (typeof onResult !== "function") throw new Error("onResult must be a function");
+  if (beforeProbe !== null && typeof beforeProbe !== "function") {
+    throw new Error("beforeProbe must be a function");
+  }
 
   let timer = null;
   let running = false;
@@ -38,25 +42,63 @@ export function createProbeScheduler({
     inFlight.add(id);
     try {
       let result;
-      try {
-        const snapshot = await registry.probe(id);
-        result = {
-          targetId: id,
-          status: "success",
-          snapshot
-        };
-      } catch (error) {
-        result = {
-          targetId: id,
-          status: "failed",
-          errorClass: error instanceof Error ? error.message : "probe_failed"
-        };
+      let probeContext = null;
+
+      if (beforeProbe) {
+        try {
+          const admission = await beforeProbe({
+            target: structuredClone(target),
+            targetId: id
+          });
+          if (admission?.allowed === false) {
+            result = {
+              targetId: id,
+              status: "skipped",
+              reason: admission.reason || "probe_admission_denied"
+            };
+          } else {
+            probeContext = admission?.context ?? null;
+          }
+        } catch (error) {
+          result = {
+            targetId: id,
+            status: "skipped",
+            reason: "probe_admission_failed",
+            errorClass: error instanceof Error ? error.message : "probe_admission_failed"
+          };
+        }
+      }
+
+      if (!result) {
+        try {
+          const snapshot = await registry.probe(id);
+          result = snapshot?.available === false
+            ? {
+                targetId: id,
+                status: "failed",
+                errorClass: "provider_unavailable",
+                snapshot
+              }
+            : {
+                targetId: id,
+                status: "success",
+                snapshot
+              };
+        } catch (error) {
+          result = {
+            targetId: id,
+            status: "failed",
+            errorClass: error instanceof Error ? error.message : "probe_failed"
+          };
+        }
       }
 
       try {
-        await onResult(result);
+        await onResult(probeContext == null
+          ? result
+          : { ...result, probeContext });
       } catch {
-        // Observability must not change probe outcome semantics.
+        // Observability and breaker observers must not rewrite probe outcomes.
       }
 
       return result;

@@ -318,6 +318,40 @@ export function createHTTPCoordinationStore({
       return response.deleted === true;
     },
 
+    async deleteIfValue(key, expectedValue) {
+      const response = await request(
+        fetchImpl,
+        baseUrl,
+        apiKey,
+        "/v1/state/kv/" + encodeKey(key) + "/delete-if-value",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ expectedValue })
+        },
+        null,
+        timeoutMs
+      );
+      return response.deleted === true;
+    },
+
+    async setIfValue(key, expectedValue, value, { ttlMs = null } = {}) {
+      const response = await request(
+        fetchImpl,
+        baseUrl,
+        apiKey,
+        "/v1/state/kv/" + encodeKey(key) + "/set-if-value",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ expectedValue, value, ttlMs })
+        },
+        null,
+        timeoutMs
+      );
+      return response.updated === true;
+    },
+
     async incr(key, { ttlMs = null } = {}) {
       const response = await request(
         fetchImpl,

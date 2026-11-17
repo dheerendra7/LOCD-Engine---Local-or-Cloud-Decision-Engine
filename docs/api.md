@@ -90,8 +90,8 @@ A successful decision returns:
 - estimated: selected target latency/cost estimate.
 - reasons: positive explanations for the selected candidate.
 - alternatives: other eligible candidates ranked below the winner.
-- rejected: hard-rejected candidates and rule reasons.
-- evaluated: full candidate trace for audit/debugging.
+- rejected: hard-rejected candidates and rule reasons, including `circuit_breaker_open` and `circuit_breaker_half_open_busy`.
+- evaluated: full candidate trace for audit/debugging, including circuit state for registered targets.
 
 ### Hard-constraint behavior
 
@@ -139,7 +139,7 @@ Optional query parameter:
 
 ## GET /v1/metrics
 
-Returns in-memory aggregate decision metrics:
+Returns in-memory aggregate decision metrics. `estimatedCostUsd` is the subtotal of known estimates only; use `estimatedCostKnownCount` and `estimatedCostUnknownCount` to determine whether that subtotal covers every decision. An unknown estimate is not counted as zero.
 
     {
       "totalDecisions": 42,
@@ -150,6 +150,8 @@ Returns in-memory aggregate decision metrics:
         "none": 2
       },
       "estimatedCostUsd": 0.43,
+      "estimatedCostKnownCount": 38,
+      "estimatedCostUnknownCount": 4,
       "averageEstimatedLatencyMs": 318.5,
       "averageConfidence": 0.84
     }
@@ -273,10 +275,13 @@ When no request-scoped targets are supplied and the target registry is empty, PO
 
 Validates an explicit multi-stage hybrid execution plan against registered or request-scoped targets and policy.
 
-Each step contains a stable id, purpose and targetId. The planner returns:
+Each step contains a stable id, purpose and targetId, plus optional dataSensitivity (which defaults to the workload sensitivity). Conditional policy rules are evaluated independently for each step using its effective sensitivity, the workload type and declared required capabilities. A rule matched by at least one step is listed once in policyRulesApplied.
+
+The planner returns:
 
 - valid: whether every step satisfies hard policy/availability checks
 - steps: normalized stage information
+- policyRulesApplied: unique IDs of rules matched by one or more stages
 - estimated.latencyMs: sequential sum of stage latency estimates
 - estimated.costUsd: sum of stage cost estimates
 - rejected: stage-level and plan-level rejection reasons
@@ -300,14 +305,16 @@ Supported outcomes are success and failure. The event is matched by decisionId.
 
 POST /v1/decide now returns decisionId so callers can correlate predicted and observed execution metadata.
 
+Outcome feedback is a write-once transition from pending to success or failure. A second update for an already completed decision returns HTTP 409 with `decision_already_completed`; send an Idempotency-Key when retrying the same feedback request so the original response is replayed instead of attempting a second transition.
+
 Calibration fields in GET /v1/metrics include successRate, meanAbsoluteLatencyErrorMs and meanAbsoluteCostErrorUsd when enough observed data exists.
 
 
 ## Retry safety
 
-All POST endpoints under /v1 support an optional Idempotency-Key header.
+All POST, PUT and PATCH endpoints under /v1 support an optional Idempotency-Key header.
 
-When the same key and request body are received within the bounded in-memory retention window, LOCD returns the original response and sets Idempotency-Replayed: true.
+When the same key and request body are received within the bounded retention window, LOCD returns the original response and sets Idempotency-Replayed: true. While the original request is processing, the built-in idempotency stores renew its owner-fenced lease so work that takes longer than the initial lock TTL remains protected from concurrent duplicate execution.
 
 Reusing the same key with a different request body returns HTTP 409 with error idempotency_key_reused. A concurrent duplicate that arrives while the original request is still running returns HTTP 409 with error idempotency_request_in_progress.
 
@@ -344,19 +351,34 @@ The built-in OpenAI-compatible adapter probes GET /v1/models and measures round-
 
 ### POST /v1/execute
 
-Executes a previously validated execution plan against server-registered adapters.
+Executes a planner-authorized execution plan against server-registered adapters.
 
 - mode: dry-run or live; dry-run is the default
 - includeOutputs: optional boolean; successful adapter results are returned only when true
 - timeoutMs: optional execution timeout
 - failFast: optional boolean, default true
-- plan: validated plan with target IDs and optional per-step payload
+- plan: planner-issued plan; optional per-step payloads may be attached after planning
+- executionAuthorization: required signed authorization for live mode
 
-Live execution requires LOCD_EXECUTION_ENABLED=true and authentication. A positive rate-limit configuration is also mandatory for live execution; otherwise the API returns HTTP 503 with `live_execution_requires_rate_limit` and does not invoke a provider.
+A caller-provided `plan.valid: true` is not proof of validation. Live execution requires an HMAC authorization issued by `POST /v1/hybrid-plan` for a valid plan built from the authenticated tenant's registered targets. Request-scoped targets remain simulation-only and never receive a live-execution authorization.
+
+The authorization binds the plan structure and tenant, expires after `LOCD_EXECUTION_PLAN_TTL_MS` (default 600 seconds; maximum 15 minutes), and excludes only each step's runtime `payload` field so payloads can be supplied at execution time. Any change to routing, target identity, sensitivity, or other signed plan fields invalidates the authorization. Each authorization is single-use. The consumed-token claim is stored in the coordination backend until expiry; without a shared coordination backend, single-use enforcement is process-local. An idempotent retry replays the original execution response without invoking providers again.
+
+Before a provider is invoked, LOCD verifies the signature and tenant, reloads the tenant's registered targets, re-evaluates the plan against current policy and circuit-breaker state, and rejects stale or newly ineligible plans with HTTP 409. A target removed, unavailable, policy-rejected, or circuit-open since planning cannot be executed using an old authorization.
+
+Live execution requires `LOCD_EXECUTION_ENABLED=true`, authentication with execute/admin scope, a configured `LOCD_EXECUTION_PLAN_SECRET` of at least 32 bytes, and an enabled rate limiter. The same plan secret must be configured on every API instance that may issue or consume the authorization. Configure shared atomic coordination (SQLite on a shared host or the network State Service) for fleet-wide single-use token claims. Missing signing configuration returns HTTP 503; an unsigned, expired, modified or cross-tenant authorization is rejected before provider admission.
+
+When the target registry is tenant-scoped, an injected execution registry must also be tenant-scoped and expose `forTenant(tenantId)`. A flat global `targetId`-to-adapter registry is rejected for live execution with HTTP 503 `tenant_scoped_execution_registry_required`; target IDs may be reused by different tenants and must never select a shared adapter implicitly. Alternatively, register provider adapters in each tenant's target registry so the API can construct the tenant-specific execution registry automatically.
 
 Static target snapshots receive dry-run-only execution adapters. They cannot be used for live execution.
 
 Execution receipts remain metadata-only. Caller-scoped results are not written to telemetry.
+
+For live execution, each registered target must also pass circuit admission immediately before its provider adapter is called. Targets with open circuits or an active half-open probe return failed step receipts with `circuit_breaker_open` or `circuit_breaker_half_open_busy`; no provider call is made for those steps.
+
+The executor passes an `AbortSignal` to every adapter's `execute({ step, payload, mode, signal })` call. The per-step `timeoutMs` deadline aborts that signal and returns an `execution_timeout` receipt. If the HTTP client disconnects before the response completes, the API aborts the active step with `execution_aborted` and stops later steps. The built-in OpenAI-compatible, Anthropic and Ollama adapters forward this signal to their HTTP request while retaining their own provider timeout.
+
+Cancellation is cooperative: custom adapters must pass the signal to their I/O operation and stop local work when it aborts. LOCD cannot roll back a remote provider operation that has already been accepted or guarantee that a remote service stopped processing. A timed-out or disconnected live execution still consumes its single-use plan authorization. With an Idempotency-Key, the terminal execution result is retained for exact retries; without one, a new execution requires a newly issued plan authorization. Caller cancellation is not counted as a provider health failure, and an owned half-open breaker lease is released.
 
 ## Scoped authorization
 
@@ -378,11 +400,28 @@ Decision responses expose policyRulesApplied and include policy_rule_applied:<id
 
 Public readiness endpoint. Returns HTTP 200 when the API process is initialized.
 
+### GET /v1/reliability
+
+Returns authenticated, tenant-scoped provider outcome and circuit-recovery analytics. The endpoint accepts:
+
+- `windowMs`: aggregation window in milliseconds (default 24 hours; maximum is the configured history retention).
+- `limit`: number of recent events to include (1–100, default 50).
+
+The response contains summary success/failure rates, 24 time buckets, per-provider breakdown and recent operational events. It also includes an SLO evaluation with observed availability, error-budget burn/consumption, overall and per-provider status, and threshold alerts. Default policy: 99.9% availability target, 20 minimum outcomes, warning at 2× budget burn and critical at 5×. When sample volume is below the threshold, status is `insufficient_data`; when retention eviction or event-write gaps make the history incomplete, status is `incomplete_data` and alerts are suppressed. The SLO error-budget measurement applies to the requested history window, not a rolling monthly commitment unless the caller requests a 30-day retention/window configuration.
+
+SLO alerts are returned by the API and displayed in the dashboard; they are read-only evaluations and do not send email, webhook, PagerDuty or other notifications. It records provider IDs, timestamps, operation source and circuit transitions only; prompts, request payloads, completions, provider response bodies and credentials are not stored. Event history uses the same atomic coordination backend as circuit state, so SQLite/State Service deployments share it across instances. Without a shared backend, history is process-local.
+
+History is bounded per tenant: defaults are seven days and 2,000 events, configurable with `LOCD_CIRCUIT_BREAKER_HISTORY_RETENTION_MS` and `LOCD_CIRCUIT_BREAKER_HISTORY_MAX_ENTRIES`. SLO configuration uses `LOCD_RELIABILITY_SLO_TARGET`, `LOCD_RELIABILITY_SLO_MIN_SAMPLES`, `LOCD_RELIABILITY_SLO_WARNING_BURN_RATE` and `LOCD_RELIABILITY_SLO_CRITICAL_BURN_RATE`. The endpoint reports event eviction and process-local write gaps; it is operational analytics, not a permanent audit log.
+
 ### GET /v1/status
 
 Authenticated operational snapshot for operators and dashboards. The response contains safe counts and capability flags, not credentials or workload payloads.
 
-It includes target count, probeable target count, execution adapter count, decision count, execution-enabled state, persistence flags and automatic-probing state.
+It includes target count, probeable target count, execution adapter count, decision count, execution-enabled state, persistence flags, automatic-probing state, circuit-breaker backend and open/half-open/closed target counts. The additive `circuitBreakers` object contains the effective failure threshold, failure window, cooldown and probe-lease durations, plus one safe detail row per registered target (`targetId`, `state`, `failureCount`, `openedAt`, `retryAt` and `probeInFlight`). It never returns internal probe ownership tokens. Target details and counts are evaluated against the authenticated tenant's registry and breaker namespace.
+
+The capability flags are derived from each store's declared contract, not merely from whether a store object was supplied. `sharedCoordination` is true only when the coordination backend declares `shared: true`; `durableCoordination` reflects `durable: true`. A process-local in-memory coordination store therefore remains process-local even though it supports atomic operations within one process.
+
+Derived capability modes use `shared` for explicitly shared stores, `durable-local` for durable stores that do not claim cross-instance sharing, and `process-local` when neither capability is declared. Concrete backend labels such as `sqlite`, `network` or `file` may still be supplied for diagnostics, but a `process-local` label cannot override a store that declares stronger capabilities. Circuit-breaker state is reported as shared only when the coordination store supports the required atomic compare-and-set operations and explicitly advertises shared capability. Rate-limit and idempotency modes report the capabilities of their effective backing adapters. `rateLimitMode` is `disabled` when the configured request limit is zero, regardless of which store is available.
 
 ### Graceful shutdown
 
@@ -396,7 +435,7 @@ Calibration waits for a configurable minimum sample count before changing estima
 
 GET /v1/calibration returns the current calibration configuration and in-memory model state.
 
-When durable telemetry is enabled, the API rebuilds calibration state from retained completed decision events at startup.
+When durable telemetry is enabled, the API rebuilds calibration state from retained completed decision events at startup, replaying feedback in outcome-time order. Calibrated cost factors adjust either explicit target estimates or the active rate fields for flat, per-request and per-1k-token pricing.
 
 ## Cost estimation
 

@@ -26,6 +26,8 @@ Possible destinations:
 - Privacy and residency controls.
 - Cost and latency budgeting.
 - Capacity and health awareness.
+- Tenant-scoped provider circuit breakers with atomic half-open probe leases.
+- Policy-aware failover across subsequent decisions when a registered provider circuit opens.
 - Optional target heartbeats with enforceable freshness policies.
 - Built-in policy profiles with per-request overrides.
 - Pure JavaScript core with no runtime dependency.
@@ -49,7 +51,7 @@ Possible destinations:
 
 ## Quick start
 
-Requirements: Node.js 22+ (Node 22 and 24 are supported CI runtimes).
+Requirements: Node.js >=22.16.0 <25.0.0. CI tests Node.js 22 and 24.
 
     npm test
     npm start

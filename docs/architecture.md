@@ -20,7 +20,10 @@
     candidate normalization
        |
        v
-    hard-constraint filtering
+    tenant-scoped circuit overlay
+       |
+       v
+    hard policy/resource/circuit filtering
        |
        +--> no eligible target --> NO_ROUTE
        |
@@ -49,6 +52,20 @@
 - cost fit
 - capacity headroom
 - target health/reliability
+
+## Provider failure isolation
+
+The deterministic core remains side-effect free. The API overlays tenant-scoped circuit state onto registered target snapshots before decision or hybrid-plan evaluation. Circuit-open and half-open-busy targets are hard-rejected before scoring; request-scoped target arrays remain simulation inputs and do not mutate or inherit registered provider state.
+
+The live executor and both automatic and manual health-probe paths obtain a target admission permit before invoking a provider. Closed-state probe failures contribute to the configured failure threshold; a probe that throws or returns `available: false` is treated as failed. An open circuit suppresses scheduled/manual provider probes during cooldown. After cooldown, only one owner-token-fenced half-open operation (a live execution or health probe) is admitted; its success closes and clears the breaker, while failure reopens it with a fresh cooldown. Ordinary successes from older in-flight work cannot close an open circuit. Expired probe leases can be reclaimed, and stale owners cannot close a newer trial.
+
+Circuit state uses atomic compare-and-set operations from the configured coordination store. SQLite and the network State Service therefore share breaker state across API instances. When no atomic shared backend is configured, the API uses process-local breaker state and reports that boundary in GET /v1/status.
+
+Failover is policy-aware across subsequent decisions: once a provider is open, the normal engine re-runs capability, privacy, residency, latency, cost and health checks against the remaining candidates. LOCD does not silently replay an arbitrary failed payload to another provider inside the same execution; callers must submit a newly validated plan for another destination, preserving side-effect and data-boundary safety.
+
+## Calibration recovery
+
+Calibration observations are replayed in ascending observation time during startup hydration. Completed telemetry uses `outcomeTimestamp` because that is when feedback became available; legacy records fall back to the original decision `timestamp`. The replay is stable for equal timestamps and does not mutate the telemetry list. This preserves the same EWMA result after restart even when activity APIs return newest-first events.
 
 The future executor should remain outside the core:
 

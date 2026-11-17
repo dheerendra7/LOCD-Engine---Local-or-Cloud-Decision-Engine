@@ -143,6 +143,118 @@ test("hydrate reconstructs calibration from completed telemetry events", () => {
   assert.equal(state.costFactor, 1.5);
 });
 
+test("hydrate replays reverse-ordered telemetry chronologically by outcome time", () => {
+  const older = {
+    targetId: "cloud",
+    workloadType: "classification",
+    estimatedLatencyMs: 100,
+    actualLatencyMs: 125,
+    estimatedCostUsd: 0.01,
+    actualCostUsd: 0.0125,
+    outcome: "success",
+    timestamp: "2026-11-16T10:00:00.000Z",
+    outcomeTimestamp: "2026-11-16T10:05:00.000Z"
+  };
+  const newer = {
+    ...older,
+    actualLatencyMs: 150,
+    actualCostUsd: 0.015,
+    timestamp: "2026-11-16T10:01:00.000Z",
+    outcomeTimestamp: "2026-11-16T10:10:00.000Z"
+  };
+  const latestFirst = [newer, older];
+  const originalOrder = latestFirst.map(event => event.outcomeTimestamp);
+
+  const recovered = createCalibrator({ minSamples: 1, alpha: 0.5 });
+  recovered.hydrate(latestFirst);
+
+  const continuous = createCalibrator({ minSamples: 1, alpha: 0.5 });
+  continuous.observe({
+    targetId: older.targetId,
+    workloadType: older.workloadType,
+    estimatedLatencyMs: older.estimatedLatencyMs,
+    actualLatencyMs: older.actualLatencyMs,
+    estimatedCostUsd: older.estimatedCostUsd,
+    actualCostUsd: older.actualCostUsd,
+    outcome: older.outcome
+  });
+  continuous.observe({
+    targetId: newer.targetId,
+    workloadType: newer.workloadType,
+    estimatedLatencyMs: newer.estimatedLatencyMs,
+    actualLatencyMs: newer.actualLatencyMs,
+    estimatedCostUsd: newer.estimatedCostUsd,
+    actualCostUsd: newer.actualCostUsd,
+    outcome: newer.outcome
+  });
+
+  assert.deepEqual(recovered.snapshot(), continuous.snapshot());
+  assert.equal(recovered.get("cloud", "classification").latencyFactor, 1.375);
+  assert.equal(recovered.get("cloud", "classification").costFactor, 1.375);
+  assert.deepEqual(latestFirst.map(event => event.outcomeTimestamp), originalOrder);
+});
+
+test("hydrate uses the decision timestamp for legacy events without outcome timestamps", () => {
+  const older = {
+    targetId: "cloud",
+    workloadType: "batch",
+    estimatedLatencyMs: 100,
+    actualLatencyMs: 120,
+    outcome: "success",
+    timestamp: "2026-11-16T10:00:00.000Z"
+  };
+  const newer = {
+    ...older,
+    actualLatencyMs: 160,
+    timestamp: "2026-11-16T10:10:00.000Z"
+  };
+  const recovered = createCalibrator({ minSamples: 1, alpha: 0.5 });
+  recovered.hydrate([newer, older]);
+
+  assert.equal(recovered.get("cloud", "batch").latencyFactor, 1.4);
+});
+
+test("calibration adjusts flat, per-request and token pricing when no explicit estimate exists", () => {
+  const calibrator = createCalibrator({ minSamples: 1, alpha: 1 });
+  const targets = [
+    { id: "flat", pricing: { unit: "flat", flatUsd: 0.05 } },
+    { id: "request", pricing: { unit: "per-request", requestUsd: 0.01 } },
+    {
+      id: "tokens",
+      pricing: {
+        unit: "per-1k-tokens",
+        inputUsdPer1kTokens: 0.003,
+        outputUsdPer1kTokens: 0.012
+      }
+    },
+    {
+      id: "explicit",
+      estimatedCostUsd: 0.01,
+      pricing: { unit: "per-request", requestUsd: 0.05 }
+    }
+  ];
+
+  for (const target of targets) {
+    calibrator.observe({
+      targetId: target.id,
+      workloadType: "llm",
+      estimatedCostUsd: 0.01,
+      actualCostUsd: 0.02,
+      outcome: "success"
+    });
+  }
+
+  const adjusted = calibrator.apply(targets, "llm");
+  assert.equal(adjusted[0].pricing.flatUsd, 0.1);
+  assert.equal(adjusted[1].pricing.requestUsd, 0.02);
+  assert.equal(adjusted[2].pricing.inputUsdPer1kTokens, 0.006);
+  assert.equal(adjusted[2].pricing.outputUsdPer1kTokens, 0.024);
+  assert.equal(adjusted[3].estimatedCostUsd, 0.02);
+  assert.equal(adjusted[3].pricing.requestUsd, 0.05);
+  assert.equal(targets[0].pricing.flatUsd, 0.05);
+  assert.equal(targets[2].pricing.inputUsdPer1kTokens, 0.003);
+});
+
 test("invalid calibration configuration fails clearly", () => {
   assert.throws(
     () => createCalibrator({ alpha: 0 }),
@@ -246,6 +358,17 @@ test("null utilization maps to the unknown calibration band", () => {
   });
 
   assert.equal(calibrator.get("gpu", "llm", null).utilizationBand, "unknown");
+  assert.equal(calibrator.get("gpu", "llm", " ").utilizationBand, "unknown");
+
+  calibrator.observe({
+    targetId: "gpu-blank",
+    workloadType: "llm",
+    utilization: " ",
+    estimatedLatencyMs: 100,
+    actualLatencyMs: 150,
+    outcome: "success"
+  });
+  assert.equal(calibrator.get("gpu-blank", "llm", " ").utilizationBand, "unknown");
 });
 
 test("calibration factors are isolated by tenant", () => {

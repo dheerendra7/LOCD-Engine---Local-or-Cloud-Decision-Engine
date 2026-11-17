@@ -158,6 +158,36 @@ test("Anthropic execute preserves explicit model and max_tokens", async () => {
   assert.equal(body.stream, false);
 });
 
+test("Anthropic execution forwards caller cancellation to the HTTP request", async () => {
+  const controller = new AbortController();
+  let requestSignal;
+  const adapter = createAnthropicAdapter({
+    id: "anthropic-cancel",
+    targetId: "anthropic-cancel",
+    baseUrl: "https://api.anthropic.com",
+    model: "configured-model",
+    fetchImpl: async (_url, options) => {
+      requestSignal = options.signal;
+      return new Promise((_, reject) => {
+        options.signal.addEventListener("abort", () => {
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          reject(error);
+        }, { once: true });
+      });
+    }
+  });
+
+  const pending = adapter.execute({
+    payload: { messages: [] },
+    mode: "live",
+    signal: controller.signal
+  });
+  controller.abort();
+  await assert.rejects(pending, /provider_aborted/);
+  assert.equal(requestSignal.aborted, true);
+});
+
 test("Anthropic execute refuses dry-run mode", async () => {
   const adapter = createAnthropicAdapter({
     id: "anthropic-provider",
@@ -247,4 +277,105 @@ test("Anthropic execution sends workspace header when configured", async () => {
   });
 
   assert.equal(calls[0].options.headers["anthropic-workspace-id"], "wrkspc_demo");
+});
+
+
+test("Anthropic provider keeps unspecified cost and capacity telemetry unknown", async () => {
+  const adapter = createAnthropicAdapter({
+    id: "unknown-metrics",
+    targetId: "unknown-metrics",
+    baseUrl: "https://api.anthropic.com",
+    pricing: {
+      unit: "per-1k-tokens",
+      inputUsdPer1kTokens: 0.003,
+      outputUsdPer1kTokens: 0.015
+    }
+  });
+
+  const snapshot = await adapter.getSnapshot();
+  assert.equal(snapshot.estimatedCostUsd, null);
+  assert.equal(snapshot.estimatedLatencyMs, null);
+  assert.equal(snapshot.availableMemoryGb, null);
+  assert.equal(snapshot.maxContextTokens, null);
+  assert.equal(snapshot.pricing.outputUsdPer1kTokens, 0.015);
+});
+
+
+test("blank optional provider metrics remain unknown rather than zero", async () => {
+  const adapter = createAnthropicAdapter({
+    id: "blank-metrics",
+    targetId: "blank-metrics",
+    baseUrl: "https://api.anthropic.com",
+    estimatedCostUsd: " ",
+    initial: {
+      health: " ",
+      capacity: " ",
+      privacy: " ",
+      estimatedLatencyMs: " ",
+      availableMemoryGb: " ",
+      maxContextTokens: " "
+    },
+    pricing: {
+      unit: "per-1k-tokens",
+      currency: "USD",
+      inputUsdPer1kTokens: 0.003,
+      outputUsdPer1kTokens: 0.015
+    }
+  });
+  const snapshot = await adapter.getSnapshot();
+
+  assert.equal(snapshot.estimatedCostUsd, null);
+  assert.equal(snapshot.estimatedLatencyMs, null);
+  assert.equal(snapshot.availableMemoryGb, null);
+  assert.equal(snapshot.maxContextTokens, null);
+  assert.equal(snapshot.health, 0);
+  assert.equal(snapshot.capacity, 1);
+  assert.equal(snapshot.privacy, 0);
+});
+
+
+test("negative Anthropic estimates and capacity telemetry remain unknown or use safe defaults", async () => {
+  const adapter = createAnthropicAdapter({
+    id: "negative-metrics",
+    targetId: "negative-metrics",
+    baseUrl: "https://api.anthropic.com",
+    estimatedCostUsd: -1,
+    initial: {
+      health: -1,
+      capacity: -1,
+      privacy: -1,
+      estimatedLatencyMs: -1,
+      availableMemoryGb: -1,
+      maxContextTokens: -1
+    },
+    pricing: {
+      unit: "per-1k-tokens",
+      currency: "USD",
+      inputUsdPer1kTokens: 0.003,
+      outputUsdPer1kTokens: 0.015
+    }
+  });
+  const snapshot = await adapter.getSnapshot();
+
+  assert.equal(snapshot.estimatedCostUsd, null);
+  assert.equal(snapshot.estimatedLatencyMs, null);
+  assert.equal(snapshot.availableMemoryGb, null);
+  assert.equal(snapshot.maxContextTokens, null);
+  assert.equal(snapshot.health, 0);
+  assert.equal(snapshot.capacity, 1);
+  assert.equal(snapshot.privacy, 0);
+});
+
+
+test("Anthropic adapter rejects disabled or malformed request timeouts", () => {
+  for (const timeoutMs of [0, -1, NaN, Infinity, "5000", null]) {
+    assert.throws(
+      () => createAnthropicAdapter({
+        id: "bad-timeout",
+        targetId: "bad-timeout",
+        timeoutMs
+      }),
+      /timeoutMs must be a positive finite number/
+    );
+  }
 });

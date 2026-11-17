@@ -10,7 +10,7 @@ const DEFAULT_UTILIZATION_BANDS = Object.freeze({
 });
 
 function finite(value) {
-  if (value == null || value === "") return null;
+  if (value == null || (typeof value === "string" && value.trim() === "")) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -165,7 +165,25 @@ export function createCalibrator(options = {}) {
 
   function hydrate(events = []) {
     if (!Array.isArray(events)) throw new Error("events must be an array");
-    for (const event of events) {
+
+    // Telemetry stores return newest-first for operator-facing activity views.
+    // Replaying EWMA observations in that order changes the recovered factors.
+    // Outcomes are learned when feedback arrives, so prefer outcomeTimestamp
+    // and fall back to the decision timestamp for legacy records.
+    const ordered = events
+      .map((event, index) => {
+        const observedAt = Date.parse(event?.outcomeTimestamp || event?.timestamp || "");
+        return {
+          event,
+          index,
+          observedAt: Number.isFinite(observedAt) ? observedAt : 0
+        };
+      })
+      .sort((left, right) =>
+        left.observedAt - right.observedAt || left.index - right.index
+      );
+
+    for (const { event } of ordered) {
       if (event?.outcome === "success" || event?.outcome === "failure") {
         observe({
           tenantId: event.tenantId,
@@ -177,7 +195,6 @@ export function createCalibrator(options = {}) {
           actualCostUsd: event.actualCostUsd,
           outcome: event.outcome,
           utilization: event.targetUtilization
-        
         });
       }
     }
@@ -211,9 +228,28 @@ export function createCalibrator(options = {}) {
         );
       }
       if (item.costFactor != null && finite(target.estimatedCostUsd) != null) {
+        // An explicit per-target estimate remains authoritative over pricing metadata.
         adjusted.estimatedCostUsd = Number(
           (Number(target.estimatedCostUsd) * item.costFactor).toFixed(6)
         );
+      } else if (item.costFactor != null && target.pricing &&
+          typeof target.pricing === "object" && !Array.isArray(target.pricing)) {
+        // When the estimate is derived from provider rates, calibrate the rates
+        // so the costing engine can still apply the request's actual usage.
+        const pricingFields = {
+          flat: ["flatUsd"],
+          "per-request": ["requestUsd"],
+          "per-1k-tokens": ["inputUsdPer1kTokens", "outputUsdPer1kTokens"]
+        }[target.pricing.unit] || [];
+        const pricing = { ...target.pricing };
+        let pricingAdjusted = false;
+        for (const field of pricingFields) {
+          const value = finite(pricing[field]);
+          if (value === null || value < 0) continue;
+          pricing[field] = Number((value * item.costFactor).toFixed(6));
+          pricingAdjusted = true;
+        }
+        if (pricingAdjusted) adjusted.pricing = pricing;
       }
       return adjusted;
     });

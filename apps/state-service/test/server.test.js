@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { checkReadiness, createGracefulShutdown, createStateServiceServer } from "../src/server.js";
+import { checkReadiness, readBody, createGracefulShutdown, createStateServiceServer } from "../src/server.js";
 import { createSQLiteStateStores } from "../../../packages/sqlite/src/index.js";
 
 async function startServer(apiKey = "state-secret") {
@@ -109,6 +109,7 @@ test("state service graceful shutdown force-closes active connections after its 
 
 test("state service applies HTTP resource guards", () => {
   const guarded = createStateServiceServer({
+    apiKey: "state-secret",
     stores: {
       telemetry: {},
       coordination: {},
@@ -151,29 +152,78 @@ test("state service rejects invalid HTTP resource guard configuration", () => {
   };
 
   assert.throws(
-    () => createStateServiceServer({ stores, requestTimeoutMs: 0 }),
+    () => createStateServiceServer({ stores, apiKey: "state-secret", requestTimeoutMs: 0 }),
     /requestTimeoutMs must be >= 1/
   );
   assert.throws(
-    () => createStateServiceServer({ stores, headersTimeoutMs: 0 }),
+    () => createStateServiceServer({ stores, apiKey: "state-secret", headersTimeoutMs: 0 }),
     /headersTimeoutMs must be >= 1/
   );
   assert.throws(
     () => createStateServiceServer({
       stores,
+      apiKey: "state-secret",
       requestTimeoutMs: 5_000,
       headersTimeoutMs: 5_001
     }),
     /headersTimeoutMs must be <= requestTimeoutMs/
   );
   assert.throws(
-    () => createStateServiceServer({ stores, keepAliveTimeoutMs: -1 }),
+    () => createStateServiceServer({ stores, apiKey: "state-secret", keepAliveTimeoutMs: -1 }),
     /keepAliveTimeoutMs must be >= 0/
   );
   assert.throws(
-    () => createStateServiceServer({ stores, maxRequestsPerSocket: 1.5 }),
+    () => createStateServiceServer({ stores, apiKey: "state-secret", maxRequestsPerSocket: 1.5 }),
     /maxRequestsPerSocket must be a non-negative integer/
   );
+});
+
+test("state service makes decision outcome transitions write-once", async () => {
+  const instance = await startServer();
+  instance.stores.telemetry.record({
+    id: "state-outcome-once",
+    route: "cloud",
+    workloadType: "batch",
+    estimatedLatencyMs: 100,
+    outcome: "pending"
+  });
+
+  const submit = body => fetch(
+    instance.url + "/v1/state/outcomes/state-outcome-once",
+    {
+      method: "POST",
+      headers: {
+        authorization: "Bearer state-secret",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(body)
+    }
+  );
+
+  try {
+    const first = await submit({
+      outcome: "success",
+      actualLatencyMs: 120,
+      timestamp: "2026-11-16T10:00:00.000Z"
+    });
+    assert.equal(first.status, 200);
+    const firstBody = await first.json();
+    assert.equal(firstBody.outcomeTimestamp, "2026-11-16T10:00:00.000Z");
+
+    const duplicate = await submit({
+      outcome: "failure",
+      actualLatencyMs: 900,
+      errorClass: "duplicate_feedback"
+    });
+    assert.equal(duplicate.status, 409);
+    assert.deepEqual(await duplicate.json(), { error: "decision_already_completed" });
+    assert.equal(
+      instance.stores.telemetry.list({ limit: 1 })[0].actualLatencyMs,
+      120
+    );
+  } finally {
+    await instance.cleanup();
+  }
 });
 
 test("state service rejects body-bearing requests without JSON content type", async () => {
@@ -306,7 +356,7 @@ test("state service hides unexpected storage failures behind a generic 500", asy
       error: "internal_server_error",
       requestId: "state-error-contract"
     });
-    assert.equal("internal sqlite password should never reach the client" in JSON.stringify(body), false);
+    assert.equal(JSON.stringify(body).includes("internal sqlite password should never reach the client"), false);
   } finally {
     instance.stores.telemetry.record = originalRecord;
     await instance.cleanup();
@@ -590,6 +640,120 @@ test("state service isolates telemetry by trusted tenant header", async () => {
       }
     );
     assert.equal(crossTenantOutcome.status, 404);
+  } finally {
+    await instance.cleanup();
+  }
+});
+
+
+test("state service conditionally deletes only the matching coordination value", async () => {
+  const instance = await startServer();
+  const headers = {
+    authorization: "Bearer state-secret",
+    "content-type": "application/json"
+  };
+  const keyPath = "/v1/state/kv/claim-for-delete";
+  try {
+    await fetch(instance.url + keyPath, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ value: { owner: "first", token: "one" }, ttlMs: 10_000 })
+    });
+
+    const stale = await fetch(instance.url + keyPath + "/delete-if-value", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ expectedValue: { owner: "first", token: "stale" } })
+    });
+    assert.deepEqual(await stale.json(), { deleted: false });
+
+    const current = await fetch(instance.url + keyPath + "/delete-if-value", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ expectedValue: { owner: "first", token: "one" } })
+    });
+    assert.deepEqual(await current.json(), { deleted: true });
+
+    const remaining = await fetch(instance.url + keyPath, { headers });
+    assert.deepEqual(await remaining.json(), { value: null });
+  } finally {
+    await instance.cleanup();
+  }
+});
+
+
+test("state service atomically replaces only the matching coordination value", async () => {
+  const instance = await startServer();
+  const headers = {
+    authorization: "Bearer state-secret",
+    "content-type": "application/json"
+  };
+  const keyPath = "/v1/state/kv/claim-for-replace";
+  try {
+    await fetch(instance.url + keyPath, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ value: { processing: true, token: "one" }, ttlMs: 10_000 })
+    });
+
+    const stale = await fetch(instance.url + keyPath + "/set-if-value", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        expectedValue: { processing: true, token: "stale" },
+        value: { response: "wrong" },
+        ttlMs: 10_000
+      })
+    });
+    assert.deepEqual(await stale.json(), { updated: false });
+
+    const current = await fetch(instance.url + keyPath + "/set-if-value", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        expectedValue: { processing: true, token: "one" },
+        value: { response: "right" },
+        ttlMs: 10_000
+      })
+    });
+    assert.deepEqual(await current.json(), { updated: true });
+
+    const remaining = await fetch(instance.url + keyPath, { headers });
+    assert.deepEqual(await remaining.json(), { value: { response: "right" } });
+  } finally {
+    await instance.cleanup();
+  }
+});
+
+
+test("state service rejects malformed conditional coordination payloads", async () => {
+  const instance = await startServer();
+  const headers = {
+    authorization: "Bearer state-secret",
+    "content-type": "application/json"
+  };
+  try {
+    for (const [suffix, payload, expected] of [
+      ["delete-if-value", "null", { error: "expected_value_required" }],
+      ["delete-if-value", "[]", { error: "expected_value_required" }],
+      ["set-if-value", "null", { error: "expected_value_and_value_required" }],
+      ["set-if-value", "[]", { error: "expected_value_and_value_required" }]
+    ]) {
+      const response = await fetch(instance.url + "/v1/state/kv/malformed/" + suffix, {
+        method: "POST",
+        headers,
+        body: payload
+      });
+      assert.equal(response.status, 400);
+      assert.deepEqual(await response.json(), expected);
+    }
+
+    const methodMismatch = await fetch(
+      instance.url + "/v1/state/kv/malformed/set-if-value",
+      { headers }
+    );
+    assert.equal(methodMismatch.status, 404);
+    assert.deepEqual(await methodMismatch.json(), { error: "not_found" });
   } finally {
     await instance.cleanup();
   }

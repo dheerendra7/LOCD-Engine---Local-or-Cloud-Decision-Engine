@@ -40,22 +40,41 @@ function authHeaders(apiKey, anthropicVersion, workspaceId = null) {
   };
 }
 
-function timeoutSignal(timeoutMs) {
+function timeoutSignal(timeoutMs, parentSignal = null) {
+  if (parentSignal != null && (
+    typeof parentSignal.aborted !== "boolean" ||
+    typeof parentSignal.addEventListener !== "function"
+  )) {
+    throw new Error("signal must be an AbortSignal");
+  }
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     return { signal: undefined, cancel: () => {} };
   }
 
   const controller = new AbortController();
+  let parentAbortListener = null;
+  if (parentSignal?.aborted) {
+    controller.abort(parentSignal.reason);
+  } else if (parentSignal) {
+    parentAbortListener = () => controller.abort(parentSignal.reason);
+    parentSignal.addEventListener("abort", parentAbortListener, { once: true });
+  }
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   return {
     signal: controller.signal,
-    cancel: () => clearTimeout(timer)
+    cancel: () => {
+      clearTimeout(timer);
+      if (parentSignal && parentAbortListener) {
+        parentSignal.removeEventListener("abort", parentAbortListener);
+      }
+    }
   };
 }
 
 function number(value, fallback = null, min = 0) {
+  if (value == null || (typeof value === "string" && value.trim() === "")) return fallback;
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.max(min, parsed) : fallback;
+  return Number.isFinite(parsed) && parsed >= min ? parsed : fallback;
 }
 
 function normalizeSnapshot(snapshot) {
@@ -119,6 +138,9 @@ export function createAnthropicAdapter({
     throw new Error("maxTokens must be a positive integer");
   }
   if (typeof fetchImpl !== "function") throw new Error("fetch implementation is required");
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("timeoutMs must be a positive finite number");
+  }
 
   const url = assertSafeBaseUrl(baseUrl, { allowInsecureHttp });
 
@@ -196,7 +218,7 @@ export function createAnthropicAdapter({
     }
   }
 
-  async function execute({ payload, mode: executionMode = "live" } = {}) {
+  async function execute({ payload, mode: executionMode = "live", signal = null } = {}) {
     if (executionMode !== "live") {
       throw new Error("provider execution requires live mode");
     }
@@ -215,7 +237,7 @@ export function createAnthropicAdapter({
       throw new Error("Anthropic execution requires a model");
     }
 
-    const timeout = timeoutSignal(timeoutMs);
+    const timeout = timeoutSignal(timeoutMs, signal);
     try {
       const response = await fetchImpl(new URL("/v1/messages", url), {
         method: "POST",
@@ -234,6 +256,7 @@ export function createAnthropicAdapter({
 
       return await response.json();
     } catch (error) {
+      if (signal?.aborted) throw new Error("provider_aborted");
       if (error?.name === "AbortError") throw new Error("provider_timeout");
       throw error;
     } finally {

@@ -54,6 +54,14 @@ test("provider configs are validated before adapter creation", () => {
     /baseUrl is required/
   );
   assert.throws(
+    () => createProviderFromConfig({ ...base, baseUrl: " " }, env),
+    /baseUrl is required/
+  );
+  assert.throws(
+    () => createProviderFromConfig({ ...base, id: " " }, env),
+    /id is required/
+  );
+  assert.throws(
     () => createProviderFromConfig({ ...base, mode: "satellite" }, env),
     /provider mode is invalid/
   );

@@ -4,13 +4,26 @@ const MODES = new Set(["local", "private", "cloud", "hybrid"]);
 const SENSITIVITIES = new Set(["low", "medium", "high"]);
 
 function finiteOrNull(value) {
+  if (value == null || (typeof value === "string" && value.trim() === "")) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
 
 function nonNegativeOrNull(value) {
   const number = finiteOrNull(value);
-  return number == null ? null : Math.max(0, number);
+  return number == null || number < 0 ? null : number;
+}
+
+function nonNegativeConstraintOrNull(value, field) {
+  if (value == null) return null;
+  if (typeof value === "string" && value.trim() === "") {
+    throw new Error(field + " must be >= 0");
+  }
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) {
+    throw new Error(field + " must be >= 0");
+  }
+  return number;
 }
 
 function normalizePlan(input) {
@@ -28,25 +41,39 @@ function normalizePlan(input) {
   }
 
   const constraints = {
-    maxLatencyMs: nonNegativeOrNull(input.constraints?.maxLatencyMs),
-    maxCostUsd: nonNegativeOrNull(input.constraints?.maxCostUsd),
+    maxLatencyMs: nonNegativeConstraintOrNull(input.constraints?.maxLatencyMs, "constraints.maxLatencyMs"),
+    maxCostUsd: nonNegativeConstraintOrNull(input.constraints?.maxCostUsd, "constraints.maxCostUsd"),
     strictLatency: Boolean(input.constraints?.strictLatency),
     strictCost: Boolean(input.constraints?.strictCost)
   };
+  const workload = {
+    type: String(input.workload?.type || "unknown"),
+    sensitivity: workloadSensitivity,
+    requiredCapabilities: Array.isArray(input.workload?.requiredCapabilities)
+      ? [...new Set(input.workload.requiredCapabilities.map(String))]
+      : []
+  };
+  const policy = input.policy || {};
+  // Validate policy definitions before evaluating individual stages. Rules are
+  // then resolved again with each stage's data sensitivity in the planner loop.
+  resolvePolicy(policy, { workload });
 
   return {
-    workload: {
-      type: String(input.workload?.type || "unknown"),
-      sensitivity: workloadSensitivity
-    },
+    workload,
     constraints,
-    policy: resolvePolicy(input.policy || {}),
-    steps: input.steps.map((step, index) => ({
-      id: String(step?.id || ""),
-      purpose: String(step?.purpose || "stage-" + index),
-      targetId: step?.targetId == null ? "" : String(step.targetId),
-      dataSensitivity: step?.dataSensitivity || workloadSensitivity
-    })),
+    policy,
+    steps: input.steps.map((step, index) => {
+      const dataSensitivity = step?.dataSensitivity || workloadSensitivity;
+      if (!SENSITIVITIES.has(dataSensitivity)) {
+        throw new Error("steps[" + index + "].dataSensitivity must be one of: low, medium, high");
+      }
+      return {
+        id: String(step?.id || ""),
+        purpose: String(step?.purpose || "stage-" + index),
+        targetId: step?.targetId == null ? "" : String(step.targetId),
+        dataSensitivity
+      };
+    }),
     targets: input.targets
   };
 }
@@ -92,36 +119,68 @@ export function planHybridExecution(input) {
   const stepIds = new Set();
   const rejected = [];
   const steps = [];
+  const policyRulesApplied = new Set();
   let totalLatencyMs = 0;
   let totalCostUsd = 0;
+  let totalLatencyKnown = true;
+  let totalCostKnown = true;
 
   for (const target of request.targets) {
-    if (target?.id) targetMap.set(String(target.id), target);
+    if (!target?.id) continue;
+    const targetId = String(target.id);
+    if (targetMap.has(targetId)) {
+      throw new Error("target ids must be unique");
+    }
+    targetMap.set(targetId, target);
   }
 
   for (const step of request.steps) {
     if (!step.id) {
+      totalLatencyKnown = false;
+      totalCostKnown = false;
       rejected.push({ stepId: null, reasons: ["step_id_missing"] });
       continue;
     }
     if (stepIds.has(step.id)) {
+      totalLatencyKnown = false;
+      totalCostKnown = false;
       rejected.push({ stepId: step.id, reasons: ["duplicate_step_id"] });
       continue;
     }
     stepIds.add(step.id);
 
+    const stepPolicy = resolvePolicy(request.policy, {
+      workload: {
+        ...request.workload,
+        sensitivity: step.dataSensitivity
+      }
+    });
+    for (const ruleId of stepPolicy.matchedRules) {
+      policyRulesApplied.add(ruleId);
+    }
+
     const target = targetMap.get(step.targetId);
     if (!target) {
+      totalLatencyKnown = false;
+      totalCostKnown = false;
       rejected.push({ stepId: step.id, reasons: ["target_not_found"] });
       continue;
     }
 
     const reasons = [];
     if (target.available === false) reasons.push("target_unavailable");
-    reasons.push(...policyRejects(request.policy, target, step.dataSensitivity));
+    if (target.circuitBreaker?.state === "open") reasons.push("circuit_breaker_open");
+    if (target.circuitBreaker?.state === "half-open" &&
+        target.circuitBreaker.probeInFlight === true) {
+      reasons.push("circuit_breaker_half_open_busy");
+    }
+    reasons.push(...policyRejects(stepPolicy, target, step.dataSensitivity));
 
     const latency = nonNegativeOrNull(target.estimatedLatencyMs);
     const cost = nonNegativeOrNull(target.estimatedCostUsd);
+
+    if (latency === null) totalLatencyKnown = false;
+    if (cost === null) totalCostKnown = false;
 
     if (request.constraints.strictLatency && latency === null) {
       reasons.push("latency_estimate_missing");
@@ -146,6 +205,9 @@ export function planHybridExecution(input) {
     }
 
     if (reasons.length) {
+      // A rejected step is not part of a complete, executable plan estimate.
+      totalLatencyKnown = false;
+      totalCostKnown = false;
       rejected.push({ stepId: step.id, reasons });
     }
   }
@@ -173,10 +235,11 @@ export function planHybridExecution(input) {
     planVersion: "1.0",
     route: "hybrid",
     valid: rejected.length === 0,
+    policyRulesApplied: [...policyRulesApplied],
     steps,
     estimated: {
-      latencyMs: Number(totalLatencyMs.toFixed(2)),
-      costUsd: Number(totalCostUsd.toFixed(6))
+      latencyMs: totalLatencyKnown ? Number(totalLatencyMs.toFixed(2)) : null,
+      costUsd: totalCostKnown ? Number(totalCostUsd.toFixed(6)) : null
     },
     reasons: rejected.length
       ? ["hybrid_plan_rejected"]

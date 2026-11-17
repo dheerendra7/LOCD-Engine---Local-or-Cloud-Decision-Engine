@@ -27,6 +27,7 @@ test("decision events normalize only routing metadata", () => {
     estimatedLatencyMs: 120,
     estimatedCostUsd: 0.001,
     outcome: "pending",
+    outcomeTimestamp: null,
     actualLatencyMs: null,
     actualCostUsd: null,
     errorClass: null
@@ -54,12 +55,41 @@ test("summary aggregates route counts and estimates", () => {
     routes: { local: 1, cloud: 2 },
     outcomes: { pending: 3, success: 0, failure: 0 },
     estimatedCostUsd: 0.03,
+    estimatedCostKnownCount: 3,
+    estimatedCostUnknownCount: 0,
     averageEstimatedLatencyMs: 200,
     averageConfidence: 0.733333,
     successRate: null,
     meanAbsoluteLatencyErrorMs: null,
     meanAbsoluteCostErrorUsd: null
   });
+});
+
+test("unknown cost, latency and utilization remain null in telemetry", () => {
+  const event = normalizeDecisionEvent({
+    route: "cloud",
+    confidence: null,
+    estimatedLatencyMs: null,
+    estimatedCostUsd: null,
+    targetUtilization: null
+  });
+
+  assert.equal(event.confidence, 0);
+  assert.equal(event.estimatedLatencyMs, null);
+  assert.equal(event.estimatedCostUsd, null);
+  assert.equal(event.targetUtilization, null);
+});
+
+test("summary distinguishes known cost subtotal from missing estimates", () => {
+  const store = createDecisionStore();
+  store.record({ id: "priced", route: "cloud", estimatedCostUsd: 0.025 });
+  store.record({ id: "unpriced", route: "cloud", estimatedCostUsd: null });
+  store.record({ id: "no-route", route: "none" });
+
+  const summary = store.summary();
+  assert.equal(summary.estimatedCostUsd, 0.025);
+  assert.equal(summary.estimatedCostKnownCount, 1);
+  assert.equal(summary.estimatedCostUnknownCount, 2);
 });
 
 test("invalid route and capacity configuration fail clearly", () => {
@@ -89,6 +119,17 @@ test("outcome feedback updates a decision", () => {
   assert.equal(updated.actualCostUsd, 0.03);
   assert.equal(updated.errorClass, null);
   assert.equal(updated.outcomeTimestamp, "2026-09-30T00:01:00.000Z");
+  assert.equal(store.list({ limit: 1 })[0].outcomeTimestamp, updated.outcomeTimestamp);
+
+  assert.throws(
+    () => store.recordOutcome(event.id, {
+      outcome: "failure",
+      actualLatencyMs: 900,
+      errorClass: "late_duplicate"
+    }),
+    /decision_already_completed/
+  );
+  assert.equal(store.list({ limit: 1 })[0].actualLatencyMs, 350);
 });
 
 test("missing decision IDs cannot be updated", () => {
@@ -302,4 +343,34 @@ test("tenant identifiers are validated before telemetry is stored", () => {
     () => store.record({ tenantId: "../escape", route: "local" }),
     /tenantId must match/
   );
+});
+
+
+test("whitespace cost and latency estimates remain unknown in telemetry", () => {
+  const event = normalizeDecisionEvent({
+    route: "cloud",
+    estimatedLatencyMs: " ",
+    estimatedCostUsd: " ",
+    targetUtilization: " "
+  });
+
+  assert.equal(event.estimatedLatencyMs, null);
+  assert.equal(event.estimatedCostUsd, null);
+  assert.equal(event.targetUtilization, null);
+});
+
+
+test("negative cost and latency observations stay unknown instead of being clamped to zero", () => {
+  const event = normalizeDecisionEvent({
+    route: "cloud",
+    estimatedLatencyMs: -5,
+    estimatedCostUsd: -0.25,
+    actualLatencyMs: -1,
+    actualCostUsd: -0.01
+  });
+
+  assert.equal(event.estimatedLatencyMs, null);
+  assert.equal(event.estimatedCostUsd, null);
+  assert.equal(event.actualLatencyMs, null);
+  assert.equal(event.actualCostUsd, null);
 });

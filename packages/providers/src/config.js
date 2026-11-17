@@ -5,7 +5,9 @@ import { createAnthropicAdapter } from "./anthropic.js";
 import { normalizeTenantId } from "../../../packages/tenancy/src/index.js";
 
 function requiredString(value, field) {
-  if (!value || typeof value !== "string") throw new Error(field + " is required");
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(field + " is required");
+  }
   return value;
 }
 

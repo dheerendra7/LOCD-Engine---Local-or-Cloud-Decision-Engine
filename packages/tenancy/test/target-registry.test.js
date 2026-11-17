@@ -54,7 +54,7 @@ test("tenant target file preserves per-tenant state", async () => {
 });
 
 test("queued target file saves observe mutations in call order", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir, "locd-target-save-race-"));
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-target-save-race-"));
   const file = path.join(dir, "targets.json");
 
   try {
@@ -86,6 +86,66 @@ test("legacy target array loads into default tenant", async () => {
     const registry = createTenantTargetRegistry();
     await registry.loadFromFile(file);
     assert.equal(registry.forTenant("default").has("legacy"), true);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("failed tenant target load preserves the currently registered state", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-tenant-targets-atomic-"));
+  const file = path.join(dir, "targets.json");
+
+  try {
+    const registry = createTenantTargetRegistry();
+    registry.forTenant("existing").register(target("kept"));
+
+    await writeFile(file, JSON.stringify({
+      version: 1,
+      tenants: {
+        acme: [target("loaded-before-error")],
+        beta: [target("duplicate"), target("duplicate")]
+      }
+    }), "utf8");
+
+    await assert.rejects(
+      () => registry.loadFromFile(file),
+      /duplicate target id: duplicate/
+    );
+
+    assert.equal(registry.hasTenant("existing"), true);
+    assert.equal(registry.forTenant("existing").has("kept"), true);
+    assert.equal(registry.hasTenant("acme"), false);
+    assert.equal(registry.hasTenant("beta"), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("duplicate tenant IDs after normalization are rejected atomically", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-tenant-normalization-"));
+  const file = path.join(dir, "targets.json");
+
+  try {
+    const registry = createTenantTargetRegistry();
+    registry.forTenant("existing").register(target("kept"));
+
+    await writeFile(file, JSON.stringify({
+      version: 1,
+      tenants: {
+        Acme: [target("first")],
+        acme: [target("second")]
+      }
+    }), "utf8");
+
+    await assert.rejects(
+      () => registry.loadFromFile(file),
+      /duplicate normalized tenant id: acme/
+    );
+
+    assert.equal(registry.forTenant("existing").has("kept"), true);
+    assert.equal(registry.hasTenant("acme"), false);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -2,8 +2,34 @@ services:
   - type: web
     name: locd-engine
     runtime: node
-    plan: free
+    plan: starter
+    region: singapore
     branch: main
+    autoDeployTrigger: checksPass
+    numInstances: 1
     buildCommand: npm ci
     startCommand: npm start
-    healthCheckPath: /health
+    healthCheckPath: /ready
+    disk:
+      name: locd-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LOCD_PRODUCTION_STRICT
+        value: "true"
+      - key: LOCD_RATE_LIMIT_RPM
+        value: "120"
+      - key: LOCD_STATE_DB_FILE
+        value: /data/locd.db
+      - key: LOCD_TARGETS_FILE
+        value: /data/targets.json
+      - key: LOCD_API_KEY
+        generateValue: true
+      - key: LOCD_EXECUTION_PLAN_SECRET
+        generateValue: true
+      - key: LOCD_EXECUTION_ENABLED
+        value: "false"
+      - key: LOCD_PROBE_INTERVAL_MS
+        value: "0"

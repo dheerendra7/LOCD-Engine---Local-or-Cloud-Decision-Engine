@@ -23,7 +23,7 @@ const ALLOWED_FIELDS = new Set([
   "rules"
 ]);
 const WEIGHT_KEYS = new Set(["privacy", "latency", "cost", "capacity", "reliability"]);
-const BUILTIN_POLICY_IDS = new Set(listPolicyProfiles().map(profile => profile.id));
+const BUILTIN_POLICY_IDS = new Set(listPolicyProfiles().map(profile => profile.id.toLowerCase()));
 
 export function createPersistenceQueue(persist) {
   if (typeof persist !== "function") {
@@ -69,13 +69,30 @@ function validatePolicyDocument(input) {
     throw new Error("policy description must be a string");
   }
 
+  if (input.maxHeartbeatAgeMs != null) {
+    const value = input.maxHeartbeatAgeMs;
+    if (
+      (typeof value === "string" && value.trim() === "") ||
+      !Number.isFinite(Number(value)) ||
+      Number(value) < 0
+    ) {
+      throw new Error("policy maxHeartbeatAgeMs must be >= 0");
+    }
+  }
+
   if (input.weights != null) {
     if (!input.weights || typeof input.weights !== "object" || Array.isArray(input.weights)) {
       throw new Error("policy weights must be an object");
     }
     for (const [key, value] of Object.entries(input.weights)) {
       if (!WEIGHT_KEYS.has(key)) throw new Error("unknown policy weight: " + key);
-      if (!Number.isFinite(Number(value)) || Number(value) < 0 || Number(value) > 1) {
+      if (
+        value == null ||
+        (typeof value === "string" && value.trim() === "") ||
+        !Number.isFinite(Number(value)) ||
+        Number(value) < 0 ||
+        Number(value) > 1
+      ) {
         throw new Error("policy weight must be between 0 and 1: " + key);
       }
     }
@@ -115,8 +132,8 @@ function clonePolicy(record) {
 }
 
 function normalizeState(parsed) {
-  if (!parsed) return { version: FILE_VERSION, tenants: {} };
   if (
+    parsed &&
     parsed.version === FILE_VERSION &&
     parsed.tenants &&
     typeof parsed.tenants === "object" &&
@@ -148,19 +165,21 @@ export function createPolicyStore({
     throw new Error("maxVersionsPerPolicy must be a positive integer");
   }
 
-  const state = { version: FILE_VERSION, tenants: {} };
+  const state = { version: FILE_VERSION, tenants: Object.create(null) };
 
   function tenantBucket(tenantId) {
     const normalized = normalizeTenantId(tenantId);
-    if (!state.tenants[normalized]) {
-      state.tenants[normalized] = { policies: {} };
+    if (!Object.hasOwn(state.tenants, normalized)) {
+      state.tenants[normalized] = { policies: Object.create(null) };
     }
     return state.tenants[normalized];
   }
 
   function list(tenantId) {
     const normalized = normalizeTenantId(tenantId);
-    const bucket = state.tenants[normalized];
+    const bucket = Object.hasOwn(state.tenants, normalized)
+      ? state.tenants[normalized]
+      : null;
     if (!bucket) return [];
     return Object.values(bucket.policies)
       .map(clonePolicy)
@@ -170,7 +189,12 @@ export function createPolicyStore({
   function get(tenantId, id) {
     const normalizedTenantId = normalizeTenantId(tenantId);
     const policyId = String(id || "").trim().toLowerCase();
-    const record = state.tenants[normalizedTenantId]?.policies?.[policyId];
+    const bucket = Object.hasOwn(state.tenants, normalizedTenantId)
+      ? state.tenants[normalizedTenantId]
+      : null;
+    const record = bucket && Object.hasOwn(bucket.policies, policyId)
+      ? bucket.policies[policyId]
+      : null;
     return record ? clonePolicy(record) : null;
   }
 
@@ -193,7 +217,9 @@ export function createPolicyStore({
     }
 
     const bucket = tenantBucket(normalizedTenantId);
-    const previous = bucket.policies[policy.id];
+    const previous = Object.hasOwn(bucket.policies, policy.id)
+      ? bucket.policies[policy.id]
+      : null;
     const nextVersion = previous ? previous.version + 1 : 1;
 
     const updatedAt = String(metadata.updatedAt || now());
@@ -243,8 +269,10 @@ export function createPolicyStore({
   function remove(tenantId, id) {
     const normalizedTenantId = normalizeTenantId(tenantId);
     const policyId = String(id || "").trim().toLowerCase();
-    const bucket = state.tenants[normalizedTenantId];
-    if (!bucket?.policies?.[policyId]) return false;
+    const bucket = Object.hasOwn(state.tenants, normalizedTenantId)
+      ? state.tenants[normalizedTenantId]
+      : null;
+    if (!bucket || !Object.hasOwn(bucket.policies, policyId)) return false;
     delete bucket.policies[policyId];
     return true;
   }
@@ -255,29 +283,87 @@ export function createPolicyStore({
 
   function importState(parsed) {
     const normalized = normalizeState(parsed);
-    state.version = FILE_VERSION;
-    state.tenants = {};
+    const nextTenants = Object.create(null);
+
+    // Validate and normalize the entire imported snapshot before swapping live state.
+    // A malformed late entry must not erase policies already serving requests.
     for (const [tenantIdRaw, tenantBucketValue] of Object.entries(normalized.tenants)) {
       const tenantId = normalizeTenantId(tenantIdRaw);
-      if (!tenantBucketValue?.policies || typeof tenantBucketValue.policies !== "object") {
+      if (Object.hasOwn(nextTenants, tenantId)) {
+        throw new Error("policy file contains duplicate normalized tenant id: " + tenantId);
+      }
+      if (
+        !tenantBucketValue?.policies ||
+        typeof tenantBucketValue.policies !== "object" ||
+        Array.isArray(tenantBucketValue.policies)
+      ) {
         throw new Error("policy tenant entry is invalid: " + tenantId);
       }
-      for (const [policyId, record] of Object.entries(tenantBucketValue.policies)) {
+
+      const policies = Object.create(null);
+      for (const [storedPolicyId, record] of Object.entries(tenantBucketValue.policies)) {
+        if (!record || typeof record !== "object" || Array.isArray(record)) {
+          throw new Error("policy record is invalid: " + storedPolicyId);
+        }
+
         const policy = validatePolicyDocument(record.policy);
+        const normalizedStoredId = String(storedPolicyId).trim().toLowerCase();
+        if (normalizedStoredId !== policy.id) {
+          throw new Error("policy key does not match document id: " + storedPolicyId);
+        }
+        if (BUILTIN_POLICY_IDS.has(policy.id)) {
+          throw new Error("built-in policy IDs are read-only");
+        }
+        if (Object.hasOwn(policies, policy.id)) {
+          throw new Error("policy file contains duplicate normalized policy id: " + policy.id);
+        }
+
         const version = Number(record.version);
         if (!Number.isInteger(version) || version < 1) {
-          throw new Error("policy version is invalid: " + policyId);
+          throw new Error("policy version is invalid: " + storedPolicyId);
         }
-        state.tenants[tenantId] ??= { policies: {} };
-        state.tenants[tenantId].policies[policy.id] = {
+        if (record.versions != null && !Array.isArray(record.versions)) {
+          throw new Error("policy history is invalid: " + storedPolicyId);
+        }
+
+        const versions = Array.isArray(record.versions)
+          ? clonePolicy(record.versions).slice(-maxVersionsPerPolicy)
+          : [];
+        let previousHistoryVersion = 0;
+        for (const item of versions) {
+          if (!item || typeof item !== "object" || Array.isArray(item)) {
+            throw new Error("policy history entry is invalid: " + storedPolicyId);
+          }
+          const historyVersion = Number(item.version);
+          if (
+            !Number.isInteger(historyVersion) ||
+            historyVersion < 1 ||
+            historyVersion <= previousHistoryVersion ||
+            historyVersion > version
+          ) {
+            throw new Error("policy history version is invalid: " + storedPolicyId);
+          }
+          const historyPolicy = validatePolicyDocument(item.policy);
+          if (historyPolicy.id !== policy.id) {
+            throw new Error("policy history ID mismatch: " + storedPolicyId);
+          }
+          previousHistoryVersion = historyVersion;
+        }
+
+        policies[policy.id] = {
           ...clonePolicy(record),
           id: policy.id,
           tenantId,
+          version,
           policy,
-          versions: Array.isArray(record.versions) ? clonePolicy(record.versions).slice(-maxVersionsPerPolicy) : []
+          versions
         };
       }
+      nextTenants[tenantId] = { policies };
     }
+
+    state.version = FILE_VERSION;
+    state.tenants = nextTenants;
   }
 
   return {

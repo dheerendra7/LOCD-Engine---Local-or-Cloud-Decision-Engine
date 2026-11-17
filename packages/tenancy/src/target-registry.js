@@ -135,14 +135,16 @@ export function createTenantTargetRegistry({
 
       if (!tenantEntries) throw new Error("tenant target file must contain version 1 tenants or a target array");
 
-      registries.clear();
-
+      const loadedRegistries = new Map();
       for (const [tenantIdRaw, targets] of Object.entries(tenantEntries)) {
         const tenantId = normalizeTenantId(tenantIdRaw);
+        if (loadedRegistries.has(tenantId)) {
+          throw new Error("tenant target file contains duplicate normalized tenant id: " + tenantId);
+        }
         if (!Array.isArray(targets)) {
           throw new Error("tenant target file entry must be an array: " + tenantId);
         }
-        const registry = getRegistry(tenantId);
+        const registry = createTargetRegistry();
         const seen = new Set();
         for (const target of targets) {
           const adapter = createStaticTargetAdapter(target);
@@ -152,6 +154,14 @@ export function createTenantTargetRegistry({
           seen.add(adapter.id);
           registry.register(adapter);
         }
+        loadedRegistries.set(tenantId, registry);
+      }
+
+      // Commit the new registry set only after every tenant and target validates.
+      // A malformed persisted file must not erase the currently serving targets.
+      registries.clear();
+      for (const [tenantId, registry] of loadedRegistries) {
+        registries.set(tenantId, registry);
       }
 
       return registries.size;
