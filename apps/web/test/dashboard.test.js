@@ -618,6 +618,36 @@ test("policy catalog only applies the newest refresh response", async () => {
   assert.equal(status.textContent, currentStatus);
 });
 
+test("system capability labels distinguish sharing and durability from enabled state", async () => {
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  const start = script.indexOf("function renderCapabilities(caps) {");
+  const end = script.indexOf("\\nfunction formatCircuitTimestamp", start);
+  assert.ok(start >= 0 && end > start, "capability renderer should exist");
+  const rendererSource = script.slice(start, end);
+  const root = { innerHTML: "" };
+  const render = new Function("document", "escapeHtml", rendererSource + "; return renderCapabilities;")(
+    { querySelector: selector => selector === "#capabilities" ? root : null },
+    value => String(value)
+  );
+  render({
+    executionEnabled: false,
+    sharedCoordination: false,
+    durableCoordination: false,
+    persistentTelemetry: true,
+    persistentTargets: false,
+    sharedCircuitBreaker: true,
+    rateLimitMode: "shared",
+    idempotencyMode: "process-local"
+  });
+  assert.ok(root.innerHTML.includes("Shared coordination</span><strong>Not shared</strong>"));
+  assert.ok(root.innerHTML.includes("Durable coordination</span><strong>Non-durable</strong>"));
+  assert.ok(root.innerHTML.includes("Durable telemetry</span><strong>Durable</strong>"));
+  assert.ok(root.innerHTML.includes("Persistent targets</span><strong>Ephemeral</strong>"));
+  assert.ok(root.innerHTML.includes("Shared circuit state</span><strong>Shared</strong>"));
+  assert.ok(root.innerHTML.includes("Live execution gate</span><strong>Disabled</strong>"));
+  assert.ok(root.innerHTML.includes("Rate limiting</span><strong>shared</strong>"));
+  assert.ok(root.innerHTML.includes("Idempotency</span><strong>process-local</strong>"));
+});
 test("readiness diagnostics do not overwrite the API connection status", async () => {
   const html = await readFile(new URL("index.html", webRoot), "utf8");
   const script = await readFile(new URL("app.js", webRoot), "utf8");
