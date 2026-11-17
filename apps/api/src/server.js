@@ -1002,6 +1002,7 @@ export function createServer({
         }
 
         let executablePlan = body.plan;
+        let registry = null;
         if (mode === "live") {
           if (!executionEnabled) {
             sendJson(res, 403, { error: "live_execution_disabled" });
@@ -1057,6 +1058,23 @@ export function createServer({
             return;
           }
 
+          // A global targetId -> adapter map is unsafe when target IDs are
+          // tenant-local. Resolve a tenant-specific adapter registry before
+          // consuming the single-use authorization token.
+          if (executionRegistry && typeof executionRegistry.forTenant === "function") {
+            registry = await executionRegistry.forTenant(tenantId);
+          } else if (executionRegistry && typeof targetRegistry.forTenant === "function") {
+            sendJson(res, 503, { error: "tenant_scoped_execution_registry_required" });
+            return;
+          } else {
+            registry = executionRegistry ||
+              await createConfiguredExecutionRegistry({ targetRegistry: requestRegistry });
+          }
+          if (!registry || typeof registry.get !== "function") {
+            sendJson(res, 503, { error: "execution_registry_unavailable" });
+            return;
+          }
+
           const claimNow = Date.now();
           const claimTtlMs = authorization.expiresAt - claimNow;
           if (claimTtlMs <= 0) {
@@ -1089,8 +1107,12 @@ export function createServer({
           };
         }
 
-        const registry = executionRegistry ||
-          await createConfiguredExecutionRegistry({ targetRegistry: requestRegistry });
+        if (!registry) {
+          registry = executionRegistry && typeof executionRegistry.forTenant === "function"
+            ? await executionRegistry.forTenant(tenantId)
+            : executionRegistry ||
+              await createConfiguredExecutionRegistry({ targetRegistry: requestRegistry });
+        }
 
         const responseBody = await executePlan(executablePlan, {
           registry,
@@ -1793,10 +1815,13 @@ export function createServer({
         const probeableTargets = typeof requestRegistry.listProbeable === "function"
           ? await requestRegistry.listProbeable()
           : [];
-        const scopedExecutionRegistry = executionRegistry ||
-          (typeof targetRegistry.forTenant === "function"
-            ? await createConfiguredExecutionRegistry({ targetRegistry: requestRegistry })
-            : null);
+        const scopedExecutionRegistry = executionRegistry
+          ? (typeof executionRegistry.forTenant === "function"
+              ? await executionRegistry.forTenant(tenantId)
+              : (typeof targetRegistry.forTenant === "function" ? null : executionRegistry))
+          : (typeof targetRegistry.forTenant === "function"
+              ? await createConfiguredExecutionRegistry({ targetRegistry: requestRegistry })
+              : null);
         const executionAdapters = scopedExecutionRegistry && typeof scopedExecutionRegistry.list === "function"
           ? scopedExecutionRegistry.list()
           : [];

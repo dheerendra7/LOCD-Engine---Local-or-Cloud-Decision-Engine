@@ -368,6 +368,8 @@ Before a provider is invoked, LOCD verifies the signature and tenant, reloads th
 
 Live execution requires `LOCD_EXECUTION_ENABLED=true`, authentication with execute/admin scope, a configured `LOCD_EXECUTION_PLAN_SECRET` of at least 32 bytes, and an enabled rate limiter. The same plan secret must be configured on every API instance that may issue or consume the authorization. Configure shared atomic coordination (SQLite on a shared host or the network State Service) for fleet-wide single-use token claims. Missing signing configuration returns HTTP 503; an unsigned, expired, modified or cross-tenant authorization is rejected before provider admission.
 
+When the target registry is tenant-scoped, an injected execution registry must also be tenant-scoped and expose `forTenant(tenantId)`. A flat global `targetId`-to-adapter registry is rejected for live execution with HTTP 503 `tenant_scoped_execution_registry_required`; target IDs may be reused by different tenants and must never select a shared adapter implicitly. Alternatively, register provider adapters in each tenant's target registry so the API can construct the tenant-specific execution registry automatically.
+
 Static target snapshots receive dry-run-only execution adapters. They cannot be used for live execution.
 
 Execution receipts remain metadata-only. Caller-scoped results are not written to telemetry.

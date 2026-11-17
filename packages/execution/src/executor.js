@@ -83,6 +83,56 @@ export function createExecutionRegistry(adapters = []) {
   };
 }
 
+export function createTenantExecutionRegistry({ defaultTenantId = "default" } = {}) {
+  const tenantPattern = /^[a-z0-9][a-z0-9._-]{0,62}$/;
+  const normalizeTenant = value => {
+    const tenantId = String(value ?? defaultTenantId).trim().toLowerCase();
+    if (!tenantPattern.test(tenantId)) {
+      throw new Error("tenantId must match " + tenantPattern);
+    }
+    return tenantId;
+  };
+
+  const registries = new Map();
+  const getRegistry = tenantId => {
+    const normalized = normalizeTenant(tenantId);
+    let registry = registries.get(normalized);
+    if (!registry) {
+      registry = createExecutionRegistry();
+      registries.set(normalized, registry);
+    }
+    return registry;
+  };
+
+  function forTenant(tenantId = defaultTenantId) {
+    const normalizedTenantId = normalizeTenant(tenantId);
+    const registry = getRegistry(normalizedTenantId);
+    return Object.freeze({
+      tenantId: normalizedTenantId,
+      register(value) { return registry.register(value); },
+      get(targetId) { return registry.get(targetId); },
+      has(targetId) { return registry.has(targetId); },
+      list() { return registry.list(); },
+      clear() { return registry.clear(); }
+    });
+  }
+
+  const defaultRegistry = forTenant(defaultTenantId);
+  return Object.freeze({
+    forTenant,
+    register(value) { return defaultRegistry.register(value); },
+    get(targetId) { return defaultRegistry.get(targetId); },
+    has(targetId) { return defaultRegistry.has(targetId); },
+    list() { return defaultRegistry.list(); },
+    clear() {
+      for (const registry of registries.values()) registry.clear();
+    },
+    listTenantIds() {
+      return [...registries.keys()].sort();
+    }
+  });
+}
+
 export function createDryRunExecutionAdapter({ id, targetId } = {}) {
   return {
     id: String(id || ("dry-run:" + targetId)),

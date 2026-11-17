@@ -14,7 +14,10 @@ import {
   createHTTPCoordinationStore
 } from "../../../packages/state-client/src/index.js";
 import { createTargetRegistry } from "../../../packages/registry/src/index.js";
-import { createExecutionRegistry } from "../../../packages/execution/src/index.js";
+import {
+  createExecutionRegistry,
+  createTenantExecutionRegistry
+} from "../../../packages/execution/src/index.js";
 import { createInMemoryCoordinationStore } from "../../../packages/coordination/src/index.js";
 import { createCircuitBreaker } from "../../../packages/resilience/src/index.js";
 import { createTenantTargetRegistry } from "../../../packages/tenancy/src/index.js";
@@ -2572,7 +2575,8 @@ test("live execution fails closed when plan signing is not configured", async ()
 });
 
 test("live plan authorization is tenant-bound and rejects post-planning policy changes", async () => {
-  let providerCalls = 0;
+  let acmeProviderCalls = 0;
+  let betaProviderCalls = 0;
   const authorizer = createScopedAuthorizer({
     keys: [
       { id: "acme-admin", secret: "acme-plan-secret", tenantId: "acme", scopes: ["admin"] },
@@ -2602,21 +2606,31 @@ test("live plan authorization is tenant-bound and rejects post-planning policy c
       estimatedCostUsd: 0.01
     });
   }
+  const executionRegistry = createTenantExecutionRegistry();
+  executionRegistry.forTenant("acme").register({
+    id: "acme-local-adapter",
+    targetId: "tenant-local",
+    async execute() { acmeProviderCalls++; return { ok: true }; }
+  });
+  executionRegistry.forTenant("acme").register({
+    id: "acme-private-adapter",
+    targetId: "tenant-private",
+    async execute() { acmeProviderCalls++; return { ok: true }; }
+  });
+  executionRegistry.forTenant("beta").register({
+    id: "beta-local-adapter",
+    targetId: "tenant-local",
+    async execute() { betaProviderCalls++; return { ok: true }; }
+  });
+  executionRegistry.forTenant("beta").register({
+    id: "beta-private-adapter",
+    targetId: "tenant-private",
+    async execute() { betaProviderCalls++; return { ok: true }; }
+  });
   const executionServer = createServer({
     authorizer,
     targetRegistry,
-    executionRegistry: createExecutionRegistry([
-      {
-        id: "tenant-local-adapter",
-        targetId: "tenant-local",
-        async execute() { providerCalls++; return { ok: true }; }
-      },
-      {
-        id: "tenant-private-adapter",
-        targetId: "tenant-private",
-        async execute() { providerCalls++; return { ok: true }; }
-      }
-    ]),
+    executionRegistry,
     executionEnabled: true,
     executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
     rateLimitMaxRequests: 20
@@ -2666,6 +2680,91 @@ test("live plan authorization is tenant-bound and rejects post-planning policy c
     });
     assert.equal(crossTenant.status, 403);
     assert.deepEqual(await crossTenant.json(), { error: "execution_plan_tenant_mismatch" });
+
+    const betaGrant = await getAuthorizedHybridPlan(url, betaHeaders, {
+      workload: { type: "tenant-bound-live-plan", sensitivity: "low" },
+      steps: [
+        { id: "local-step", targetId: "tenant-local" },
+        { id: "private-step", targetId: "tenant-private" }
+      ]
+    });
+    const betaExecution = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers: betaHeaders,
+      body: JSON.stringify({
+        mode: "live",
+        plan: betaGrant.plan,
+        executionAuthorization: betaGrant.executionAuthorization.token
+      })
+    });
+    assert.equal(betaExecution.status, 200);
+    const betaExecutionBody = await betaExecution.json();
+    assert.equal(betaExecutionBody.receipts[0].adapterId, "beta-local-adapter");
+    assert.equal(betaExecutionBody.receipts[1].adapterId, "beta-private-adapter");
+    assert.equal(acmeProviderCalls, 0);
+    assert.equal(betaProviderCalls, 2);
+  } finally {
+    await new Promise(resolve => executionServer.close(resolve));
+  }
+});
+
+test("live execution rejects a global adapter registry for tenant-scoped targets", async () => {
+  let providerCalls = 0;
+  const authorizer = createScopedAuthorizer({
+    keys: [{ id: "beta-admin", secret: "beta-only-secret", tenantId: "beta", scopes: ["admin"] }]
+  });
+  const targetRegistry = createTenantTargetRegistry();
+  for (const targetId of ["shared-local", "shared-private"]) {
+    targetRegistry.forTenant("beta").register({
+      id: targetId,
+      mode: targetId.endsWith("local") ? "local" : "private",
+      available: true,
+      health: 1,
+      capacity: 0.1,
+      privacy: 1,
+      estimatedLatencyMs: 10,
+      estimatedCostUsd: 0
+    });
+  }
+  const executionServer = createServer({
+    authorizer,
+    targetRegistry,
+    executionRegistry: createExecutionRegistry([
+      { id: "global-local", targetId: "shared-local", async execute() { providerCalls++; return { ok: true }; } },
+      { id: "global-private", targetId: "shared-private", async execute() { providerCalls++; return { ok: true }; } }
+    ]),
+    executionEnabled: true,
+    executionPlanSecret: TEST_EXECUTION_PLAN_SECRET,
+    rateLimitMaxRequests: 20
+  });
+  await new Promise(resolve => executionServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + executionServer.address().port;
+  const headers = {
+    authorization: "Bearer beta-only-secret",
+    "content-type": "application/json"
+  };
+
+  try {
+    const grant = await getAuthorizedHybridPlan(url, headers, {
+      workload: { type: "tenant-isolation-fail-closed", sensitivity: "low" },
+      steps: [
+        { id: "local-step", targetId: "shared-local" },
+        { id: "private-step", targetId: "shared-private" }
+      ]
+    });
+    const response = await fetch(url + "/v1/execute", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        mode: "live",
+        plan: grant.plan,
+        executionAuthorization: grant.executionAuthorization.token
+      })
+    });
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), {
+      error: "tenant_scoped_execution_registry_required"
+    });
     assert.equal(providerCalls, 0);
   } finally {
     await new Promise(resolve => executionServer.close(resolve));

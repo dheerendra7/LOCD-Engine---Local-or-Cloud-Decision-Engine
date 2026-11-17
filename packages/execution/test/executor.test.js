@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   createDryRunExecutionAdapter,
   createExecutionRegistry,
+  createTenantExecutionRegistry,
   executePlan
 } from "../src/index.js";
 
@@ -241,4 +242,24 @@ test("execution outputs are caller-scoped and omitted by default", async () => {
     result: { echoed: "hello" }
   }]);
   assert.equal("payload" in visible.receipts[0], false);
+});
+
+
+test("tenant execution registries isolate identical target IDs", () => {
+  const registry = createTenantExecutionRegistry();
+  registry.forTenant("acme").register({
+    id: "acme-provider",
+    targetId: "shared-target",
+    async execute() { return { tenant: "acme" }; }
+  });
+  registry.forTenant("beta").register({
+    id: "beta-provider",
+    targetId: "shared-target",
+    async execute() { return { tenant: "beta" }; }
+  });
+
+  assert.equal(registry.forTenant("acme").get("shared-target").id, "acme-provider");
+  assert.equal(registry.forTenant("beta").get("shared-target").id, "beta-provider");
+  assert.equal(registry.get("shared-target"), null);
+  assert.deepEqual(registry.listTenantIds(), ["acme", "beta", "default"]);
 });
