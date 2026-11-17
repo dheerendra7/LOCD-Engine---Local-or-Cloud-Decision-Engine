@@ -2031,15 +2031,25 @@ function apiLabSetInspectorTab(name) {
 
 function apiLabRenderCode() {
   const config = apiLabConfig();
-  const body = config.method === "POST" ? apiLabBody?.value || "{}" : null;
+  let body = null;
+  if (config.method === "POST") {
+    try {
+      body = JSON.stringify(JSON.parse(apiLabBody?.value || "{}"), null, 2);
+    } catch {
+      const output = document.querySelector("#apiLabCode");
+      if (output) output.textContent = "Fix the JSON request body to generate runnable examples.";
+      return;
+    }
+  }
   const path = config.path;
   const curlBody = body == null ? "" : " \\\n  --data '" + body.replace(/'/g, "'\\''") + "'";
+  const idempotencyHeader = config.method === "POST" ? " \\\n  --header 'Idempotency-Key: <UNIQUE_IDEMPOTENCY_KEY>'" : "";
   const nodeBody = body == null ? "" : ",\n  body: JSON.stringify(" + body + ")";
-  const pythonBody = body == null ? "" : ",\n    json=" + body;
+  const pythonBody = body == null ? "" : ",\n    json=json.loads(" + JSON.stringify(body) + ")";
   const examples = [
-    "# cURL\ncurl --request " + config.method + " 'https://YOUR-LOCD-HOST" + path + "' \\\n  --header 'Authorization: Bearer <YOUR_LOCD_API_KEY>' \\\n  --header 'X-Request-ID: <UNIQUE_REQUEST_ID>'" + curlBody,
-    "# Node.js (built-in fetch)\nconst response = await fetch('https://YOUR-LOCD-HOST" + path + "', {\n  method: '" + config.method + "',\n  headers: {\n    Authorization: 'Bearer <YOUR_LOCD_API_KEY>',\n    'X-Request-ID': '<UNIQUE_REQUEST_ID>'\n  }" + nodeBody + "\n});\nconst result = await response.json();\nconsole.log(response.status, result);",
-    "# Python (requests)\nimport requests\n\nresponse = requests.request(\n    '" + config.method + "',\n    'https://YOUR-LOCD-HOST" + path + "',\n    headers={\n        'Authorization': 'Bearer <YOUR_LOCD_API_KEY>',\n        'X-Request-ID': '<UNIQUE_REQUEST_ID>'\n    }" + pythonBody + "\n)\nprint(response.status_code, response.json())"
+    "# cURL\ncurl --request " + config.method + " 'https://YOUR-LOCD-HOST" + path + "' \\\n  --header 'Authorization: Bearer <YOUR_LOCD_API_KEY>' \\\n  --header 'X-Request-ID: <UNIQUE_REQUEST_ID>'" + idempotencyHeader + curlBody,
+    "# Node.js (built-in fetch)\nconst response = await fetch('https://YOUR-LOCD-HOST" + path + "', {\n  method: '" + config.method + "',\n  headers: {\n    Authorization: 'Bearer <YOUR_LOCD_API_KEY>',\n    'X-Request-ID': '<UNIQUE_REQUEST_ID>'" + (config.method === "POST" ? ",\n    'Idempotency-Key': '<UNIQUE_IDEMPOTENCY_KEY>'" : "") + "\n  }" + nodeBody + "\n});\nconst result = await response.json();\nconsole.log(response.status, result);",
+    "# Python (requests)\nimport json\nimport requests\n\nresponse = requests.request(\n    '" + config.method + "',\n    'https://YOUR-LOCD-HOST" + path + "',\n    headers={\n        'Authorization': 'Bearer <YOUR_LOCD_API_KEY>',\n        'X-Request-ID': '<UNIQUE_REQUEST_ID>'" + (config.method === "POST" ? ",\n        'Idempotency-Key': '<UNIQUE_IDEMPOTENCY_KEY>'" : "") + "\n    }" + pythonBody + "\n)\nprint(response.status_code, response.json())"
   ];
   const output = document.querySelector("#apiLabCode");
   if (output) output.textContent = examples.join("\n\n" + "─".repeat(64) + "\n\n");
