@@ -1122,3 +1122,24 @@ test("API Lab exposes only safe allowlisted operations and a read-only policy si
   assert.match(script, /executedProvider/);
   assert.doesNotMatch(script, /fetch\(document\.querySelector\("#apiLabPath"\)/);
 });
+
+
+test("decision activity explorer provides tenant-history filters and metadata-only export", async () => {
+  const html = await readFile(new URL("index.html", webRoot), "utf8");
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  for (const id of [
+    "activitySearch", "activityOutcomeFilter", "activityRouteFilter",
+    "activityWindowFilter", "activityClearFilters", "activityExportCsv",
+    "activitySummary", "activityMatchedCount", "activitySuccessCount",
+    "activityFailureCount", "activityPendingCount"
+  ]) {
+    assert.match(html, new RegExp('id="' + id + '"'), "missing decision explorer control: " + id);
+  }
+  assert.match(script, /decisionActivityLimit = 100/);
+  assert.match(script, /\/v1\/decisions\?limit=" \+ decisionActivityLimit/);
+  assert.match(script, /function filteredDecisionRows\(\)/);
+  assert.match(script, /function csvDecisionCell\(value\)/);
+  assert.match(script, /\^\[\\s\]\*\[=\+\\-@\]/);
+  assert.match(script, /Export filtered CSV/);
+  assert.doesNotMatch(script, /localStorage\.(?:setItem|removeItem)\(/);
+});
