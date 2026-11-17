@@ -46,6 +46,15 @@ function backendModeFor(store) {
   return "process-local";
 }
 
+function backendNameFor(store, configuredName) {
+  // Keep concrete adapter labels such as "sqlite" or "network", but do not
+  // let a stale "process-local" label contradict the store's capabilities.
+  if (typeof configuredName === "string" &&
+      configuredName.trim() &&
+      configuredName !== "process-local") return configuredName;
+  return backendModeFor(store);
+}
+
 function validateProductionSafety({
   strict = false,
   authEnabled,
@@ -641,9 +650,9 @@ export function createServer({
     : hasAtomicCircuitCoordination
       ? coordinationMode
       : "process-local";
-  const telemetryBackendName = telemetryBackend || backendModeFor(decisionStore);
-  const policyBackendName = policyBackend || backendModeFor(policyStore);
-  const coordinationBackendName = coordinationBackend || coordinationMode;
+  const telemetryBackendName = backendNameFor(decisionStore, telemetryBackend);
+  const policyBackendName = backendNameFor(policyStore, policyBackend);
+  const coordinationBackendName = backendNameFor(coordinationStore, coordinationBackend);
   for (const method of ["annotateTargets", "acquire", "recordFailure", "recordSuccess", "snapshot"]) {
     if (typeof effectiveCircuitBreaker?.[method] !== "function") {
       throw new Error("circuitBreaker must implement " + method + "()");
