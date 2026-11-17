@@ -992,3 +992,32 @@ test("provider reliability trends render safe aggregates, buckets, providers and
   assert.equal(nodes["#sloStateBadge"].textContent, "Unavailable");
   assert.match(nodes["#sloAlertsBody"].innerHTML, /unavailable/);
 });
+
+
+test("first-run access and Free preview notices are actionable and data-safe", async () => {
+  const html = await readFile(new URL("index.html", webRoot), "utf8");
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  const css = await readFile(new URL("styles.css", webRoot), "utf8");
+
+  assert.match(html, /id="apiAccessNotice"[^>]*role="status"/);
+  assert.match(html, /id="apiAccessNoticeAction"[^>]*href="#system-settings"/);
+  assert.match(html, /id="freePreviewNotice"[^>]*role="note"/);
+  assert.match(html, /id="apiKey"/);
+  assert.match(script, /response\.status === 401\) setApiAccessNotice\("missing"\)/);
+  assert.match(script, /response\.status === 403\) setApiAccessNotice\("scope"\)/);
+  assert.match(script, /response\.ok && path === "\/v1\/status"\) setApiAccessNotice\("clear"\)/);
+  assert.match(script, /data\?\.deploymentProfile === "free-preview"/);
+  assert.match(script, /caps\.persistentTelemetry/);
+  assert.match(script, /Process-local state may reset/);
+  assert.doesNotMatch(script, /localStorage\.(?:setItem|getItem)\(/);
+  assert.match(css, /\.notice-card\.notice-preview/);
+});
+
+test("dashboard access onboarding never embeds or persists the deployment API key", async () => {
+  const html = await readFile(new URL("index.html", webRoot), "utf8");
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  assert.match(html, /Copy LOCD_API_KEY/);
+  assert.match(script, /let activeApiKey = ""/);
+  assert.match(script, /activeApiKey = nextApiKey/);
+  assert.doesNotMatch(html + script, /LOCD_API_KEY\s*[:=]\s*["'][^"']+/);
+});
