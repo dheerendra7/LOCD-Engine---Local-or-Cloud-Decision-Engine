@@ -925,6 +925,7 @@ function renderCapabilities(caps) {
     automaticProbing: "Automatic probing",
     calibrationEnabled: "Estimate calibration",
     sharedCoordination: "Shared coordination",
+    durableCoordination: "Durable coordination",
     telemetryBackend: "Telemetry backend",
     policyBackend: "Policy backend",
     coordinationBackend: "Coordination backend",
@@ -933,9 +934,19 @@ function renderCapabilities(caps) {
     circuitBreakerBackend: "Circuit-breaker coordination",
     sharedCircuitBreaker: "Shared circuit state"
   };
+  const booleanLabels = {
+    persistentTargets: ["Ephemeral", "Persistent"],
+    persistentTelemetry: ["Ephemeral", "Durable"],
+    sharedCoordination: ["Not shared", "Shared"],
+    durableCoordination: ["Non-durable", "Durable"],
+    sharedCircuitBreaker: ["Not shared", "Shared"]
+  };
   root.innerHTML = Object.entries(labels).map(([key, label]) => {
     const value = caps[key];
-    let shown = typeof value === "boolean" ? (value ? "Enabled" : "Disabled") : (value == null ? "Not reported" : String(value));
+    const booleanLabel = booleanLabels[key];
+    const shown = typeof value === "boolean"
+      ? (booleanLabel ? booleanLabel[value ? 1 : 0] : (value ? "Enabled" : "Disabled"))
+      : (value == null ? "Not reported" : String(value));
     return '<div class="system-item"><span>' + escapeHtml(label) + '</span><strong>' + escapeHtml(shown) + "</strong></div>";
   }).join("");
 }
