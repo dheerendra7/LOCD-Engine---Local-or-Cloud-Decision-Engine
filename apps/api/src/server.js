@@ -554,6 +554,7 @@ export function createServer({
   authorizer = null,
   probeScheduler = null,
   serviceVersion = "0.1.0",
+  deploymentProfile = process.env.LOCD_DEPLOYMENT_PROFILE?.trim() || "self-hosted",
   calibrator = createCalibrator(),
   calibrationEnabled = process.env.LOCD_CALIBRATION_ENABLED === "true",
   coordinationBackend = null,
@@ -1857,6 +1858,7 @@ export function createServer({
           service: "locd-api",
           version: serviceVersion,
           status: "ok",
+          deploymentProfile,
           stateBackend: describeStateBackend({
             telemetry: decisionStore,
             coordination: coordinationStore,
