@@ -73,12 +73,13 @@ test("console operational data is fetched from LOCD API endpoints", async () => 
   const script = await readFile(new URL("app.js", webRoot), "utf8");
   for (const endpoint of [
     "/v1/status", "/v1/metrics", "/v1/targets", "/v1/policies",
-    "/v1/decisions?limit=25", "/v1/calibration", "/v1/outcomes",
+    "/v1/decisions?limit=", "/v1/calibration", "/v1/outcomes",
     "/v1/policies/simulate"
   ]) {
     assert.ok(script.includes(endpoint), "missing API integration: " + endpoint);
   }
   assert.doesNotMatch(script, /localStorage\.(?:setItem|removeItem)\(/);
+  assert.match(script, /decisionActivityLimit = 100/);
 });
 
 
@@ -1140,6 +1141,6 @@ test("decision activity explorer provides tenant-history filters and metadata-on
   assert.match(script, /function filteredDecisionRows\(\)/);
   assert.match(script, /function csvDecisionCell\(value\)/);
   assert.match(script, /\^\[\\s\]\*\[=\+\\-@\]/);
-  assert.match(script, /Export filtered CSV/);
+  assert.match(html, /Export filtered CSV/);
   assert.doesNotMatch(script, /localStorage\.(?:setItem|removeItem)\(/);
 });
