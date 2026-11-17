@@ -13,6 +13,8 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: LOCD_DEPLOYMENT_PROFILE
+        value: free-preview
       - key: LOCD_PRODUCTION_STRICT
         value: "false"
       - key: LOCD_RATE_LIMIT_RPM

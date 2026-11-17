@@ -291,6 +291,47 @@ function portalIdempotencyKey() {
   return "locd-" + Date.now() + "-" + Math.random().toString(16).slice(2);
 }
 
+function setApiAccessNotice(state) {
+  const notice = document.querySelector("#apiAccessNotice");
+  if (!notice) return;
+
+  if (state === "clear") {
+    notice.classList.add("hidden");
+    notice.classList.remove("notice-auth", "notice-scope");
+    return;
+  }
+
+  const missingKey = state === "missing";
+  notice.classList.remove("hidden");
+  notice.classList.toggle("notice-auth", missingKey);
+  notice.classList.toggle("notice-scope", !missingKey);
+  setText("apiAccessNoticeTitle", missingKey ? "API key required to load this workspace" : "The current API key has insufficient scope");
+  setText("apiAccessNoticeText", missingKey
+    ? "Copy LOCD_API_KEY from Render → locd-engine → Environment. Then open System & access and apply it. Keep this key private; it is not a provider credential."
+    : "This key can authenticate but cannot read every control-plane resource. Use a key with the read scope, plus the relevant action scopes, or an admin key for full control-plane access.");
+  setText("apiAccessNoticeAction", "Open System & access");
+}
+
+function renderDeploymentNotices(data) {
+  const notice = document.querySelector("#freePreviewNotice");
+  if (!notice) return;
+
+  const isFreePreview = data?.deploymentProfile === "free-preview";
+  notice.classList.toggle("hidden", !isFreePreview);
+  if (!isFreePreview) return;
+
+  const caps = data.capabilities || {};
+  const targetState = caps.persistentTargets === true ? "durable" : "ephemeral";
+  const telemetryState = caps.persistentTelemetry === true ? "durable" : "ephemeral";
+  const policyState = String(caps.policyBackend || "unknown");
+  const coordinationState = String(caps.coordinationBackend || "unknown");
+  setText("freePreviewNoticeText",
+    "Free instances can sleep after inactivity. Current state: targets " + targetState +
+    ", telemetry " + telemetryState + ", policies " + policyState +
+    ", coordination " + coordinationState +
+    ". Process-local state may reset after sleep, restart or redeploy. Avoid customer-critical data; live provider execution remains disabled.");
+}
+
 async function portalFetch(path, options = {}) {
   const headers = {
     ...(options.headers || {}),
@@ -307,6 +348,10 @@ async function portalFetch(path, options = {}) {
   } catch {
     payload = {};
   }
+  if (response.status === 401) setApiAccessNotice("missing");
+  if (response.status === 403) setApiAccessNotice("scope");
+  if (response.ok && path === "/v1/status") setApiAccessNotice("clear");
+
   if (!response.ok) {
     const descriptions = {
       unauthorized: "Authentication required. Add a scoped LOCD API key in System & access.",
@@ -1301,6 +1346,7 @@ async function refreshStatus() {
     if (accessRevision !== apiAccessRevision) return;
     const caps = data.capabilities || {};
     const counts = data.counts || {};
+    renderDeploymentNotices(data);
     setStatus("Connected · " + (data.service || "locd-api") + " · " + (data.version || "version unknown"), "connected");
     setText("probeCount", (counts.probeableTargets == null ? "—" : counts.probeableTargets) + " probe-capable / " + (counts.targets == null ? "—" : counts.targets) + " registered");
     setText("telemetryBackend", caps.telemetryBackend || data.stateBackend?.kind || "Not reported");
