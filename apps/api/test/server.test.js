@@ -1594,7 +1594,9 @@ test("live provider failures open a tenant circuit and route subsequent decision
       })
     });
     assert.equal(staleExecution.status, 409);
-    assert.deepEqual(await staleExecution.json(), { error: "execution_plan_stale" });
+    const staleBody = await staleExecution.json();
+    assert.equal(staleBody.error, "execution_plan_stale");
+    assert.equal(Array.isArray(staleBody.rejected), true);
     assert.equal(failedProviderCalls, 1);
 
     const nextDecisionResponse = await fetch(url + "/v1/decide", {
