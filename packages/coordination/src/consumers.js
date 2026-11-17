@@ -2,6 +2,16 @@ import { randomUUID } from "node:crypto";
 import { fingerprint } from "../../../packages/runtime/src/idempotency.js";
 import { assertCoordinationStore } from "./store.js";
 
+function backendCapabilities(store) {
+  const capabilities = store?.capabilities || {};
+  return Object.freeze({
+    durable: capabilities.durable === true,
+    shared: capabilities.shared === true,
+    tenantScoped: capabilities.tenantScoped === true,
+    transactional: capabilities.transactional === true
+  });
+}
+
 function normalizeKey(value) {
   const key = String(value ?? "").trim();
   if (!key || key.length > 512) throw new Error("coordination key is invalid");
@@ -27,6 +37,7 @@ export function createCoordinatedFixedWindowRateLimiter({
   }
 
   return {
+    capabilities: backendCapabilities(store),
     enabled: limit > 0,
 
     async consume(key, now = Date.now()) {
@@ -208,5 +219,12 @@ export function createCoordinatedIdempotencyStore({
     return store.deleteIfValue(storedKey, existing);
   }
 
-  return { lookup, remember, claim, renew, release };
+  return {
+    capabilities: backendCapabilities(store),
+    lookup,
+    remember,
+    claim,
+    renew,
+    release
+  };
 }

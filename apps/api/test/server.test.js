@@ -3410,9 +3410,12 @@ test("two API instances share idempotency responses through the same backend", a
 });
 
 
-test("status endpoint reports shared coordination mode", async () => {
+test("status endpoint does not misreport in-memory coordination as shared or durable", async () => {
   const coordination = createInMemoryCoordinationStore();
-  const statusServer = createServer({ coordinationStore: coordination });
+  const statusServer = createServer({
+    coordinationStore: coordination,
+    rateLimitMaxRequests: 5
+  });
 
   await new Promise(resolve => statusServer.listen(0, "127.0.0.1", resolve));
   const url = "http://127.0.0.1:" + statusServer.address().port;
@@ -3422,11 +3425,73 @@ test("status endpoint reports shared coordination mode", async () => {
     assert.equal(response.status, 200);
     const body = await response.json();
 
+    assert.equal(body.capabilities.sharedCoordination, false);
+    assert.equal(body.capabilities.durableCoordination, false);
+    assert.equal(body.capabilities.coordinationBackend, "process-local");
+    assert.equal(body.capabilities.circuitBreakerBackend, "process-local");
+    assert.equal(body.capabilities.sharedCircuitBreaker, false);
+    assert.equal(body.capabilities.rateLimitMode, "process-local");
+    assert.equal(body.capabilities.idempotencyMode, "process-local");
+  } finally {
+    await new Promise(resolve => statusServer.close(resolve));
+  }
+});
+
+test("status endpoint reports disabled rate limiting when no request limit is configured", async () => {
+  const statusServer = createServer();
+  await new Promise(resolve => statusServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + statusServer.address().port;
+  try {
+    const response = await fetch(url + "/v1/status");
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.capabilities.rateLimitMode, "disabled");
+  } finally {
+    await new Promise(resolve => statusServer.close(resolve));
+  }
+});
+test("status endpoint reports shared and durable capabilities from SQLite backends", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "locd-status-capabilities-"));
+  const file = path.join(dir, "state.db");
+  const stores = createSQLiteStateStores({ filePath: file, maxEntries: 20 });
+  const statusServer = createServer({
+    decisionStore: stores.telemetry,
+    policyStore: stores.policies,
+    coordinationStore: stores.coordination,
+    // Stale process-local labels must not contradict durable/shared stores.
+    telemetryBackend: "process-local",
+    policyBackend: "process-local",
+    coordinationBackend: "process-local",
+    rateLimitMaxRequests: 10
+  });
+
+  await new Promise(resolve => statusServer.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + statusServer.address().port;
+
+  try {
+    const response = await fetch(url + "/v1/status");
+    assert.equal(response.status, 200);
+    const body = await response.json();
+
+    assert.equal(body.stateBackend.kind, "shared");
+    assert.equal(body.stateBackend.telemetry.durable, true);
+    assert.equal(body.stateBackend.telemetry.shared, true);
+    assert.equal(body.stateBackend.coordination.durable, true);
+    assert.equal(body.stateBackend.coordination.shared, true);
+    assert.equal(body.capabilities.persistentTelemetry, true);
     assert.equal(body.capabilities.sharedCoordination, true);
+    assert.equal(body.capabilities.durableCoordination, true);
+    assert.equal(body.capabilities.coordinationBackend, "shared");
+    assert.equal(body.capabilities.telemetryBackend, "shared");
+    assert.equal(body.capabilities.policyBackend, "shared");
+    assert.equal(body.capabilities.circuitBreakerBackend, "shared");
+    assert.equal(body.capabilities.sharedCircuitBreaker, true);
     assert.equal(body.capabilities.rateLimitMode, "shared");
     assert.equal(body.capabilities.idempotencyMode, "shared");
   } finally {
     await new Promise(resolve => statusServer.close(resolve));
+    stores.close();
+    await rm(dir, { recursive: true, force: true });
   }
 });
 

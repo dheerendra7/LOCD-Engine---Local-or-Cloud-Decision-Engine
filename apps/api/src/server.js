@@ -39,6 +39,22 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../../web");
 
 
+function backendModeFor(store) {
+  const capabilities = store?.capabilities || {};
+  if (capabilities.shared === true) return "shared";
+  if (capabilities.durable === true) return "durable-local";
+  return "process-local";
+}
+
+function backendNameFor(store, configuredName) {
+  // Keep concrete adapter labels such as "sqlite" or "network", but do not
+  // let a stale "process-local" label contradict the store's capabilities.
+  if (typeof configuredName === "string" &&
+      configuredName.trim() &&
+      configuredName !== "process-local") return configuredName;
+  return backendModeFor(store);
+}
+
 function validateProductionSafety({
   strict = false,
   authEnabled,
@@ -613,6 +629,7 @@ export function createServer({
   const hasAtomicCircuitCoordination = coordinationStore &&
     typeof coordinationStore.setIfValue === "function" &&
     typeof coordinationStore.deleteIfValue === "function";
+  const coordinationMode = backendModeFor(coordinationStore);
   const circuitBreakerStore = hasAtomicCircuitCoordination
     ? coordinationStore
     : createInMemoryCoordinationStore();
@@ -625,11 +642,17 @@ export function createServer({
     historyRetentionMs: circuitBreakerHistoryRetentionMs,
     historyMaxEntries: circuitBreakerHistoryMaxEntries
   });
+  // A compare-and-set API is necessary for safe breaker transitions, but it
+  // does not by itself make the state cross-instance. Both atomic operations
+  // and an explicitly shared backend capability are required for that claim.
   const circuitBreakerBackend = circuitBreaker
     ? "custom"
     : hasAtomicCircuitCoordination
-      ? "shared"
+      ? coordinationMode
       : "process-local";
+  const telemetryBackendName = backendNameFor(decisionStore, telemetryBackend);
+  const policyBackendName = backendNameFor(policyStore, policyBackend);
+  const coordinationBackendName = backendNameFor(coordinationStore, coordinationBackend);
   for (const method of ["annotateTargets", "acquire", "recordFailure", "recordSuccess", "snapshot"]) {
     if (typeof effectiveCircuitBreaker?.[method] !== "function") {
       throw new Error("circuitBreaker must implement " + method + "()");
@@ -1654,14 +1677,12 @@ export function createServer({
           stateBackend: describeStateBackend({
             telemetry: decisionStore,
             coordination: coordinationStore,
-            kind: telemetryBackend || "process-local"
+            kind: telemetryBackendName
           }),
           capabilities: {
             executionEnabled: Boolean(executionEnabled),
             persistentTargets: Boolean(targetFile),
-            persistentTelemetry: Boolean(
-              telemetryBackend && telemetryBackend !== "process-local"
-            ),
+            persistentTelemetry: decisionStore?.capabilities?.durable === true,
             automaticProbing: Boolean(probeScheduler?.isRunning?.()),
             calibrationEnabled: Boolean(calibrationEnabled),
             circuitBreakerEnabled: true,
@@ -1671,13 +1692,15 @@ export function createServer({
             reliabilityHistoryBackend: circuitBreakerBackend,
             reliabilitySloEnabled: true,
             reliabilitySloTarget: reliabilitySloEvaluator.policy.availabilityTarget,
-            sharedCoordination: Boolean(coordinationStore),
-            coordinationBackend: coordinationBackend ||
-              (coordinationStore ? "shared" : "process-local"),
-            telemetryBackend: telemetryBackend || "process-local",
-            policyBackend: policyBackend || "process-local",
-            rateLimitMode: coordinationStore ? "shared" : "process-local",
-            idempotencyMode: coordinationStore ? "shared" : "process-local"
+            sharedCoordination: coordinationStore?.capabilities?.shared === true,
+            durableCoordination: coordinationStore?.capabilities?.durable === true,
+            coordinationBackend: coordinationBackendName,
+            telemetryBackend: telemetryBackendName,
+            policyBackend: policyBackendName,
+            rateLimitMode: effectiveRateLimiter.enabled === false
+              ? "disabled"
+              : backendModeFor(effectiveRateLimiter),
+            idempotencyMode: backendModeFor(effectiveIdempotencyStore)
           },
           circuitBreakers: {
             policy: {

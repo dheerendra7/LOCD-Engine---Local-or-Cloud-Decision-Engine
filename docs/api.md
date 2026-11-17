@@ -406,6 +406,10 @@ Authenticated operational snapshot for operators and dashboards. The response co
 
 It includes target count, probeable target count, execution adapter count, decision count, execution-enabled state, persistence flags, automatic-probing state, circuit-breaker backend and open/half-open/closed target counts. The additive `circuitBreakers` object contains the effective failure threshold, failure window, cooldown and probe-lease durations, plus one safe detail row per registered target (`targetId`, `state`, `failureCount`, `openedAt`, `retryAt` and `probeInFlight`). It never returns internal probe ownership tokens. Target details and counts are evaluated against the authenticated tenant's registry and breaker namespace.
 
+The capability flags are derived from each store's declared contract, not merely from whether a store object was supplied. `sharedCoordination` is true only when the coordination backend declares `shared: true`; `durableCoordination` reflects `durable: true`. A process-local in-memory coordination store therefore remains process-local even though it supports atomic operations within one process.
+
+Derived capability modes use `shared` for explicitly shared stores, `durable-local` for durable stores that do not claim cross-instance sharing, and `process-local` when neither capability is declared. Concrete backend labels such as `sqlite`, `network` or `file` may still be supplied for diagnostics, but a `process-local` label cannot override a store that declares stronger capabilities. Circuit-breaker state is reported as shared only when the coordination store supports the required atomic compare-and-set operations and explicitly advertises shared capability. Rate-limit and idempotency modes report the capabilities of their effective backing adapters. `rateLimitMode` is `disabled` when the configured request limit is zero, regardless of which store is available.
+
 ### Graceful shutdown
 
 The production bootstrap handles SIGTERM and SIGINT by stopping automatic probing first and then closing the HTTP server. Shutdown events are emitted through the structured logger.
