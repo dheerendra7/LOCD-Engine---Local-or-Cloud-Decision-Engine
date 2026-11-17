@@ -279,10 +279,12 @@ test("API transport converts authentication, scope, registry, and rate-limit err
   assert.ok(match, "the dashboard should centralize API response handling");
 
   let nextResponse;
+  const accessNoticeStates = [];
   const mockedFetch = async () => nextResponse;
-  const portalFetch = new Function("fetch", "apiHeaders", match[0] + "; return portalFetch;")(
+  const portalFetch = new Function("fetch", "apiHeaders", "setApiAccessNotice", match[0] + "; return portalFetch;")(
     mockedFetch,
-    () => ({})
+    () => ({}),
+    state => accessNoticeStates.push(state)
   );
 
   const rejectedResponse = (status, error) => ({
@@ -296,12 +298,14 @@ test("API transport converts authentication, scope, registry, and rate-limit err
     () => portalFetch("/v1/status"),
     /Authentication required\. Add a scoped LOCD API key/
   );
+  assert.deepEqual(accessNoticeStates, ["missing"]);
 
   nextResponse = rejectedResponse(403, "insufficient_scope");
   await assert.rejects(
     () => portalFetch("/v1/execute"),
     /This API key does not have permission/
   );
+  assert.deepEqual(accessNoticeStates, ["missing", "scope"]);
 
   nextResponse = rejectedResponse(404, "target_not_found");
   await assert.rejects(
@@ -326,6 +330,14 @@ test("API transport converts authentication, scope, registry, and rate-limit err
     () => portalFetch("/v1/decide"),
     /workload\.type is required/
   );
+
+  nextResponse = {
+    ok: true,
+    status: 200,
+    json: async () => ({ service: "locd-api" })
+  };
+  await portalFetch("/v1/status");
+  assert.deepEqual(accessNoticeStates, ["missing", "scope", "clear"]);
 });
 
 test("API keys are applied explicitly and access changes reset tenant-scoped UI state", async () => {
@@ -1000,7 +1012,8 @@ test("first-run access and Free preview notices are actionable and data-safe", a
   const css = await readFile(new URL("styles.css", webRoot), "utf8");
 
   assert.match(html, /id="apiAccessNotice"[^>]*role="status"/);
-  assert.match(html, /id="apiAccessNoticeAction"[^>]*href="#system-settings"/);
+  assert.match(html, /id="apiAccessNoticeAction"/);
+  assert.match(html, /href="#system-settings"/);
   assert.match(html, /id="freePreviewNotice"[^>]*role="note"/);
   assert.match(html, /id="apiKey"/);
   assert.match(script, /response\.status === 401\) setApiAccessNotice\("missing"\)/);
@@ -1016,7 +1029,7 @@ test("first-run access and Free preview notices are actionable and data-safe", a
 test("dashboard access onboarding never embeds or persists the deployment API key", async () => {
   const html = await readFile(new URL("index.html", webRoot), "utf8");
   const script = await readFile(new URL("app.js", webRoot), "utf8");
-  assert.match(html, /Copy LOCD_API_KEY/);
+  assert.match(script, /Copy LOCD_API_KEY from Render/);
   assert.match(script, /let activeApiKey = ""/);
   assert.match(script, /activeApiKey = nextApiKey/);
   assert.doesNotMatch(html + script, /LOCD_API_KEY\s*[:=]\s*["'][^"']+/);
