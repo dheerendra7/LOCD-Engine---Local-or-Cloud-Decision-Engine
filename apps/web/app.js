@@ -2257,3 +2257,45 @@ document.querySelector("#apiLabRun")?.addEventListener("click", async event => {
 });
 
 apiLabSelectEndpoint();
+
+
+// Public website / product workspace routing. Existing workspace hash routes remain unchanged.
+(function initializePublicSiteNavigation() {
+  const publicRoutes = new Set(["", "home", "product", "solutions", "resources", "pricing"]);
+  const siteNav = document.querySelector("#siteNav");
+  const menuToggle = document.querySelector("#siteMenuToggle");
+
+  function syncPublicSiteMode() {
+    const route = decodeURIComponent(window.location.hash.replace(/^#/, ""));
+    document.body.classList.toggle("app-mode", !publicRoutes.has(route));
+  }
+
+  document.querySelectorAll("[data-public-scroll]").forEach(link => {
+    link.addEventListener("click", event => {
+      event.preventDefault();
+      const target = document.getElementById(link.dataset.publicScroll);
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+      siteNav?.classList.remove("is-open");
+      menuToggle?.setAttribute("aria-expanded", "false");
+    });
+  });
+
+  document.querySelectorAll("[data-public-top]").forEach(link => {
+    link.addEventListener("click", event => {
+      event.preventDefault();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      siteNav?.classList.remove("is-open");
+      menuToggle?.setAttribute("aria-expanded", "false");
+    });
+  });
+
+  menuToggle?.addEventListener("click", () => {
+    const open = menuToggle.getAttribute("aria-expanded") !== "true";
+    menuToggle.setAttribute("aria-expanded", String(open));
+    menuToggle.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
+    siteNav?.classList.toggle("is-open", open);
+  });
+
+  window.addEventListener("hashchange", syncPublicSiteMode);
+  syncPublicSiteMode();
+})();

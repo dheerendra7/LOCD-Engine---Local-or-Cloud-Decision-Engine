@@ -3,19 +3,158 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="LOCD Engine control plane for explainable local, private, cloud and hybrid workload placement.">
-  <meta name="theme-color" content="#f4f6f2">
-  <title>LOCD Engine — Control Plane</title>
+  <meta name="description" content="LOCD helps infrastructure teams evaluate workload placement across local, private, cloud and hybrid environments with explicit policies and explainable decisions.">
+  <meta name="theme-color" content="#0b0c0e">
+  <title>LOCD — Infrastructure Placement Decisions</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+  <div id="public-site" class="public-site">
+    <header class="site-header">
+      <div class="site-header-inner">
+        <a class="site-brand" href="#home" data-public-top aria-label="LOCD home">
+          <span class="site-brand-mark" aria-hidden="true"><svg viewBox="0 0 36 36" fill="none"><path d="M18 2.8 32 10.6v14.8L18 33.2 4 25.4V10.6L18 2.8Z" stroke="currentColor" stroke-width="1.8"/><path d="m18 2.8 14 7.8-14 8-14-8 14-7.8Z" fill="currentColor" opacity=".2"/><path d="M18 18.6v14.6M4 10.6v14.8l14 7.8 14-7.8V10.6" stroke="currentColor" stroke-width="1.8"/><path d="m18 18.6 14-8" stroke="currentColor" stroke-width="1.8"/></svg></span>
+          <span>LOCD</span>
+        </a>
+        <nav class="site-nav" id="siteNav" aria-label="Main navigation">
+          <a href="#product" data-public-scroll="product">Product</a>
+          <a href="#solutions" data-public-scroll="solutions">Solutions</a>
+          <a href="#resources" data-public-scroll="resources">Resources</a>
+          <a href="#pricing" data-public-scroll="pricing">Pricing</a>
+        </nav>
+        <div class="site-header-actions">
+          <a class="site-signin" href="#decision-lab">Open workspace</a>
+          <a class="site-button site-button-small" href="#decision-lab">Get started <span aria-hidden="true">→</span></a>
+          <button class="site-menu-toggle" id="siteMenuToggle" type="button" aria-label="Open navigation" aria-controls="siteNav" aria-expanded="false"><span></span><span></span></button>
+        </div>
+      </div>
+    </header>
+
+    <main class="site-main">
+      <section class="site-hero" id="public-home" aria-labelledby="siteHeroTitle">
+        <div class="site-hero-copy">
+          <div class="site-eyebrow"><span class="site-eyebrow-mark"></span> INFRASTRUCTURE DECISION ENGINE</div>
+          <h1 id="siteHeroTitle">Local or cloud?<br>Make the <span>right decision.</span></h1>
+          <p>LOCD helps infrastructure teams evaluate workload requirements, compare eligible destinations and understand why a placement decision was made.</p>
+          <div class="site-hero-actions">
+            <a class="site-button" href="#decision-lab">Start Decision Studio <span aria-hidden="true">→</span></a>
+            <a class="site-button site-button-outline" href="https://github.com/dheerendra7/LOCD-Engine---Local-or-Cloud-Decision-Engine/tree/main/docs" target="_blank" rel="noopener noreferrer"><span class="site-book-icon" aria-hidden="true">▤</span> Explore documentation</a>
+          </div>
+          <div class="site-hero-meta"><span>LOCAL</span><i></i><span>PRIVATE</span><i></i><span>CLOUD</span><i></i><span>HYBRID</span></div>
+        </div>
+        <div class="site-hero-art" aria-hidden="true">
+          <svg viewBox="0 0 820 570" role="presentation" focusable="false">
+            <defs>
+              <pattern id="locdGrid" width="44" height="44" patternUnits="userSpaceOnUse"><path d="M44 0H0V44" fill="none" stroke="#77797c" stroke-opacity=".15" stroke-width="1"/></pattern>
+              <clipPath id="locdBuildingClip"><path d="M120 405 438 230 760 405 443 566Z"/></clipPath>
+            </defs>
+            <path d="M0 0H820V570H0Z" fill="url(#locdGrid)"/>
+            <path d="M490 0H750L631 202H374Z" fill="#9f1f27" opacity=".82"/>
+            <path d="M492 0H750L631 202" fill="none" stroke="#ed4248" stroke-width="1.5"/>
+            <path d="M105 407 438 222 775 407 442 574Z" fill="#101113" stroke="#626467" stroke-width="1.4"/>
+            <path d="M105 407 438 222V506L442 574Z" fill="#17191b" stroke="#55585b" stroke-width="1.2"/>
+            <path d="M438 222 775 407V470L442 574V506Z" fill="#0d0e10" stroke="#55585b" stroke-width="1.2"/>
+            <path d="M438 222 775 407M105 407 438 574" stroke="#777a7d" stroke-opacity=".65" stroke-width="1.3"/>
+            <g clip-path="url(#locdBuildingClip)" stroke="#777a7d" stroke-opacity=".45" fill="none">
+              <path d="M170 400 444 250M170 430 444 280M170 460 444 310M170 490 444 340M170 520 444 370M170 550 444 400"/>
+              <path d="M215 376V555M270 345V570M325 315V570M380 285V570M435 255V570"/>
+              <path d="M445 250 730 410M445 280 730 440M445 310 730 470M445 340 730 500M445 370 730 530"/>
+              <path d="M500 280V540M555 310V510M610 340V485M665 365V460"/>
+            </g>
+            <path d="M105 407 438 222 775 407" fill="none" stroke="#9b9da0" stroke-width="2"/>
+            <path d="M105 407 438 222V252L105 437Z" fill="#26282b" opacity=".82"/>
+            <path d="M438 222 775 407V437L438 252Z" fill="#202225" opacity=".84"/>
+            <path d="M105 437 438 252 775 437" fill="none" stroke="#d3d4d5" stroke-opacity=".38"/>
+            <path d="M105 490 438 305 775 490" fill="none" stroke="#626467" stroke-opacity=".42"/>
+            <path d="M105 543 438 358 775 543" fill="none" stroke="#626467" stroke-opacity=".32"/>
+            <path d="M438 222V570" stroke="#96999c" stroke-opacity=".5"/>
+            <path d="M438 222 631 0" stroke="#5e6063" stroke-opacity=".35"/>
+            <path d="M105 407 105 570M775 407V570" stroke="#44474a" stroke-opacity=".5"/>
+            <path d="M43 472H220M660 525H795" stroke="#e33a42" stroke-opacity=".56"/>
+          </svg>
+          <div class="site-art-label"><span>01</span><span>PLACEMENT CONTROL PLANE</span></div>
+        </div>
+      </section>
+
+      <section class="site-capability-strip" aria-label="Core capabilities">
+        <div><span class="capability-symbol">&lt;/&gt;</span><span><strong>Workload placement</strong><small>Local, private, cloud and hybrid</small></span></div>
+        <div><span class="capability-symbol capability-bars">▥</span><span><strong>Policy evaluation</strong><small>Constraints before ranking</small></span></div>
+        <div><span class="capability-symbol">◇</span><span><strong>Explainable decisions</strong><small>Routes, alternatives and reasons</small></span></div>
+        <div><span class="capability-symbol">⌘</span><span><strong>Developer focused</strong><small>API-first control plane</small></span></div>
+      </section>
+
+      <section class="site-product-section" id="product" aria-labelledby="productHeading">
+        <div class="site-product-copy">
+          <div class="site-section-kicker">THE LOCD CONTROL PLANE</div>
+          <h2 id="productHeading">Infrastructure decisions, with the reasoning in view.</h2>
+          <p>Go beyond a simple local-versus-cloud toggle. LOCD evaluates hard constraints, checks eligible targets and makes the trade-offs behind a placement decision visible.</p>
+          <div class="site-feature-list">
+            <article><span>01</span><div><h3>Policy-aware placement</h3><p>Apply privacy, capability, cost and latency requirements before a destination is ranked.</p></div></article>
+            <article><span>02</span><div><h3>Hybrid plan validation</h3><p>Model multi-stage workloads and validate plans with a dry-run before execution is considered.</p></div></article>
+            <article><span>03</span><div><h3>Operational visibility</h3><p>Inspect target health, reliability signals, reported outcomes and decision history.</p></div></article>
+            <article><span>04</span><div><h3>Built for integration</h3><p>Use the API, scoped access keys and API Lab to work with the control plane directly.</p></div></article>
+          </div>
+          <a class="site-text-link" href="#decision-lab">Explore the workspace <span aria-hidden="true">→</span></a>
+        </div>
+
+        <div class="site-console-frame" aria-label="Illustrative preview of the LOCD control plane">
+          <div class="site-console-topbar"><div class="site-console-brand"><span class="site-console-mark">L</span> LOCD</div><div class="site-console-search"><span>⌕</span> Search workspace</div><div class="site-console-account"><span class="site-console-status"></span> Workspace preview</div></div>
+          <div class="site-console-body">
+            <aside class="site-console-sidebar" aria-hidden="true">
+              <div class="is-active">▦ <span>Overview</span></div><div>⌕ <span>Decision Studio</span></div><div>▤ <span>Infrastructure</span></div><div>◇ <span>Governance</span></div><div>⌁ <span>Observability</span></div><div>&lt;/&gt; <span>API Lab</span></div>
+              <div class="site-console-sidebar-foot">CONTROL PLANE</div>
+            </aside>
+            <div class="site-console-main">
+              <div class="site-console-heading"><div><span class="site-console-kicker">WORKSPACE OVERVIEW</span><h3>Placement control plane</h3><p>Connect a workspace to inspect live infrastructure and decision data.</p></div><span class="site-preview-label">ILLUSTRATIVE UI</span></div>
+              <div class="site-console-stats">
+                <div><small>Registered destinations</small><strong>—</strong><span>From your target registry</span></div>
+                <div><small>Decisions evaluated</small><strong>—</strong><span>From recorded activity</span></div>
+                <div><small>Runtime readiness</small><strong>—</strong><span>Reported by the API</span></div>
+              </div>
+              <div class="site-console-lower">
+                <div class="site-console-card"><div class="site-console-card-heading"><strong>Placement workflow</strong><span>01 — 03</span></div><div class="site-flow-row"><b>01</b><span><strong>Describe workload</strong><small>Type, data class and requirements</small></span></div><div class="site-flow-row"><b>02</b><span><strong>Apply guardrails</strong><small>Policy and hard constraints</small></span></div><div class="site-flow-row"><b>03</b><span><strong>Inspect decision</strong><small>Destination and rejected alternatives</small></span></div></div>
+                <div class="site-console-card site-destinations"><div class="site-console-card-heading"><strong>Placement destinations</strong><span>4 modes</span></div><div class="site-destination-row"><span class="destination-mark">L</span><span><strong>Local</strong><small>Owned infrastructure</small></span></div><div class="site-destination-row"><span class="destination-mark">P</span><span><strong>Private</strong><small>Controlled environment</small></span></div><div class="site-destination-row"><span class="destination-mark">C</span><span><strong>Cloud</strong><small>External provider</small></span></div><div class="site-destination-row"><span class="destination-mark">H</span><span><strong>Hybrid</strong><small>Multiple stages</small></span></div></div>
+              </div>
+              <div class="site-console-footnote">Preview layout only · Live values are loaded from your connected LOCD API.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="site-solutions-section" id="solutions" aria-labelledby="solutionsHeading">
+        <div class="site-section-heading"><div><div class="site-section-kicker">WHERE LOCD FITS</div><h2 id="solutionsHeading">One decision layer. Different infrastructure needs.</h2></div><p>Use the same placement model across workloads, environments and operational teams.</p></div>
+        <div class="site-solution-grid">
+          <article><span class="solution-number">01 / WORKLOAD TEAMS</span><h3>Choose the right execution location</h3><p>Evaluate where an application, inference request or data workload should run against actual requirements.</p><a href="#decision-lab">Evaluate a workload <span>→</span></a></article>
+          <article><span class="solution-number">02 / PLATFORM TEAMS</span><h3>Keep infrastructure choices consistent</h3><p>Register destinations, define policy profiles and make placement criteria consistent across environments.</p><a href="#target-registry">Explore infrastructure <span>→</span></a></article>
+          <article><span class="solution-number">03 / OPERATIONS &amp; GOVERNANCE</span><h3>Understand why a route was selected</h3><p>Review constraint outcomes, reliability signals, decision records and calibration data in one place.</p><a href="#telemetry">View observability <span>→</span></a></article>
+        </div>
+      </section>
+
+      <section class="site-method-section" aria-labelledby="methodHeading">
+        <div class="site-method-intro"><div class="site-section-kicker">HOW IT WORKS</div><h2 id="methodHeading">A decision you can inspect. Not a black box.</h2><p>LOCD separates eligibility from ranking so hard requirements are not treated as just another score.</p></div>
+        <div class="site-method-steps"><article><span>01</span><div><h3>Describe</h3><p>Provide workload type, data sensitivity, capabilities and operational budgets.</p></div></article><article><span>02</span><div><h3>Constrain</h3><p>Apply policy profiles and hard limits to determine which targets are eligible.</p></div></article><article><span>03</span><div><h3>Explain</h3><p>Inspect the selected destination, alternatives, rejected targets and decision reasons.</p></div></article></div>
+      </section>
+
+      <section class="site-resources-section" id="resources" aria-labelledby="resourcesHeading">
+        <div><div class="site-section-kicker">FOR DEVELOPERS</div><h2 id="resourcesHeading">Designed to fit into your stack.</h2><p>Explore the implementation, read the API contract and inspect the architecture before connecting a workload.</p><a class="site-button site-button-outline" href="https://github.com/dheerendra7/LOCD-Engine---Local-or-Cloud-Decision-Engine" target="_blank" rel="noopener noreferrer">View source on GitHub <span aria-hidden="true">↗</span></a></div>
+        <div class="site-resource-links"><a href="https://github.com/dheerendra7/LOCD-Engine---Local-or-Cloud-Decision-Engine/blob/main/docs/architecture.md" target="_blank" rel="noopener noreferrer"><span>01</span><strong>Architecture</strong><small>Control-plane components and boundaries</small><b>↗</b></a><a href="https://github.com/dheerendra7/LOCD-Engine---Local-or-Cloud-Decision-Engine/blob/main/docs/api.md" target="_blank" rel="noopener noreferrer"><span>02</span><strong>API reference</strong><small>Endpoints, payloads and access scopes</small><b>↗</b></a><a href="https://github.com/dheerendra7/LOCD-Engine---Local-or-Cloud-Decision-Engine/blob/main/docs/deployment.md" target="_blank" rel="noopener noreferrer"><span>03</span><strong>Deployment guide</strong><small>Run and configure the control plane</small><b>↗</b></a></div>
+      </section>
+
+      <section class="site-pricing-section" id="pricing" aria-labelledby="pricingHeading">
+        <div><div class="site-section-kicker">OPEN SOURCE CORE</div><h2 id="pricingHeading">Start with the engine. Keep control of your deployment.</h2><p>LOCD Engine is published under the MIT License. Run the control plane in your own environment and connect registered targets through its API.</p></div>
+        <div class="site-pricing-actions"><a class="site-button" href="#decision-lab">Open LOCD workspace <span aria-hidden="true">→</span></a><a class="site-text-link" href="https://github.com/dheerendra7/LOCD-Engine---Local-or-Cloud-Decision-Engine/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">Read the license <span aria-hidden="true">↗</span></a></div>
+      </section>
+    </main>
+    <footer class="site-footer"><a class="site-brand" href="#home" data-public-top><span class="site-brand-mark" aria-hidden="true">L</span><span>LOCD</span></a><span>Infrastructure placement decisions, made explainable.</span><div><a href="https://github.com/dheerendra7/LOCD-Engine---Local-or-Cloud-Decision-Engine" target="_blank" rel="noopener noreferrer">GitHub ↗</a><a href="https://github.com/dheerendra7/LOCD-Engine---Local-or-Cloud-Decision-Engine/tree/main/docs" target="_blank" rel="noopener noreferrer">Documentation ↗</a></div></footer>
+  </div>
+
   <div class="app-shell">
     <aside class="sidebar" aria-label="Primary navigation">
-      <a class="brand" href="#decision-lab" aria-label="LOCD Engine Decision Studio" style="text-decoration:none">
-        <span class="brand-mark" aria-hidden="true">L.</span>
+      <a class="brand" href="#home" aria-label="LOCD home" style="text-decoration:none">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 36 36" fill="none"><path d="M18 2.8 32 10.6v14.8L18 33.2 4 25.4V10.6L18 2.8Z" stroke="currentColor" stroke-width="1.8"/><path d="M18 18.6v14.6M4 10.6l14 8 14-8" stroke="currentColor" stroke-width="1.8"/></svg></span>
         <span>
-          <span class="brand-name">LOCD Engine</span>
-          <span class="brand-caption" style="display:block">Placement control plane</span>
+          <span class="brand-name">LOCD</span>
+          <span class="brand-caption" style="display:block">Infrastructure decisions</span>
         </span>
       </a>
       <div class="nav-group">
@@ -79,6 +218,7 @@
       <header class="topbar">
         <div class="breadcrumbs"><span>Workspace</span><span aria-hidden="true">/</span><strong id="breadcrumbCurrent">Decision Studio</strong></div>
         <div class="topbar-actions">
+          <a class="btn btn-quiet app-site-link" href="#home">← Website</a>
           <span class="connection-pill" id="connectionPill" data-state="checking"><span class="connection-dot"></span><span id="connectionText">Checking API</span></span>
           <button class="btn btn-secondary" id="refreshAll" type="button" title="Refresh data from the control plane">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9A7 7 0 0 1 18 6l2 6M4 12l2 6a7 7 0 0 0 12.4-3"/></svg>Refresh

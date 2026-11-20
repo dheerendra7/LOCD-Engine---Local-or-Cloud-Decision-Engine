@@ -282,10 +282,11 @@ test("API responses include browser security headers", async () => {
   );
 });
 
-test("light dashboard serves its real stylesheet and script under the browser CSP", async () => {
+test("graphite-red website serves its real stylesheet and script under the browser CSP", async () => {
   const pageResponse = await fetch(baseUrl + "/");
   assert.equal(pageResponse.status, 200);
   const page = await pageResponse.text();
+  assert.match(page, /id="public-site"/);
   assert.match(page, /href="\/styles\.css"/);
   assert.match(page, /<script src="\/app\.js" defer><\/script>/);
 
@@ -293,7 +294,7 @@ test("light dashboard serves its real stylesheet and script under the browser CS
   assert.equal(stylesheetResponse.status, 200);
   assert.match(stylesheetResponse.headers.get("content-type") || "", /^text\/css/);
   assert.match(stylesheetResponse.headers.get("content-security-policy") || "", /style-src 'self'/);
-  assert.match(await stylesheetResponse.text(), /color-scheme:\s*light/);
+  assert.match(await stylesheetResponse.text(), /color-scheme:\s*dark/);
 
   const scriptResponse = await fetch(baseUrl + "/app.js");
   assert.equal(scriptResponse.status, 200);
