@@ -30,19 +30,28 @@ test("decision console calls the read-only simulator endpoint", async () => {
 });
 
 
-test("LOCD website and control plane use the graphite-red responsive design system", async () => {
+test("LOCD public website is a product-led developer platform, not an editorial landing page", async () => {
   const html = await readFile(new URL("index.html", webRoot), "utf8");
   const css = await readFile(new URL("styles.css", webRoot), "utf8");
   const script = await readFile(new URL("app.js", webRoot), "utf8");
   assert.match(html, /id="public-site"/);
-  assert.match(html, /Local or cloud\?/);
-  assert.match(html, /id="siteNav"/);
-  assert.match(css, /color-scheme:\s*dark/);
-  assert.match(css, /--accent:\s*#e3323b/);
-  assert.match(css, /@media\s*\(max-width:\s*640px\)/);
+  assert.match(html, /id="lmHeroTitle"/);
+  assert.match(html, /lm-product-visual/);
+  assert.match(html, /EXAMPLE EVALUATION/);
+  assert.match(html, /id="product"/);
+  assert.match(html, /id="solutions"/);
+  assert.match(html, /id="resources"/);
+  assert.match(html, /POST/);
+  assert.match(html, /\/v1\/decide/);
+  assert.match(html, /local-only/);
+  assert.match(html, /lm-destination-grid/);
+  assert.match(css, /\.lm-product-visual/);
+  assert.match(css, /\.lm-platform-grid/);
+  assert.match(css, /\.lm-developer-grid/);
+  assert.match(css, /@media\s*\(max-width:\s*680px\)/);
   assert.match(script, /initializePublicSiteNavigation/);
   assert.match(script, /app-mode/);
-  assert.doesNotMatch(css, /color-scheme:\s*light/);
+  assert.doesNotMatch(html, /Trusted by Developers|Loved by teams|10,000\+/);
 });
 
 test("control-plane navigation exposes real operational workflows", async () => {

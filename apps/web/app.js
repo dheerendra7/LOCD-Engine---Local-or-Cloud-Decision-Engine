@@ -2261,7 +2261,7 @@ apiLabSelectEndpoint();
 
 // Public website / product workspace routing. Existing workspace hash routes remain unchanged.
 (function initializePublicSiteNavigation() {
-  const publicRoutes = new Set(["", "home", "product", "solutions", "resources", "pricing"]);
+  const publicRoutes = new Set(["", "home", "product", "solutions", "resources"]);
   const siteNav = document.querySelector("#siteNav");
   const menuToggle = document.querySelector("#siteMenuToggle");
 
