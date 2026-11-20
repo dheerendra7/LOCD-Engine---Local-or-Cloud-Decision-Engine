@@ -30,14 +30,19 @@ test("decision console calls the read-only simulator endpoint", async () => {
 });
 
 
-test("LOCD control plane uses a light-only responsive design system", async () => {
+test("LOCD website and control plane use the graphite-red responsive design system", async () => {
   const html = await readFile(new URL("index.html", webRoot), "utf8");
   const css = await readFile(new URL("styles.css", webRoot), "utf8");
-  assert.match(html, /href="\/styles\.css"/);
-  assert.match(css, /color-scheme:\s*light/);
-  assert.match(css, /@media\s*\(max-width:\s*920px\)/);
+  const script = await readFile(new URL("app.js", webRoot), "utf8");
+  assert.match(html, /id="public-site"/);
+  assert.match(html, /Local or cloud\?/);
+  assert.match(html, /id="siteNav"/);
+  assert.match(css, /color-scheme:\s*dark/);
+  assert.match(css, /--accent:\s*#e3323b/);
   assert.match(css, /@media\s*\(max-width:\s*640px\)/);
-  assert.doesNotMatch(css, /color-scheme:\s*dark/);
+  assert.match(script, /initializePublicSiteNavigation/);
+  assert.match(script, /app-mode/);
+  assert.doesNotMatch(css, /color-scheme:\s*light/);
 });
 
 test("control-plane navigation exposes real operational workflows", async () => {
