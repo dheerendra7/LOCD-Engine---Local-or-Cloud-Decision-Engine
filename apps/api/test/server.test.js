@@ -3604,20 +3604,23 @@ test("server provider config loads native Ollama adapter into the target registr
 });
 
 
-test("readiness endpoint reports public service readiness", async () => {
+test("readiness endpoint reports service readiness and safe deployment configuration", async () => {
   const response = await fetch(baseUrl + "/ready");
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), {
-    status: "ready",
-    service: "locd-api",
-    version: "0.1.0",
-    checks: {
-      telemetry: "ok",
-      targets: "ok",
-      policies: "ok",
-      coordination: "not_configured"
-    }
+  const body = await response.json();
+  assert.equal(body.status, "ready");
+  assert.equal(body.service, "locd-api");
+  assert.equal(body.version, "0.1.0");
+  assert.deepEqual(body.checks, {
+    telemetry: "ok",
+    targets: "ok",
+    policies: "ok",
+    coordination: "not_configured"
   });
+  assert.equal(body.deployment.productionReady, false);
+  assert.equal(body.deployment.status, "needs-configuration");
+  assert.ok(body.deployment.blockers.some(item => item.code === "api_authentication_disabled"));
+  assert.equal(body.deployment.execution.liveEnabled, false);
 });
 
 test("status endpoint exposes explicit backend capability metadata", async () => {
