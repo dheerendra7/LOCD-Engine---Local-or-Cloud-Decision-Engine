@@ -181,26 +181,38 @@ function weightedScore(factors, weights) {
   );
 }
 
+function finiteNonNegativeRange(items, readValue) {
+  let minimum = Infinity;
+  let maximum = -Infinity;
+
+  for (const item of items) {
+    const value = readValue(item);
+    if (!Number.isFinite(value) || value < 0) continue;
+    if (value < minimum) minimum = value;
+    if (value > maximum) maximum = value;
+  }
+
+  return minimum === Infinity ? null : { minimum, maximum };
+}
+
 function applyRelativeLatencyScoring(candidates, request) {
   // An explicit budget already gives latency a meaningful absolute reference.
   if (request.constraints.latencyBudgetMs !== null) return;
 
-  const measured = candidates.filter(candidate =>
-    Number.isFinite(candidate.estimatedLatencyMs) &&
-    candidate.estimatedLatencyMs >= 0
+  const range = finiteNonNegativeRange(
+    candidates,
+    candidate => candidate.estimatedLatencyMs
   );
-  if (measured.length < 2) return;
+  if (!range || range.maximum <= range.minimum) return;
 
-  const latencies = measured.map(candidate => candidate.estimatedLatencyMs);
-  const minimum = Math.min(...latencies);
-  const maximum = Math.max(...latencies);
-  if (maximum <= minimum) return;
+  const denominator = range.maximum - range.minimum;
+  // Keep only known, non-negative latency estimates in the relative scale.
+  for (const candidate of candidates) {
+    const latency = candidate.estimatedLatencyMs;
+    if (!Number.isFinite(latency) || latency < 0) continue;
 
-  // Without a budget, compare known estimates only across eligible,
-  // measured candidates. Unknown latency never distorts the scale.
-  for (const candidate of measured) {
     candidate.factors.latency = clamp(
-      (maximum - candidate.estimatedLatencyMs) / (maximum - minimum)
+      (range.maximum - latency) / denominator
     );
     candidate.score = weightedScore(candidate.factors, request.policy.weights);
   }
@@ -210,22 +222,20 @@ function applyRelativeCostScoring(candidates, request) {
   // An explicit budget already gives cost a meaningful absolute reference.
   if (request.constraints.maxCostUsd !== null) return;
 
-  const priced = candidates.filter(candidate =>
-    Number.isFinite(candidate.costEstimate?.usd) &&
-    candidate.costEstimate.usd >= 0
+  const range = finiteNonNegativeRange(
+    candidates,
+    candidate => candidate.costEstimate?.usd
   );
-  if (priced.length < 2) return;
+  if (!range || range.maximum <= range.minimum) return;
 
-  const costs = priced.map(candidate => candidate.costEstimate.usd);
-  const minimum = Math.min(...costs);
-  const maximum = Math.max(...costs);
-  if (maximum <= minimum) return;
+  const denominator = range.maximum - range.minimum;
+  // Compare known prices only; missing estimates never distort the scale.
+  for (const candidate of candidates) {
+    const cost = candidate.costEstimate?.usd;
+    if (!Number.isFinite(cost) || cost < 0) continue;
 
-  // Without a budget, compare known prices only against other eligible,
-  // priced candidates. Unknown estimates never distort the scale.
-  for (const candidate of priced) {
     candidate.factors.cost = clamp(
-      (maximum - candidate.costEstimate.usd) / (maximum - minimum)
+      (range.maximum - cost) / denominator
     );
     candidate.score = weightedScore(candidate.factors, request.policy.weights);
   }
