@@ -282,7 +282,7 @@ test("API responses include browser security headers", async () => {
   );
 });
 
-test("graphite-red website serves its real stylesheet and script under the browser CSP", async () => {
+test("light-mode LOCD website serves its real stylesheet and script under the browser CSP", async () => {
   const pageResponse = await fetch(baseUrl + "/");
   assert.equal(pageResponse.status, 200);
   const page = await pageResponse.text();
@@ -294,7 +294,7 @@ test("graphite-red website serves its real stylesheet and script under the brows
   assert.equal(stylesheetResponse.status, 200);
   assert.match(stylesheetResponse.headers.get("content-type") || "", /^text\/css/);
   assert.match(stylesheetResponse.headers.get("content-security-policy") || "", /style-src 'self'/);
-  assert.match(await stylesheetResponse.text(), /color-scheme:\s*dark/);
+  assert.match(await stylesheetResponse.text(), /color-scheme:\s*light/);
 
   const scriptResponse = await fetch(baseUrl + "/app.js");
   assert.equal(scriptResponse.status, 200);
