@@ -841,6 +841,7 @@ export function createServer({
         targetId,
         tenantId: probeTenantId = "default",
         status,
+        snapshot,
         probeContext
       }) => {
         if (!targetId || (status !== "success" && status !== "failed")) return;
@@ -869,6 +870,25 @@ export function createServer({
             status,
             errorClass: error instanceof Error ? error.constructor.name : "unknown_error"
           });
+        }
+
+        // Keep durable target state in sync with the result of background probes.
+        // A thrown provider error has no trustworthy snapshot and is not persisted.
+        if (snapshot && (targetStore || targetFile)) {
+          try {
+            if (targetStore) {
+              await targetStore.upsert(probeTenantId, snapshot);
+            } else {
+              await targetRegistry.saveToFile(targetFile);
+            }
+          } catch (error) {
+            logger.warn({
+              event: "scheduled_probe_snapshot_persist_failed",
+              tenantId: probeTenantId,
+              targetId,
+              errorClass: error instanceof Error ? error.constructor.name : "unknown_error"
+            });
+          }
         }
       }
     });
