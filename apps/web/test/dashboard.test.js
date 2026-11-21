@@ -1219,3 +1219,15 @@ test("API Lab inspector formats response headers and supports accessible keyboar
   assert.match(script, /event\.key === "End"/);
   assert.match(script, /button\.tabIndex = active \? 0 : -1/);
 });
+
+
+test("LOCD public site and console share one legible typography system", async () => {
+  const css = await readFile(new URL("styles.css", webRoot), "utf8");
+  assert.match(css, /--font-sans:\s*"Segoe UI Variable", Inter/);
+  assert.match(css, /html, body, button, input, select, textarea\s*\{[^}]*font-family:\s*var\(--font-sans\)/s);
+  assert.match(css, /\.locd-marketing, \.app-shell\s*\{\s*font-family:\s*var\(--font-sans\)/);
+  assert.match(css, /\.lm-hero h1\s*\{[^}]*font-weight:\s*700/s);
+  assert.match(css, /\.app-shell h1\s*\{[^}]*font-weight:\s*700/s);
+  assert.match(css, /\.lm-product-visual :where\([^}]*font-size:\s*9px/s);
+  assert.match(css, /\.app-shell \.data-table\s*\{\s*font-size:\s*12px/);
+});
