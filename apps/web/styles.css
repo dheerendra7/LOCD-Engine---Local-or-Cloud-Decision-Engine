@@ -1726,7 +1726,7 @@ code, summary { color: var(--ink-soft); }
 .lm-workload-bar span { color: var(--lm-dim); font-size: 8px; }
 .lm-workload-bar b { color: var(--lm-text); font-size: 10px; }
 .lm-criteria-panel, .lm-decision-panel { border-color: var(--lm-line); border-radius: 8px; background: #f9f8f2; }
-.lm-panel-heading b { color: var(--lm- text, #3e4038); font-size: 9px; }
+.lm-panel-heading b { color: var(--lm-text, #3e4038); font-size: 9px; }
 .lm-panel-heading span { color: var(--lm-dim); font-size: 8px; }
 .lm-criteria-row { border-top-color: #e5e3d9; }
 .lm-criteria-row span, .lm-criteria-row b { color: var(--lm-copy); font-size: 8px; }
