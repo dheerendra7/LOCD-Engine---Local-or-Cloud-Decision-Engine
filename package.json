@@ -18,5 +18,8 @@
     "node": ">=22.16.0 <25.0.0"
   },
   "license": "MIT",
-  "packageManager": "npm@11"
+  "packageManager": "npm@11",
+  "dependencies": {
+    "postgres": "3.4.9"
+  }
 }

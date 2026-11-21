@@ -29,6 +29,7 @@ import { createExecutionPlanAuthorizer } from "../../../packages/execution/src/i
 import { loadProvidersFromFile } from "../../../packages/providers/src/index.js";
 import { loadScopedAuthFromEnv } from "../../../packages/auth/src/index.js";
 import { createSQLiteStateStores } from "../../../packages/sqlite/src/index.js";
+import { createPostgresStateStores } from "../../../packages/postgres/src/index.js";
 import { createHTTPCoordinationStore } from "../../../packages/state-client/src/index.js";
 import {
   assertDecisionStore,
@@ -433,11 +434,14 @@ export async function createConfiguredTargetRegistry({
   targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null,
   providerFile = process.env.LOCD_PROVIDERS_FILE?.trim() || null,
   env = process.env,
-  fetchImpl = globalThis.fetch
+  fetchImpl = globalThis.fetch,
+  targetStore = null
 } = {}) {
   const targetRegistry = createTenantTargetRegistry();
 
-  if (targetFile) {
+  if (targetStore) {
+    await targetStore.loadInto(targetRegistry);
+  } else if (targetFile) {
     await targetRegistry.loadFromFile(targetFile);
   }
 
@@ -462,6 +466,7 @@ export function buildDeploymentReport({
   decisionStore = null,
   policyStore = null,
   targetFile = null,
+  targetStore = null,
   coordinationStore = null,
   telemetryBackend = "process-local",
   policyBackend = "process-local",
@@ -471,7 +476,8 @@ export function buildDeploymentReport({
 } = {}) {
   const telemetryDurable = decisionStore?.capabilities?.durable === true;
   const policyDurable = policyStore?.capabilities?.durable === true;
-  const targetsFileConfigured = Boolean(targetFile);
+  const targetsPersistent = Boolean(targetStore?.capabilities?.durable || targetFile);
+  const targetsBackend = targetStore?.capabilities?.backend || (targetFile ? "file" : "process-local");
   const coordinationShared = coordinationStore?.capabilities?.shared === true;
   const coordinationDurable = coordinationStore?.capabilities?.durable === true;
   const blockers = [];
@@ -490,14 +496,14 @@ export function buildDeploymentReport({
   if (!telemetryDurable) blockers.push({
     code: "telemetry_not_durable",
     message: "Decision telemetry is not backed by durable storage.",
-    action: "Configure a persistent SQLite state file or a durable network State Service."
+    action: "Configure LOCD_DATABASE_URL for managed PostgreSQL, or a persistent SQLite/State Service backend."
   });
   if (!policyDurable) blockers.push({
     code: "policies_not_durable",
     message: "Policy state is not backed by durable storage.",
     action: "Configure a durable policy backend before relying on saved company policies."
   });
-  if (!targetsFileConfigured) blockers.push({
+  if (!targetsPersistent) blockers.push({
     code: "target_registry_not_persistent",
     message: "The target registry has no persistence file configured.",
     action: "Configure LOCD_TARGETS_FILE on persistent storage before relying on registered targets."
@@ -547,8 +553,9 @@ export function buildDeploymentReport({
       telemetry: { backend: telemetryBackend, durable: telemetryDurable },
       policies: { backend: policyBackend, durable: policyDurable },
       targets: {
-        backend: targetsFileConfigured ? "file" : "process-local",
-        fileConfigured: targetsFileConfigured
+        backend: targetsBackend,
+        persistent: targetsPersistent,
+        fileConfigured: Boolean(targetFile)
       },
       coordination: {
         backend: coordinationBackend,
@@ -632,6 +639,7 @@ export function createServer({
   decisionStore = createDecisionStore({ maxEntries: 1000 }),
   targetRegistry = createTenantTargetRegistry(),
   targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null,
+  targetStore = null,
   policyStore = createPolicyStore(),
   idempotencyStore = null,
   coordinationStore = null,
@@ -890,6 +898,7 @@ export function createServer({
     decisionStore,
     policyStore,
     targetFile,
+    targetStore,
     coordinationStore,
     telemetryBackend: telemetryBackendName,
     policyBackend: policyBackendName,
@@ -1779,8 +1788,9 @@ export function createServer({
         }
 
         const target = await requestRegistry.register(body);
-        if (targetFile) await targetRegistry.saveToFile(targetFile);
         const responseBody = await target.getSnapshot();
+        if (targetStore) await targetStore.upsert(tenantId, responseBody);
+        else if (targetFile) await targetRegistry.saveToFile(targetFile);
         await rememberResponse(body, 201, responseBody);
         sendJson(res, 201, responseBody);
         return;
@@ -1845,7 +1855,8 @@ export function createServer({
               targetId: id
             });
           }
-          if (targetFile) await targetRegistry.saveToFile(targetFile);
+          if (targetStore) await targetStore.upsert(tenantId, snapshot);
+          else if (targetFile) await targetRegistry.saveToFile(targetFile);
           await rememberResponse(body, 200, snapshot);
           sendJson(res, 200, snapshot);
         } catch (error) {
@@ -1894,7 +1905,8 @@ export function createServer({
 
         try {
           const updated = await requestRegistry.heartbeat(id, body);
-          if (targetFile) await targetRegistry.saveToFile(targetFile);
+          if (targetStore) await targetStore.upsert(tenantId, updated);
+          else if (targetFile) await targetRegistry.saveToFile(targetFile);
           await rememberResponse(body, 200, updated);
           sendJson(res, 200, updated);
         } catch (error) {
@@ -1922,7 +1934,8 @@ export function createServer({
           sendJson(res, 404, { error: "target_not_found" });
           return;
         }
-        if (targetFile) await targetRegistry.saveToFile(targetFile);
+        if (targetStore) await targetStore.remove(tenantId, id);
+        else if (targetFile) await targetRegistry.saveToFile(targetFile);
         sendJson(res, 200, { removed: id });
         return;
       }
@@ -2016,7 +2029,7 @@ export function createServer({
               executionPlanAuthorizer && coordinationStore?.capabilities?.shared === true
             ),
             liveExecutionRequiresSignedPlan: true,
-            persistentTargets: Boolean(targetFile),
+            persistentTargets: Boolean(targetStore?.capabilities?.durable || targetFile),
             persistentTelemetry: decisionStore?.capabilities?.durable === true,
             automaticProbing: Boolean(probeScheduler?.isRunning?.()),
             calibrationEnabled: Boolean(calibrationEnabled),
@@ -2170,6 +2183,7 @@ const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPat
 
 if (isMain) {
   const port = Number(process.env.PORT || 8787);
+  const databaseUrl = process.env.LOCD_DATABASE_URL?.trim() || null;
   const targetFile = process.env.LOCD_TARGETS_FILE?.trim() || null;
   const telemetryFile = process.env.LOCD_TELEMETRY_FILE?.trim() || null;
   const stateDbFile = process.env.LOCD_STATE_DB_FILE?.trim() || null;
@@ -2179,16 +2193,26 @@ if (isMain) {
   const coordinationApiKey = process.env.LOCD_COORDINATION_API_KEY?.trim() || null;
   const providerFile = process.env.LOCD_PROVIDERS_FILE?.trim() || null;
   const policyFile = process.env.LOCD_POLICIES_FILE?.trim() || null;
+
+  const postgresState = databaseUrl
+    ? await createPostgresStateStores({
+        connectionString: databaseUrl,
+        maxEntries: 5000,
+        maxVersionsPerPolicy: 20
+      })
+    : null;
+  const targetStore = postgresState?.targets || null;
   const targetRegistry = await createConfiguredTargetRegistry({
-    targetFile,
-    providerFile
+    targetFile: postgresState ? null : targetFile,
+    providerFile,
+    targetStore
   });
 
-  const stateStores = stateDbFile
+  const stateStores = postgresState || (stateDbFile
     ? createSQLiteStateStores({ filePath: stateDbFile, maxEntries: 5000 })
-    : null;
+    : null);
 
-  const networkState = !stateDbFile && stateServiceUrl
+  const networkState = !postgresState && !stateDbFile && stateServiceUrl
     ? createHTTPStateStores({
         baseUrl: stateServiceUrl,
         apiKey: stateServiceApiKey,
@@ -2227,30 +2251,37 @@ if (isMain) {
       : createPolicyStore());
 
   const server = createServer({
-    targetFile,
+    targetFile: postgresState ? null : targetFile,
+    targetStore,
     targetRegistry,
     policyStore,
     decisionStore,
     logger,
     probeScheduler,
     coordinationStore,
-    coordinationBackend: stateDbFile
-      ? "sqlite"
-      : (coordinationUrl || stateServiceUrl)
-        ? "network"
-        : "process-local",
-    telemetryBackend: stateDbFile
-      ? "sqlite"
-      : (stateServiceUrl || telemetryFile)
-        ? (stateServiceUrl ? "network" : "file")
-        : "process-local",
-    policyBackend: stateDbFile
-      ? "sqlite"
-      : stateServiceUrl
-        ? "network"
-        : policyFile
-          ? "file"
+    coordinationBackend: postgresState
+      ? "postgres"
+      : stateDbFile
+        ? "sqlite"
+        : (coordinationUrl || stateServiceUrl)
+          ? "network"
           : "process-local",
+    telemetryBackend: postgresState
+      ? "postgres"
+      : stateDbFile
+        ? "sqlite"
+        : (stateServiceUrl || telemetryFile)
+          ? (stateServiceUrl ? "network" : "file")
+          : "process-local",
+    policyBackend: postgresState
+      ? "postgres"
+      : stateDbFile
+        ? "sqlite"
+        : stateServiceUrl
+          ? "network"
+          : policyFile
+            ? "file"
+            : "process-local",
     executionEnabled: process.env.LOCD_EXECUTION_ENABLED === "true"
   });
 
@@ -2258,7 +2289,10 @@ if (isMain) {
     server,
     probeScheduler,
     logger,
-    onClosed: () => stateStores?.close()
+    onClosed: async () => {
+      if (postgresState) await postgresState.close();
+      else stateStores?.close();
+    }
   });
 
   process.once("SIGTERM", () => { void shutdown("SIGTERM"); });
