@@ -2370,6 +2370,65 @@ test("configured probe scheduler emits normalized probe logs", async () => {
   assert.equal(logs[0].latencyMs, 31);
 });
 
+test("scheduled probe snapshots are persisted with tenant scope", async () => {
+  const targetRegistry = createTenantTargetRegistry();
+  const targetId = "scheduled-persistence-target";
+  let current = {
+    id: targetId,
+    mode: "private",
+    available: true,
+    health: 0.9,
+    estimatedLatencyMs: 40
+  };
+  targetRegistry.forTenant("acme").register({
+    id: targetId,
+    async getSnapshot() {
+      return structuredClone(current);
+    },
+    async setSnapshot(snapshot) {
+      current = { ...current, ...snapshot };
+      return structuredClone(current);
+    },
+    async probe() {
+      return {
+        ...current,
+        available: false,
+        health: 0.2,
+        estimatedLatencyMs: 250
+      };
+    }
+  });
+
+  const writes = [];
+  const targetStore = {
+    capabilities: {
+      durable: true,
+      shared: true,
+      backend: "test"
+    },
+    async upsert(tenantId, snapshot) {
+      writes.push({ tenantId, snapshot: structuredClone(snapshot) });
+    }
+  };
+  const probeScheduler = createConfiguredProbeScheduler({
+    registry: targetRegistry,
+    intervalMs: 1_000,
+    logger: { info() {}, warn() {} }
+  });
+
+  createServer({ targetRegistry, targetStore, probeScheduler });
+  const results = await probeScheduler.runOnce();
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0].status, "failed");
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].tenantId, "acme");
+  assert.equal(writes[0].snapshot.id, targetId);
+  assert.equal(writes[0].snapshot.available, false);
+  assert.equal(writes[0].snapshot.health, 0.2);
+  assert.equal(writes[0].snapshot.estimatedLatencyMs, 250);
+});
+
 test("dry-run execution works through the public API", async () => {
   const executionServer = createServer({
     targetRegistry: createTargetRegistry([{
