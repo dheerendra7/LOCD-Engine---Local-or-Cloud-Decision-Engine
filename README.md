@@ -58,6 +58,13 @@ Requirements: Node.js >=22.16.0 <25.0.0. CI tests Node.js 22 and 24.
 
 Then open http://localhost:8787/.
 
+Public deployment diagnostics:
+
+    GET /capabilities
+    GET /ready
+
+Check `/capabilities` before integrating to confirm authentication headers, active storage backends, durability, execution availability and production-readiness blockers. A healthy `/ready` response is a traffic-readiness signal, not a production certification.
+
 Decision endpoint:
 
     POST /v1/decide

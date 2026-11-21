@@ -6,6 +6,33 @@ info:
 servers:
   - url: http://localhost:8787
 paths:
+  /capabilities:
+    get:
+      summary: Public deployment capabilities
+      description: Returns safe configuration and production-readiness information without exposing credentials or tenant data.
+      responses:
+        "200":
+          description: Deployment capability and readiness report
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [service, version, profile, productionReady, authentication, storage, execution]
+                properties:
+                  service: {type: string}
+                  version: {type: string}
+                  profile: {type: string}
+                  status: {type: string, enum: [production-ready, preview, needs-configuration]}
+                  productionReady: {type: boolean}
+                  blockers:
+                    type: array
+                    items: {$ref: "#/components/schemas/ReadinessItem"}
+                  warnings:
+                    type: array
+                    items: {$ref: "#/components/schemas/ReadinessItem"}
+                  authentication: {type: object}
+                  storage: {type: object}
+                  execution: {type: object}
   /ready:
     get:
       summary: Readiness probe
@@ -663,6 +690,13 @@ components:
         targetUtilization: {type: [number, "null"], minimum: 0, maximum: 1}
         errorClass: {type: string}
         timestamp: {type: string, format: date-time}
+    ReadinessItem:
+      type: object
+      required: [code, message]
+      properties:
+        code: {type: string}
+        message: {type: string}
+        action: {type: string}
     Readiness:
       type: object
       required: [status, service, version, checks]
@@ -679,6 +713,9 @@ components:
           additionalProperties:
             type: string
             enum: [ok, failed, not_configured]
+        deployment:
+          type: object
+          description: Safe production-readiness report; ready does not imply durable or production-ready operation.
 
     Health:
       type: object
@@ -688,7 +725,7 @@ components:
         version: {type: string}
 
 # Authentication note: when LOCD_API_KEY is configured, all /v1 operations
-# require bearerAuth or apiKeyHeader. /health remains public.
+# require bearerAuth or apiKeyHeader. /health, /ready and /capabilities remain public.
 
 # Authorization scopes
 # read: GET /v1/*

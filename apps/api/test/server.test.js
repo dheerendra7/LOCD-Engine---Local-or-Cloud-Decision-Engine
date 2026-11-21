@@ -1,7 +1,7 @@
 import http from "node:http";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { checkReadiness, readBody, createConfiguredExecutionRegistry, createConfiguredProbeScheduler, createConfiguredTargetRegistry, createGracefulShutdown, createServer } from "../src/server.js";
+import { buildDeploymentReport, checkReadiness, readBody, createConfiguredExecutionRegistry, createConfiguredProbeScheduler, createConfiguredTargetRegistry, createGracefulShutdown, createServer } from "../src/server.js";
 import { createDecisionStore, createFileDecisionStore } from "../../../packages/telemetry/src/index.js";
 import { createCalibrator } from "../../../packages/calibration/src/index.js";
 import { createPolicyStore } from "../../../packages/policy-store/src/index.js";
@@ -508,6 +508,60 @@ test("health endpoint reports service readiness", async () => {
     service: "locd-api",
     version: "0.1.0"
   });
+});
+
+test("capabilities endpoint is public and explains configuration without exposing secrets", async () => {
+  const response = await fetch(baseUrl + "/capabilities");
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.service, "locd-api");
+  assert.equal(body.authentication.required, false);
+  assert.deepEqual(body.authentication.methods, [
+    "Authorization: Bearer <api-key>",
+    "X-LOCD-API-Key: <api-key>"
+  ]);
+  assert.equal(body.storage.telemetry.durable, false);
+  assert.equal(body.storage.policies.durable, false);
+  assert.equal(body.storage.targets.fileConfigured, false);
+  assert.equal(body.execution.liveEnabled, false);
+  assert.equal(body.productionReady, false);
+  assert.ok(body.blockers.some(item => item.code === "api_authentication_disabled"));
+  assert.doesNotMatch(JSON.stringify(body), /secret|token|apiKeyValue/i);
+});
+
+test("deployment report requires explicit safeguards before declaring production readiness", () => {
+  const durableStore = { capabilities: { durable: true, shared: true } };
+  const report = buildDeploymentReport({
+    deploymentProfile: "self-hosted",
+    authEnabled: true,
+    rateLimitEnabled: true,
+    decisionStore: durableStore,
+    policyStore: durableStore,
+    targetFile: "/var/lib/locd/targets.json",
+    coordinationStore: durableStore,
+    telemetryBackend: "sqlite",
+    policyBackend: "sqlite",
+    coordinationBackend: "sqlite"
+  });
+  assert.equal(report.productionReady, true);
+  assert.equal(report.status, "production-ready");
+  assert.deepEqual(report.blockers, []);
+  assert.equal(report.storage.telemetry.durable, true);
+  assert.equal(report.storage.coordination.shared, true);
+});
+
+test("free preview profile is never reported as production-ready", () => {
+  const report = buildDeploymentReport({
+    deploymentProfile: "free-preview",
+    authEnabled: true,
+    rateLimitEnabled: true,
+    decisionStore: { capabilities: { durable: true } },
+    policyStore: { capabilities: { durable: true } },
+    targetFile: "/tmp/targets.json"
+  });
+  assert.equal(report.productionReady, false);
+  assert.equal(report.status, "preview");
+  assert.ok(report.blockers.some(item => item.code === "preview_environment"));
 });
 
 test("readiness probe reports dependency health", async () => {
@@ -1334,7 +1388,10 @@ test("configured API key protects v1 endpoints while health remains public", asy
 
     const missing = await fetch(protectedBaseUrl + "/v1/policies");
     assert.equal(missing.status, 401);
-    assert.deepEqual(await missing.json(), { error: "unauthorized" });
+    const missingBody = await missing.json();
+    assert.equal(missingBody.error, "unauthorized");
+    assert.match(missingBody.message, /Authorization: Bearer/);
+    assert.equal(missingBody.requestId, missing.headers.get("x-request-id"));
 
     const wrong = await fetch(protectedBaseUrl + "/v1/policies", {
       headers: { authorization: "Bearer wrong-key" }
@@ -3268,7 +3325,10 @@ test("scoped API keys enforce route permissions", async () => {
       })
     });
     assert.equal(readDecide.status, 403);
-    assert.deepEqual(await readDecide.json(), { error: "insufficient_scope" });
+    const readDecideBody = await readDecide.json();
+    assert.equal(readDecideBody.error, "insufficient_scope");
+    assert.equal(readDecideBody.requiredScope, "decide");
+    assert.equal(readDecideBody.requestId, readDecide.headers.get("x-request-id"));
 
     const decide = await fetch(url + "/v1/decide", {
       method: "POST",
@@ -3295,7 +3355,10 @@ test("scoped API keys enforce route permissions", async () => {
       headers: { authorization: "Bearer decider-secret" }
     });
     assert.equal(targetRead.status, 403);
-    assert.deepEqual(await targetRead.json(), { error: "insufficient_scope" });
+    const targetReadBody = await targetRead.json();
+    assert.equal(targetReadBody.error, "insufficient_scope");
+    assert.equal(targetReadBody.requiredScope, "read");
+    assert.equal(targetReadBody.requestId, targetRead.headers.get("x-request-id"));
 
     const outcome = await fetch(url + "/v1/outcomes", {
       method: "POST",
@@ -3382,7 +3445,10 @@ test("live execution requires execute scope and a planner-issued authorization",
       body: JSON.stringify({ plan, mode: "live" })
     });
     assert.equal(denied.status, 403);
-    assert.deepEqual(await denied.json(), { error: "insufficient_scope" });
+    const deniedBody = await denied.json();
+    assert.equal(deniedBody.error, "insufficient_scope");
+    assert.equal(deniedBody.requiredScope, "execute");
+    assert.equal(deniedBody.requestId, denied.headers.get("x-request-id"));
 
     const executorHeaders = {
       authorization: "Bearer executor-secret",
@@ -3538,20 +3604,23 @@ test("server provider config loads native Ollama adapter into the target registr
 });
 
 
-test("readiness endpoint reports public service readiness", async () => {
+test("readiness endpoint reports service readiness and safe deployment configuration", async () => {
   const response = await fetch(baseUrl + "/ready");
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), {
-    status: "ready",
-    service: "locd-api",
-    version: "0.1.0",
-    checks: {
-      telemetry: "ok",
-      targets: "ok",
-      policies: "ok",
-      coordination: "not_configured"
-    }
+  const body = await response.json();
+  assert.equal(body.status, "ready");
+  assert.equal(body.service, "locd-api");
+  assert.equal(body.version, "0.1.0");
+  assert.deepEqual(body.checks, {
+    telemetry: "ok",
+    targets: "ok",
+    policies: "ok",
+    coordination: "not_configured"
   });
+  assert.equal(body.deployment.productionReady, false);
+  assert.equal(body.deployment.status, "needs-configuration");
+  assert.ok(body.deployment.blockers.some(item => item.code === "api_authentication_disabled"));
+  assert.equal(body.deployment.execution.liveEnabled, false);
 });
 
 test("status endpoint exposes explicit backend capability metadata", async () => {
