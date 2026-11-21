@@ -12,7 +12,8 @@
     "lint": "node scripts/lint.mjs",
     "start:state": "node apps/state-service/src/server.js",
     "dev:state": "node --watch apps/state-service/src/server.js",
-    "state:backup": "node packages/cli/bin/locd.mjs backup"
+    "state:backup": "node packages/cli/bin/locd.mjs backup",
+    "bench:decision": "node scripts/bench-decision.mjs"
   },
   "engines": {
     "node": ">=22.16.0 <25.0.0"
