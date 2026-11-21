@@ -60,4 +60,4 @@ jobs:
           done
           exit 1
       - name: Decision benchmark smoke
-        run: node scripts/bench-decision.mjs 100 1000
+        run: node scripts/bench-decision.mjs 100 1000 5000
