@@ -820,10 +820,10 @@ test("workspace navigation shows one page at a time and maps nested links to the
 
 test("dashboard text and status colors meet WCAG AA contrast targets", async () => {
   const css = await readFile(new URL("styles.css", webRoot), "utf8");
-  const root = css.match(/:root\s*\{([\s\S]*?)\}/);
-  assert.ok(root, "design tokens should be defined in :root");
+  const rootBlocks = [...css.matchAll(/:root\s*\{([\s\S]*?)\}/g)];
+  assert.ok(rootBlocks.length > 0, "design tokens should be defined in :root blocks");
   const tokens = Object.fromEntries(
-    [...root[1].matchAll(/(--[a-z-]+)\s*:\s*(#[0-9a-fA-F]{6})/g)]
+    rootBlocks.flatMap(root => [...root[1].matchAll(/(--[a-z-]+)\s*:\s*(#[0-9a-fA-F]{6})/g)])
       .map(match => [match[1], match[2]])
   );
   const luminance = hex => {
