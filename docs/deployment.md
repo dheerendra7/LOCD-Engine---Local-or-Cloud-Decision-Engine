@@ -147,9 +147,24 @@ The API and internal State Service allow `LOCD_SHUTDOWN_TIMEOUT_MS` (default 10 
 
 The application handles SIGTERM/SIGINT and stops the probe scheduler before closing the HTTP listener.
 
+## Managed PostgreSQL state backend
+
+Set `LOCD_DATABASE_URL` to a managed PostgreSQL connection string to use one shared database for:
+
+- tenant-scoped decision telemetry and outcome feedback
+- versioned tenant policies and rollback history
+- atomic coordination keys used by rate limiting, idempotency and circuit-breaker state
+- registered target snapshots
+
+The PostgreSQL backend runs versioned, advisory-lock-protected schema migrations at startup. Writes use parameterized queries and transactions; the database enforces tenant-qualified keys for decisions, policies and targets. The API restores registered target snapshots at startup and persists registration, heartbeat, probe and removal changes.
+
+`LOCD_DATABASE_URL` takes precedence over `LOCD_STATE_DB_FILE`, `LOCD_STATE_SERVICE_URL`, `LOCD_COORDINATION_URL`, `LOCD_TELEMETRY_FILE`, `LOCD_POLICIES_FILE` and `LOCD_TARGETS_FILE`. Keep the connection string server-side only. Use a private network connection where your database provider supports it, TLS when required by the provider, least-privilege credentials, automated backups, and a tested restore procedure. The adapter defaults to a bounded connection pool; tune `LOCD_DATABASE_POOL_MAX`, `LOCD_DATABASE_IDLE_TIMEOUT_SECONDS` and `LOCD_DATABASE_CONNECT_TIMEOUT_SECONDS` to match the database connection budget.
+
+For company workloads, use a paid database plan with backups and point-in-time recovery. A disposable preview database is not a production data strategy. The Render Free Postgres plan is limited to 1 GB, expires after 30 days, has no backups, and does not support managed connection pooling; do not attach it to production or customer-critical data. Render's Free web services also cannot attach persistent disks. See https://render.com/docs/free.
+
 ## SQLite state backend
 
-Set LOCD_STATE_DB_FILE to a persistent SQLite database path to enable durable decision telemetry and shared coordination from one LOCD host. The SQLite path uses Node's built-in node:sqlite, WAL mode and a busy timeout for concurrent writers. It is appropriate for a single host or deployment that provides a reliable shared filesystem. It is not a network database for unrelated hosts.
+Set LOCD_STATE_DB_FILE to a persistent SQLite database path to enable durable decision telemetry and shared coordination from one LOCD host. For multi-instance or company deployments, prefer the managed PostgreSQL backend described above. The SQLite path uses Node's built-in node:sqlite, WAL mode and a busy timeout for concurrent writers. It is appropriate for a single host or deployment that provides a reliable shared filesystem. It is not a network database for unrelated hosts.
 
 ## SQLite backup and recovery
 
