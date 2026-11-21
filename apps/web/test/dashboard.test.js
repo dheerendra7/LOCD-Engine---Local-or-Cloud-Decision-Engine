@@ -46,8 +46,13 @@ test("LOCD public website is a product-led developer platform, not an editorial 
   assert.match(html, /local-only/);
   assert.match(html, /lm-destination-grid/);
   assert.match(css, /\.lm-product-visual/);
+  assert.match(css, /color-scheme:\s*light/);
+  assert.match(css, /--lm-bg:\s*#ffffff/);
+  assert.match(css, /\.lm-code\s*\{[^}]*background:\s*#fff/);
   assert.match(css, /\.lm-platform-grid/);
   assert.match(css, /\.lm-developer-grid/);
+  assert.match(css, /\.sidebar\s*\{[^}]*background:\s*#f6f8fa/);
+  assert.match(html, /theme-color" content="#ffffff"/);
   assert.match(css, /@media\s*\(max-width:\s*680px\)/);
   assert.match(script, /initializePublicSiteNavigation/);
   assert.match(script, /app-mode/);
