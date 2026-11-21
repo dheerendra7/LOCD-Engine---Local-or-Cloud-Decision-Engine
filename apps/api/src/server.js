@@ -455,6 +455,115 @@ export async function createConfiguredTargetRegistry({
   return targetRegistry;
 }
 
+export function buildDeploymentReport({
+  deploymentProfile = "self-hosted",
+  authEnabled = false,
+  rateLimitEnabled = false,
+  decisionStore = null,
+  policyStore = null,
+  targetFile = null,
+  coordinationStore = null,
+  telemetryBackend = "process-local",
+  policyBackend = "process-local",
+  coordinationBackend = "process-local",
+  executionEnabled = false,
+  executionPlanAuthorizationEnabled = false
+} = {}) {
+  const telemetryDurable = decisionStore?.capabilities?.durable === true;
+  const policyDurable = policyStore?.capabilities?.durable === true;
+  const targetsFileConfigured = Boolean(targetFile);
+  const coordinationShared = coordinationStore?.capabilities?.shared === true;
+  const coordinationDurable = coordinationStore?.capabilities?.durable === true;
+  const blockers = [];
+  const warnings = [];
+
+  if (!authEnabled) blockers.push({
+    code: "api_authentication_disabled",
+    message: "API-key authentication is not enabled.",
+    action: "Configure LOCD_API_KEY or scoped keys with LOCD_API_KEYS_JSON."
+  });
+  if (!rateLimitEnabled) blockers.push({
+    code: "api_rate_limit_disabled",
+    message: "API rate limiting is not enabled.",
+    action: "Configure LOCD_RATE_LIMIT_RPM and verify the limit for your expected traffic."
+  });
+  if (!telemetryDurable) blockers.push({
+    code: "telemetry_not_durable",
+    message: "Decision telemetry is not backed by durable storage.",
+    action: "Configure a persistent SQLite state file or a durable network State Service."
+  });
+  if (!policyDurable) blockers.push({
+    code: "policies_not_durable",
+    message: "Policy state is not backed by durable storage.",
+    action: "Configure a durable policy backend before relying on saved company policies."
+  });
+  if (!targetsFileConfigured) blockers.push({
+    code: "target_registry_not_persistent",
+    message: "The target registry has no persistence file configured.",
+    action: "Configure LOCD_TARGETS_FILE on persistent storage before relying on registered targets."
+  });
+  if (deploymentProfile === "free-preview") blockers.push({
+    code: "preview_environment",
+    message: "This deployment profile is a free preview with an ephemeral filesystem and no durable customer data guarantee.",
+    action: "Move to a persistent deployment profile and validate backup, restore and restart behaviour."
+  });
+
+  if (!coordinationShared) warnings.push({
+    code: "coordination_not_shared",
+    message: "Coordination is not shared across API instances.",
+    action: "Use a shared State Service or another atomic shared coordination backend before scaling horizontally."
+  });
+  if (!coordinationDurable) warnings.push({
+    code: "coordination_not_durable",
+    message: "Coordination state is not declared durable; rate-limit and idempotency state may reset with the process."
+  });
+  if (!executionEnabled) warnings.push({
+    code: "live_execution_disabled",
+    message: "Live provider execution is disabled. Planning and dry-run behaviour remain available."
+  });
+  if (executionEnabled && (!executionPlanAuthorizationEnabled || !coordinationShared)) blockers.push({
+    code: "live_execution_safety_incomplete",
+    message: "Live execution is enabled without signed, shared, single-use plan authorization.",
+    action: "Configure LOCD_EXECUTION_PLAN_SECRET and a shared coordination backend before enabling live execution."
+  });
+
+  const productionReady = blockers.length === 0;
+  return {
+    profile: deploymentProfile,
+    status: productionReady
+      ? "production-ready"
+      : deploymentProfile === "free-preview"
+        ? "preview"
+        : "needs-configuration",
+    productionReady,
+    blockers,
+    warnings,
+    authentication: {
+      required: authEnabled,
+      methods: ["Authorization: Bearer <api-key>", "X-LOCD-API-Key: <api-key>"],
+      scopes: ["read", "decide", "telemetry", "targets", "execute", "admin"]
+    },
+    storage: {
+      telemetry: { backend: telemetryBackend, durable: telemetryDurable },
+      policies: { backend: policyBackend, durable: policyDurable },
+      targets: {
+        backend: targetsFileConfigured ? "file" : "process-local",
+        fileConfigured: targetsFileConfigured
+      },
+      coordination: {
+        backend: coordinationBackend,
+        shared: coordinationShared,
+        durable: coordinationDurable
+      }
+    },
+    execution: {
+      liveEnabled: Boolean(executionEnabled),
+      signedPlanAuthorization: Boolean(executionPlanAuthorizationEnabled),
+      sharedPlanClaims: Boolean(executionEnabled && executionPlanAuthorizationEnabled && coordinationShared)
+    }
+  };
+}
+
 export async function checkReadiness({
   decisionStore,
   targetRegistry,
@@ -774,6 +883,20 @@ export function createServer({
     executionPlanAuthorizationEnabled: Boolean(executionPlanAuthorizer),
     executionPlanAuthorizationShared: coordinationStore?.capabilities?.shared === true
   });
+  const deploymentReport = buildDeploymentReport({
+    deploymentProfile,
+    authEnabled: auth.enabled,
+    rateLimitEnabled: effectiveRateLimiter.enabled !== false,
+    decisionStore,
+    policyStore,
+    targetFile,
+    coordinationStore,
+    telemetryBackend: telemetryBackendName,
+    policyBackend: policyBackendName,
+    coordinationBackend: coordinationBackendName,
+    executionEnabled,
+    executionPlanAuthorizationEnabled: Boolean(executionPlanAuthorizer)
+  });
 
   const server = http.createServer(async (req, res) => {
     const requestId = createRequestId(req.headers["x-request-id"]);
@@ -853,15 +976,23 @@ export function createServer({
       };
 
       if (pathname.startsWith("/v1/")) {
-        authContext = auth.authorize(req, requiredScope(req.method, pathname));
+        const required = requiredScope(req.method, pathname);
+        authContext = auth.authorize(req, required);
 
         if (!authContext.ok) {
           const status = authContext.reason === "forbidden_scope" ? 403 : 401;
-          const body = {
-            error: authContext.reason === "forbidden_scope"
-              ? "insufficient_scope"
-              : "unauthorized"
-          };
+          const body = status === 403
+            ? {
+                error: "insufficient_scope",
+                message: "This API key does not include the required '" + required + "' scope.",
+                requiredScope: required,
+                requestId
+              }
+            : {
+                error: "unauthorized",
+                message: "A valid API key is required. Send Authorization: Bearer <api-key> or X-LOCD-API-Key.",
+                requestId
+              };
           const headers = status === 401
             ? { "www-authenticate": "Bearer" }
             : {};
@@ -967,6 +1098,15 @@ export function createServer({
         return;
       }
 
+      if (req.method === "GET" && pathname === "/capabilities") {
+        sendJson(res, 200, {
+          service: "locd-api",
+          version: serviceVersion,
+          ...deploymentReport
+        });
+        return;
+      }
+
       if (req.method === "GET" && pathname === "/ready") {
         const readiness = await checkReadiness({
           decisionStore,
@@ -978,7 +1118,8 @@ export function createServer({
           status: readiness.ready ? "ready" : "not_ready",
           service: "locd-api",
           version: serviceVersion,
-          checks: readiness.checks
+          checks: readiness.checks,
+          deployment: deploymentReport
         });
         return;
       }
@@ -1864,6 +2005,7 @@ export function createServer({
             coordination: coordinationStore,
             kind: telemetryBackendName
           }),
+          deployment: deploymentReport,
           capabilities: {
             executionEnabled: Boolean(executionEnabled),
             executionPlanAuthorizationEnabled: Boolean(executionPlanAuthorizer),

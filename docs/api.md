@@ -28,6 +28,16 @@ Returns service readiness metadata.
       "version": "0.1.0"
     }
 
+## GET /capabilities
+
+Public, read-only deployment information for developers and platform operators. It does not return credentials, tenant data, workload payloads or target details. Use it before making authenticated API calls to see whether this instance requires an API key, which auth methods/scopes are supported, which state backends are active, and whether the deployment meets the production-readiness checks.
+
+Example:
+
+    curl https://your-locd-host/capabilities
+
+The response includes `authentication.required`, accepted headers/scopes, the configured state backends, durability/shared-state flags, live-execution availability, and actionable `blockers` and `warnings`. It intentionally reports configuration state, not secrets or tenant-level data.
+
 ## GET /ready
 
 Returns deployment readiness based on the API's critical backing stores.
@@ -36,7 +46,7 @@ Returns deployment readiness based on the API's critical backing stores.
 - HTTP `503` with `status: "not_ready"` when a dependency check fails.
 - `checks` reports telemetry, target registry, policy store, and coordination state.
 
-The endpoint is intended for load balancers and orchestrators. A `503` must remove the instance from service until the dependency recovers.
+The endpoint is intended for load balancers and orchestrators. A `503` must remove the instance from service until the dependency recovers. Its additive `deployment` field contains the same safe production-readiness report as `GET /capabilities`. A `200` means the process and configured stores can serve traffic; it does **not** mean the deployment is production-ready or that data is durable. Check `deployment.productionReady` and its blockers before onboarding a company workload.
 
 ## POST /v1/decide
 
@@ -234,7 +244,8 @@ When enabled:
 
 - GET /health remains public for health checks.
 - All /v1/* endpoints require either Authorization: Bearer <key> or X-LOCD-API-Key: <key>.
-- Invalid or missing credentials return HTTP 401.
+- Invalid or missing credentials return HTTP 401 with a request ID and instructions for the accepted header formats.
+- A valid key without the endpoint's required scope returns HTTP 403 with `requiredScope` and a request ID.
 
 For production deployments, use a high-entropy secret from the platform secret manager. Do not commit the key to Git.
 
